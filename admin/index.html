@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light dark"><title>VYRN Control</title><link rel="stylesheet" href="style.css"><script src="app.js" defer></script></head>
+<body>
+<header><a class="brand" href="./">VYRN <span>CONTROL</span></a><button id="language" class="quiet" type="button">فارسی</button></header>
+<main>
+<section id="login" class="card narrow">
+<div class="eyebrow" data-i18n="restricted">ADMINISTRATION</div><h1 data-i18n="welcome">Your network.<br>Your control.</h1><p class="muted" data-i18n="loginHelp">Sign in with your administrator account, then verify your authenticator code.</p>
+<form id="login-form"><label><span data-i18n="email">Email</span><input id="email" type="email" autocomplete="username" required maxlength="254"></label><label><span data-i18n="password">Password</span><input id="password" type="password" autocomplete="current-password" required></label><button data-i18n="signIn">Sign in</button></form>
+</section>
+<section id="verify" class="card narrow" hidden><div class="eyebrow">VYRN CONTROL</div><h1 data-i18n="verify">Verify access</h1><form id="verify-form"><label><span data-i18n="code">Authenticator code</span><input id="code" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" autocomplete="one-time-code" required></label><button data-i18n="unlock">Unlock control</button></form></section>
+<section id="control" hidden>
+<div class="toolbar"><div><div class="eyebrow" data-i18n="workspace">PRIVATE NETWORK</div><h1 data-i18n="overview">Overview</h1></div><div><button id="refresh" class="quiet" data-i18n="refresh">Refresh</button><button id="logout" class="quiet" data-i18n="logout">Sign out</button></div></div>
+<div id="metrics" class="metrics"></div>
+<nav aria-label="Administration"><button data-page="users" class="active" data-i18n="users">Users</button><button data-page="invites" data-i18n="invites">Invites</button><button data-page="groups" data-i18n="groups">Groups</button><button data-page="audit" data-i18n="audit">Audit log</button></nav>
+<section class="card"><div id="invite-actions" hidden><form id="invite-form" class="inline"><label><span data-i18n="uses">Uses</span><input id="uses" type="number" min="1" max="10000" value="1" required></label><label><span data-i18n="days">Days valid</span><input id="days" type="number" min="1" max="365" value="7" required></label><button data-i18n="createInvite">Create invite</button></form><output id="invite-output"></output></div><div class="table-wrap"><table><thead id="table-head"></thead><tbody id="table-body"></tbody></table></div><p id="empty" class="muted" hidden data-i18n="empty">No records yet.</p></section>
+<p class="muted small" data-i18n="privacy">Private message content is unavailable to administrators. Voice and video calls are disabled.</p>
+</section>
+<div id="notice" role="status" aria-live="polite"></div>
+</main>
+<dialog id="user-dialog"><form id="user-form"><h2 id="user-title"></h2><input id="user-id" type="hidden"><label><span data-i18n="newPassword">New password</span><input id="new-password" type="password" minlength="8" autocomplete="new-password"></label><div class="actions"><button type="button" id="reset-password" data-i18n="resetPassword">Reset password</button><button type="button" id="revoke" class="danger" data-i18n="revoke">Revoke all sessions</button><button type="button" id="block" class="danger"></button></div><button type="button" id="close-dialog" class="quiet" data-i18n="close">Close</button></form></dialog>
+</body></html>

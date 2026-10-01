@@ -1,0 +1,17 @@
+# Local smoke stack. No public listener, DNS request or ACME certificate issuance.
+services:
+  core:
+    image: vyrn-core:dev
+    ports: ["127.0.0.1:18080:8080"]
+    environment:
+      VYRN_ADMIN_ORIGIN: http://127.0.0.1:18080
+      VYRN_ADMIN_DIR: /admin
+      VYRN_TRUSTED_PROXY: 172.29.71.0/24
+    volumes:
+      - ../admin:/admin:ro
+  caddy:
+    profiles: [production]
+networks:
+  edge:
+    ipam:
+      config: !override [{subnet: 172.29.71.0/24}]

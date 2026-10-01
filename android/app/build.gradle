@@ -1,0 +1,70 @@
+apply plugin: 'com.android.application'
+apply plugin: 'org.telegram.build-app-plugin'
+
+dependencies {
+    implementation project(':TMessagesProj')
+    coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs:2.1.5'
+}
+
+android {
+    namespace 'xyz.eclipseofficial.vyrn'
+    compileSdk 36
+    buildToolsVersion '36.0.0'
+    defaultConfig {
+        applicationId 'xyz.eclipseofficial.vyrn'
+        minSdk 26
+        targetSdk 36
+        versionCode 1
+        versionName '0.1.0-dev'
+        ndk { abiFilters.addAll((findProperty('VYRN_ABIS') ?: 'arm64-v8a,armeabi-v7a').split(',')) }
+    }
+    flavorDimensions 'environment'
+    productFlavors {
+        dev { dimension 'environment'; applicationIdSuffix '.dev' }
+        staging { dimension 'environment'; applicationIdSuffix '.staging' }
+        production { dimension 'environment' }
+    }
+    signingConfigs {
+        release {
+            if (System.getenv('VYRN_KEYSTORE_PATH')) {
+                storeFile file(System.getenv('VYRN_KEYSTORE_PATH'))
+                storePassword System.getenv('VYRN_STORE_PASSWORD')
+                keyAlias System.getenv('VYRN_KEY_ALIAS')
+                keyPassword System.getenv('VYRN_KEY_PASSWORD')
+            }
+        }
+    }
+    buildTypes {
+        debug { minifyEnabled false; signingConfig signingConfigs.debug }
+        release {
+            minifyEnabled true
+            shrinkResources true
+            signingConfig signingConfigs.release
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), '../upstream/TMessagesProj/proguard-rules.pro', 'proguard-rules.pro'
+        }
+    }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_1_8
+        targetCompatibility JavaVersion.VERSION_1_8
+        coreLibraryDesugaringEnabled true
+    }
+    splits {
+        abi {
+            enable true
+            reset()
+            include(*(findProperty('VYRN_ABIS') ?: 'arm64-v8a,armeabi-v7a').split(','))
+            universalApk true
+        }
+    }
+    buildFeatures { buildConfig true }
+    androidResources { noCompress += 'pack' }
+    lint { abortOnError true; disable 'MissingTranslation','ExtraTranslation' }
+}
+
+gradle.taskGraph.whenReady { graph ->
+    if (graph.allTasks.any { it.project == project && it.name.toLowerCase().contains('release') }) {
+        ['VYRN_KEYSTORE_PATH','VYRN_KEY_ALIAS','VYRN_STORE_PASSWORD','VYRN_KEY_PASSWORD'].each {
+            if (!System.getenv(it)) throw new GradleException('Release signing requires environment variable: ' + it)
+        }
+    }
+}

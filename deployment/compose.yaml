@@ -1,0 +1,93 @@
+name: vyrn
+x-logging: &logging
+  driver: json-file
+  options: {max-size: "10m", max-file: "3"}
+services:
+  postgres:
+    image: postgres:17-alpine@sha256:b0f9560a2de083e2cc7382e75f808c7381a32852a7ec49117deedb300e552b24
+    environment:
+      POSTGRES_DB: vyrn
+      POSTGRES_USER: vyrn
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}
+      TZ: Asia/Tehran
+    command: [postgres, -c, shared_buffers=128MB, -c, max_connections=40, -c, work_mem=4MB]
+    volumes: [postgres:/var/lib/postgresql/data]
+    networks: [private]
+    restart: unless-stopped
+    mem_limit: 768m
+    cpus: 1.0
+    logging: *logging
+    healthcheck:
+      test: [CMD-SHELL, "pg_isready -U vyrn -d vyrn"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+  core:
+    build: ../backend
+    environment:
+      DATABASE_URL: postgres://vyrn:${POSTGRES_PASSWORD}@postgres:5432/vyrn?sslmode=disable
+      VYRN_LISTEN: 0.0.0.0:8080
+      VYRN_MEDIA_DIR: /media
+      VYRN_MIN_FREE_BYTES: "10737418240"
+      VYRN_ADMIN_TOTP_SECRET: ${VYRN_ADMIN_TOTP_SECRET:?Set VYRN_ADMIN_TOTP_SECRET}
+      VYRN_ADMIN_ORIGIN: https://admin.vyrn.eclipseofficial.xyz
+      VYRN_TRUSTED_PROXY: 172.29.70.0/24
+      TZ: Asia/Tehran
+    volumes: [media:/media]
+    networks: [private, edge]
+    depends_on:
+      postgres: {condition: service_healthy}
+    restart: unless-stopped
+    read_only: true
+    tmpfs: ["/tmp:size=32m,noexec,nosuid"]
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    mem_limit: 768m
+    cpus: 1.5
+    pids_limit: 128
+    logging: *logging
+    healthcheck:
+      test: [CMD, wget, -q, --spider, http://127.0.0.1:8080/health/ready]
+      interval: 15s
+      timeout: 3s
+      retries: 5
+  caddy:
+    image: caddy:2.10.2-alpine@sha256:4c6e91c6ed0e2fa03efd5b44747b625fec79bc9cd06ac5235a779726618e530d
+    ports: ["80:80", "443:443", "443:443/udp"]
+    environment:
+      VYRN_ADMIN_ALLOWED_CIDRS: ${VYRN_ADMIN_ALLOWED_CIDRS:-127.0.0.0/8 10.0.0.0/8 172.16.0.0/12 192.168.0.0/16}
+      TZ: Asia/Tehran
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ../admin:/srv/admin:ro
+      - ../artifacts/updates:/srv/updates:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    networks: [edge]
+    restart: unless-stopped
+    mem_limit: 192m
+    cpus: 0.5
+    logging: *logging
+    depends_on: [core]
+  turn:
+    image: coturn/coturn:4.6.3
+    profiles: [calls]
+    network_mode: host
+    command: [-c, /etc/coturn/turnserver.conf]
+    volumes:
+      - ./secrets/turnserver.conf:/etc/coturn/turnserver.conf:ro
+      - ./secrets/turn-certs:/etc/coturn/certs:ro
+    restart: unless-stopped
+    mem_limit: 256m
+    cpus: 0.5
+    logging: *logging
+volumes:
+  postgres:
+  media:
+  caddy_data:
+  caddy_config:
+networks:
+  private: {internal: true}
+  edge:
+    ipam:
+      config: [{subnet: 172.29.70.0/24}]

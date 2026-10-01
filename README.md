@@ -1,0 +1,49 @@
+# VYRN
+
+Independent messaging for `eclipseofficial.xyz`, based on the actual Telegram Android UI.
+
+**Status: development in progress. This is not a production release.** See [test evidence](docs/TEST_REPORT.md) and [remaining acceptance criteria](docs/ACCEPTANCE.md). Private-chat encryption, complete Android feature wiring, production deployment and release artifacts must pass their gates before public use.
+
+## Repository
+
+`android/` contains the pinned upstream descriptor, reproducible preparation script, app module and compatibility/domain/repository layers. `backend/` contains the Go service and PostgreSQL migrations. `admin/` is VYRN Control. `deployment/` contains Compose, Caddy, inactive TURN configuration and backup timers.
+
+The generated `android/upstream/`, SDK/JDK, caches, local credentials and build artifacts are intentionally ignored. The user-selected root is `C:/Users/PC/Documents/ChatGPT/Telegram/VYRN`. Main branches are `main`, `develop`; active work uses `codex/initial-implementation`. No remote is configured.
+
+## Local development on Windows
+
+Use PowerShell 7, Go 1.26.8, Git and Docker Desktop. The module requires the patched toolchain. No production credential is needed.
+
+```powershell
+./scripts/init-local.ps1
+docker run -d --name vyrn-postgres-dev --env-file .local/dev.env -p 127.0.0.1:55432:5432 -v vyrn-postgres-dev:/var/lib/postgresql/data postgres:17-alpine
+Set-Location backend
+../scripts/with-local.ps1 -Command go -Arguments @('test','./...','-count=1')
+../scripts/with-local.ps1 -Command go -Arguments @('build','-o','../artifacts/vyrn-core.exe','./cmd/vyrn')
+Set-Location ..
+./scripts/with-local.ps1 -Command ./artifacts/vyrn-core.exe -Arguments @('bootstrap')
+./scripts/start-local.ps1
+```
+
+Bootstrap requires an empty database and reads generated local settings; it never prints passwords or invite codes. Local credentials are in `.local/dev.env`, which must stay private. A production administrator requires an authenticator secret. HTTP here is loopback-only; Android and production endpoints require HTTPS.
+
+Open VYRN Control at `http://127.0.0.1:8080`. The same origin serves the API. Browser tokens stay in memory; only a non-secret device identifier is stored locally.
+
+## Android
+
+Upstream pin: `f2908b14133bbffbf7ab04f641ecb5bfaf533242` (12.10.6 / 7112). Initialize its exact submodules before building. `android/prepare-upstream.ps1` applies VYRN changes without replacing Telegram's UI implementation. Telegram socket transport is disabled at `Connection::connect`; supported UI requests go through `VyrnBridge`.
+
+```powershell
+./scripts/build-android.ps1 -Flavor dev -BuildType debug
+./scripts/verify-apks.ps1
+```
+
+This builds an early development client. The API endpoint defaults to `https://api.vyrn.eclipseofficial.xyz`; it will not connect until a valid HTTPS backend exists. API URL overrides must be HTTPS hostnames. Debug signing does not imply release readiness. See [the implementation matrix](docs/ACCEPTANCE.md) for supported requests and gaps.
+
+Verified ARM64, ARMv7 and Universal Debug APKs are in `artifacts/`; hashes and manifest evidence are in `artifacts/apk-verification.json`. These are large unminified development artifacts.
+
+The independent Docker smoke stack uses `docker compose --project-name vyrn-local --env-file .local/dev.env -f deployment/compose.yaml -f deployment/compose.local.yaml up -d --build --wait`. It exposes only `127.0.0.1:18080`, keeps PostgreSQL private, and does not start Caddy or request public certificates. Bootstrap this separate empty database before using `scripts/test-local-stack.ps1`; that test restarts only the named local stack and verifies messages/events and idempotency.
+
+## Production
+
+Follow [deployment instructions](docs/DEPLOYMENT.md). DNS, host provisioning, external backups and final signing have not been performed. Do not disable root/password SSH authentication without the user's explicit authorization. See [security](docs/SECURITY.md), [backup and restore](docs/BACKUP_RESTORE.md), [updates](docs/UPDATE_PROCESS.md) and [source redistribution](docs/GPL_COMPLIANCE.md).

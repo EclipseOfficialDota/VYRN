@@ -1,0 +1,29 @@
+# Acceptance matrix
+
+Updated 2026-10-01. A route existing or a build compiling does **not** establish end-to-end completion.
+
+| Requirement | Current evidence | Remaining work |
+|---|---|---|
+| Local repository and memory | Root, main/develop/work branch, confirmed config and ignored secrets established | Keep memory current; no remote yet |
+| Telegram source pin | Exact commit and submodules downloaded | Reproducible source export and full branding audit |
+| Original Telegram UI | Original UI compiled through VyrnApp; login and adapter overlays supplied | Finish all unsupported UI paths and settings; device verification |
+| Debug APK | ARM64/ARMv7/Universal built; signatures/ABIs/manifest verified; x86_64 emulator installed and launched | Functional client E2E and physical ARM-device checks |
+| Production release APKs/AAB | Flavors and release signing gate configured | User keystore variables, universal/ABI builds, R8/device tests |
+| Backend executable | Go executable built; loopback readiness returned ready | More coverage, operational/load/security review |
+| Compose | Full local stack healthy; patched Core image; persistence/idempotency survive stack restart | Target-VPS verification and load tests |
+| Auth and multi-session | Integration tests for invite, normalization, three-device limit, token reuse and recovery | Android session management UI and process-restart tests |
+| Group messages | REST create/send/edit/delete/reaction/receipt/pin and permission tests | Android wiring of all features and large-conversation tests |
+| E2EE private chat | Plaintext fails closed | Reviewed Signal library integration, prekeys, ratchets, verification, device changes, adversarial tests |
+| Sync | Cursor ordering, idempotency, reconnect and offline-event tests | Android durable sync/outbox/acknowledgement implementation |
+| Media/voice | Authenticated upload/download and low-disk tests | Android media/voice UI, encryption and lifecycle tests |
+| Profile/presence/block | Backend endpoints and websocket activity timestamps | Complete privacy controls and Android integration |
+| Reactions/receipts | Mutations/read models and monotonic read-state integration tests pass | Android UI rendering |
+| Search/drafts/disappearing | Backend routes and expiry/GC integration tests | Cross-device UI and local E2EE search |
+| Admin | TOTP API and authenticated dashboard tested; Persian RTL inspected; metadata tables/actions implemented | Full action E2E, per-admin TOTP, flags and storage-limit controls |
+| Push | Active websocket only | Background sync, native notifications, internal push, optional adapters |
+| Updates | Ed25519 envelope library and tamper/expiry/rollback tests | Android verification/download/install and signed remote config |
+| Backup | Local dump restored successfully to isolated database | External S3 configuration, encryption/retention/restore/alert proof, media backup |
+| TURN/calls | Inactive template and profile | Provider inbound UDP, credentials, TLS renewal, WebRTC and relay testing |
+| VPS/DNS/TLS | Configuration and guarded DNS script | SSH key installation, read-only audit, host hardening, DNS and live TLS |
+
+Do not present VYRN as complete until every required production and end-to-end acceptance item is verified. Missing external inputs are separate from unfinished implementation work.

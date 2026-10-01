@@ -14,3 +14,11 @@
 - Generate a dedicated SSH key locally. Do not disable root or password login without explicit user permission.
 - Cloudflare variables are read from environment only. Missing variables block DNS mutations, not local development.
 - All access tokens, passwords, keys, configuration secrets, private backups and local tooling stay outside version control.
+
+## 2026-10-01 — implementation checkpoints
+- Keep reproducible Android overlays outside the generated upstream checkout; preserve original sources/licenses.
+- Verify running Compose and actual APK binary properties, not configuration parsing alone.
+- Serialize administrator refresh so concurrent requests cannot reuse a rotating refresh token.
+- Reserve space across concurrent uploads, retain new orphans seven days, and return reaction/receipt read models for synchronization.
+- Pin Go 1.26.8 and its Docker digest after 1.26.4 failed the official vulnerability scan. OpenPGP is not imported; do not adopt the unmaintained package.
+- Use a separate local Docker project and headless Android emulator for verification. Production access and calls remain gated.

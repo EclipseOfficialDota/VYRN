@@ -1,0 +1,8 @@
+[Unit]
+Description=Daily VYRN backup
+[Timer]
+OnCalendar=*-*-* 03:15:00 Asia/Tehran
+Persistent=true
+RandomizedDelaySec=10m
+[Install]
+WantedBy=timers.target

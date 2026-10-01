@@ -1,0 +1,14 @@
+[Unit]
+Description=VYRN encrypted external backup
+After=docker.service network-online.target
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/vyrn
+EnvironmentFile=/etc/vyrn/backup.env
+ExecStart=/opt/vyrn/scripts/backup.sh
+UMask=0077
+Nice=10
+IOSchedulingClass=idle
+TimeoutStartSec=1h
+StandardOutput=journal
+StandardError=journal

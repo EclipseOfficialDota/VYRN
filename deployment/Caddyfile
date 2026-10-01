@@ -1,0 +1,55 @@
+{
+    admin off
+    servers {
+        timeouts {
+            read_header 10s
+            idle 70s
+        }
+    }
+}
+(security) {
+    tls {
+        protocols tls1.2 tls1.3
+    }
+    header {
+        Strict-Transport-Security "max-age=31536000; includeSubDomains"
+        X-Content-Type-Options nosniff
+        Referrer-Policy no-referrer
+        -Server
+    }
+}
+api.vyrn.eclipseofficial.xyz, ws.vyrn.eclipseofficial.xyz, media.vyrn.eclipseofficial.xyz, push.vyrn.eclipseofficial.xyz {
+    import security
+    @internal path /metrics /v1/admin/*
+    respond @internal 404
+    request_body {
+        max_size 251MB
+    }
+    reverse_proxy core:8080 {
+        header_up X-Real-IP {remote_host}
+    }
+}
+admin.vyrn.eclipseofficial.xyz {
+    import security
+    @denied not remote_ip {$VYRN_ADMIN_ALLOWED_CIDRS}
+    respond @denied 403
+    header Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'"
+    handle /v1/* {
+        reverse_proxy core:8080 {
+            header_up X-Real-IP {remote_host}
+        }
+    }
+    handle {
+        root * /srv/admin
+        file_server
+    }
+}
+updates.vyrn.eclipseofficial.xyz {
+    import security
+    root * /srv/updates
+    file_server
+}
+vyrn.eclipseofficial.xyz {
+    import security
+    respond "VYRN" 200
+}
