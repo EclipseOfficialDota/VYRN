@@ -21,6 +21,7 @@ All production endpoints require HTTPS. JSON uses UTF-8. Authentication is `Auth
 | DELETE `/v1/conversations/{id}/members/{user}` | remove member/leave group |
 | GET `/v1/conversations/{id}/messages` | limit 1–100, before message UUID, optional plaintext group search q |
 | POST `/v1/conversations/{id}/messages` | client_id, payload, encrypted, optional media_id/reply_to/forwarded_from |
+| GET `/v1/messages/{id}` | current authorized message state, including deletion/expiry tombstones |
 | PATCH `/v1/messages/{id}` | payload, encrypted, expected revision; stale edit returns 409 |
 | DELETE `/v1/messages/{id}` | replace message with a tombstone |
 | PUT/DELETE `/v1/messages/{id}/reactions` | emoji |
@@ -36,6 +37,8 @@ All production endpoints require HTTPS. JSON uses UTF-8. Authentication is `Auth
 
 Plaintext group payload: `{"text":"Hello"}` (optional caption). Maximum combined text/caption length: 16,384 characters. Private plaintext returns `e2ee_required`; a ciphertext-envelope schema exists, but device-key endpoints and client cryptography remain incomplete. Cross-conversation forwarding is not yet implemented; current reference validation only accepts visible messages in the same conversation.
 
+Message read models include a positive integer `ordinal`, allocated once by the server and stable across devices, edits, retries and restarts. History is ordered by descending ordinal; `before` still takes the corresponding message UUID. The Android adapter uses this ordinal for Telegram's UI message ID, preventing older pages from receiving larger IDs than recent messages. Reaction summaries contain `emoji`, `count`, `mine`; receipt summaries contain `delivered`, `read`, `delivered_by_me`, `read_by_me`. Deleted and collected-expiry tombstones have empty payloads and zero reaction/receipt summaries. An expired message awaiting collection returns no content.
+
 WebSocket first returns `{"type":"ready",...}`. Each `events` frame has ordered events and `cursor`. Commit events locally, then send `{"type":"ack","cursor":N}`. Heartbeat is 20 seconds; an unacknowledged batch disconnects after 45 seconds. Reconnect with bounded exponential backoff and the last committed cursor. A revoked/expired session closes the stream; refresh authentication and reconnect. Android stream consumption remains a separate integration task.
 
 Uploads: file/video/image 250 MiB, avatar 10 MiB, voice 100 MiB, user quota 2 GiB. Low disk returns 507 while text sends stay available. An unbound upload is owner-only; other members can download only after attachment to a live authorized message.
@@ -44,4 +47,4 @@ Uploads: file/video/image 250 MiB, avatar 10 MiB, voice 100 MiB, user quota 2 Gi
 
 `POST /v1/admin/unlock` with a TOTP `code` returns a five-minute `admin_token`. Subsequent administrator routes require `X-VYRN-Admin-Token` as well as the normal access token. Routes: dashboard, users, groups, invites, audit; user disable, password reset, session revocation and invite creation/revocation. Public API virtual hosts block all `/v1/admin/*`; use the restricted administrator hostname.
 
-List pagination currently caps conversations at 500 and administrator lists at 250. Complete cursor pagination for these collections and reaction/receipt read models remain acceptance gaps; do not infer full production API coverage from this table.
+List pagination currently caps conversations at 500 and administrator lists at 250. Complete cursor pagination for these collections remains an acceptance gap; do not infer full production API coverage from this table.

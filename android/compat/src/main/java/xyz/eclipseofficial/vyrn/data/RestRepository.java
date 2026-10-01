@@ -54,8 +54,13 @@ public final class RestRepository implements Models.Repository {
     }
     public List<Models.Message> messages(String conversation,String before,int limit) throws Exception{
         String path="/v1/conversations/"+conversation+"/messages?limit="+Math.max(1,Math.min(limit,100));if(before!=null)path+="&before="+before;
-        JSONArray data=(JSONArray)request("GET",path,null,true);List<Models.Message> result=new ArrayList<>();for(int i=0;i<data.length();i++){JSONObject m=data.getJSONObject(i);boolean encrypted=m.getBoolean("encrypted");result.add(new Models.Message(m.getString("id"),m.getString("sender_id"),encrypted?"":m.getJSONObject("payload").optString("text"),(int)Instant.parse(m.getString("created_at")).getEpochSecond(),encrypted,!m.isNull("deleted_at")));}return result;
+        JSONArray data=(JSONArray)request("GET",path,null,true);List<Models.Message> result=new ArrayList<>();for(int i=0;i<data.length();i++)result.add(message(data.getJSONObject(i)));return result;
     }
+    private Models.Message message(JSONObject m) throws Exception {
+        boolean encrypted=m.getBoolean("encrypted");int ordinal=m.getInt("ordinal");if(ordinal<=0)throw new IllegalStateException("invalid_message_order");
+        return new Models.Message(m.getString("id"),m.getString("sender_id"),encrypted?"":m.getJSONObject("payload").optString("text"),(int)Instant.parse(m.getString("created_at")).getEpochSecond(),ordinal,encrypted,!m.isNull("deleted_at"));
+    }
+    public Models.Message message(String id) throws Exception {return message((JSONObject)request("GET","/v1/messages/"+id,null,true));}
     public String send(String conversation,String clientId,String text) throws Exception{
         JSONObject input=new JSONObject().put("client_id",clientId).put("payload",new JSONObject().put("text",text)).put("encrypted",false);
         return ((JSONObject)request("POST","/v1/conversations/"+conversation+"/messages",input,true)).getString("id");

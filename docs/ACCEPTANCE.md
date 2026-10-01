@@ -11,8 +11,8 @@ Updated 2026-10-01. A route existing or a build compiling does **not** establish
 | Production release APKs/AAB | Flavors and release signing gate configured | User keystore variables, universal/ABI builds, R8/device tests |
 | Backend executable | Go executable built; loopback readiness returned ready | More coverage, operational/load/security review |
 | Compose | Full local stack healthy; patched Core image; persistence/idempotency survive stack restart | Target-VPS verification and load tests |
-| Auth and multi-session | Integration tests for invite, normalization, three-device limit, token reuse and recovery | Android session management UI and process-restart tests |
-| Group messages | REST create/send/edit/delete/reaction/receipt/pin and permission tests | Android wiring of all features and large-conversation tests |
+| Auth and multi-session | Backend invite/normalization/device-limit/reuse/recovery tests; Android Keystore, refresh and process-restart integration pass | Android account/session management UI and full multi-device flows |
+| Group messages | REST permissions/mutations and Android repository/Telegram dialog adapter tests; server ordinals and pagination verified | Android wiring of all features, legacy debug UI-cache upgrade and large-conversation tests |
 | E2EE private chat | Plaintext fails closed | Reviewed Signal library integration, prekeys, ratchets, verification, device changes, adversarial tests |
 | Sync | Cursor ordering, idempotency, reconnect and offline-event tests | Android durable sync/outbox/acknowledgement implementation |
 | Media/voice | Authenticated upload/download and low-disk tests | Android media/voice UI, encryption and lifecycle tests |

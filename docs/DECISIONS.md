@@ -22,3 +22,5 @@
 - Reserve space across concurrent uploads, retain new orphans seven days, and return reaction/receipt read models for synchronization.
 - Pin Go 1.26.8 and its Docker digest after 1.26.4 failed the official vulnerability scan. OpenPGP is not imported; do not adopt the unmaintained package.
 - Use a separate local Docker project and headless Android emulator for verification. Production access and calls remain gated.
+- Use opt-in dev/debug HTTPS with a localhost-scoped public CA for Android integration. Do not alter system trust stores or permit this configuration in release builds.
+- Assign positive stable message ordinals on the server for the Telegram UI; UUIDs remain API identity. Use ordinal pagination so fetch order and device-local insertion order cannot reverse message IDs.

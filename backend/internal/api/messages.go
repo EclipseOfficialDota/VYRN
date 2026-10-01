@@ -196,7 +196,29 @@ func (s *Server) sendMessage(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) messages(w http.ResponseWriter, r *http.Request) {
-	conversation := r.PathValue("id")
+	s.readMessages(w, r, r.PathValue("id"), "")
+}
+
+func (s *Server) getMessage(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if !validID(id) {
+		fail(w, 404, "not_found")
+		return
+	}
+	var conversation string
+	err := s.db.QueryRow(r.Context(), `SELECT msg.conversation_id::text FROM messages msg JOIN members member ON member.conversation_id=msg.conversation_id AND member.user_id=$2 WHERE msg.id=$1`, id, current(r).UserID).Scan(&conversation)
+	if err == pgx.ErrNoRows {
+		fail(w, 404, "not_found")
+		return
+	}
+	if err != nil {
+		s.internal(w)
+		return
+	}
+	s.readMessages(w, r, conversation, id)
+}
+
+func (s *Server) readMessages(w http.ResponseWriter, r *http.Request, conversation, single string) {
 	before := r.URL.Query().Get("before")
 	search := r.URL.Query().Get("q")
 	if !validID(conversation) || (before != "" && !validID(before)) || utf8.RuneCountInString(search) > 100 {
@@ -220,10 +242,18 @@ func (s *Server) messages(w http.ResponseWriter, r *http.Request) {
 	if before != "" {
 		cursor = before
 	}
-	rows, err := s.db.Query(r.Context(), `SELECT msg.id::text,client_id::text,sender_id::text,sender_device::text,payload,encrypted,media_id::text,reply_to::text,forwarded_from::text,revision,pinned,created_at,edited_at,deleted_at,expires_at,
+	var messageID any
+	if single != "" {
+		messageID = single
+	}
+	rows, err := s.db.Query(r.Context(), `SELECT msg.id::text,client_id::text,sender_id::text,sender_device::text,payload,encrypted,media_id::text,reply_to::text,forwarded_from::text,revision,pinned,created_at,edited_at,deleted_at,expires_at,ordinal,
         CASE WHEN deleted_at IS NOT NULL THEN '[]'::jsonb ELSE COALESCE((SELECT jsonb_agg(summary ORDER BY summary->>'emoji') FROM (SELECT jsonb_build_object('emoji',emoji,'count',count(*),'mine',bool_or(user_id=$5)) AS summary FROM reactions WHERE message_id=msg.id GROUP BY emoji) AS grouped),'[]'::jsonb) END,
         CASE WHEN deleted_at IS NOT NULL THEN '{"delivered":0,"read":0,"delivered_by_me":false,"read_by_me":false}'::jsonb ELSE (SELECT jsonb_build_object('delivered',count(*),'read',count(read_at),'delivered_by_me',COALESCE(bool_or(user_id=$5),false),'read_by_me',COALESCE(bool_or(user_id=$5 AND read_at IS NOT NULL),false)) FROM receipts WHERE message_id=msg.id AND user_id<>msg.sender_id) END
-        FROM messages msg WHERE conversation_id=$1 AND (expires_at IS NULL OR expires_at>now()) AND ($2::uuid IS NULL OR (created_at,msg.id)<(SELECT created_at,id FROM messages WHERE id=$2 AND conversation_id=$1)) AND ($3='' OR (NOT encrypted AND deleted_at IS NULL AND position(lower($3) in lower(payload->>'text'))>0)) ORDER BY created_at DESC,msg.id DESC LIMIT $4`, conversation, cursor, search, limit, current(r).UserID)
+        FROM messages msg WHERE conversation_id=$1 AND (expires_at IS NULL OR expires_at>now() OR deleted_at IS NOT NULL)
+        AND EXISTS(SELECT 1 FROM members WHERE conversation_id=msg.conversation_id AND user_id=$5)
+        AND ($2::uuid IS NULL OR ordinal<(SELECT ordinal FROM messages WHERE id=$2 AND conversation_id=$1))
+        AND ($6::uuid IS NULL OR msg.id=$6)
+        AND ($3='' OR (NOT encrypted AND deleted_at IS NULL AND position(lower($3) in lower(payload->>'text'))>0)) ORDER BY ordinal DESC LIMIT $4`, conversation, cursor, search, limit, current(r).UserID, messageID)
 	if err != nil {
 		s.internal(w)
 		return
@@ -235,17 +265,25 @@ func (s *Server) messages(w http.ResponseWriter, r *http.Request) {
 		var payload, reactions, receipts json.RawMessage
 		var enc, pinned bool
 		var media, reply, forward *string
-		var revision int
+		var revision, ordinal int
 		var created time.Time
 		var edited, deleted, expires *time.Time
-		if rows.Scan(&id, &client, &sender, &device, &payload, &enc, &media, &reply, &forward, &revision, &pinned, &created, &edited, &deleted, &expires, &reactions, &receipts) != nil {
+		if rows.Scan(&id, &client, &sender, &device, &payload, &enc, &media, &reply, &forward, &revision, &pinned, &created, &edited, &deleted, &expires, &ordinal, &reactions, &receipts) != nil {
 			s.internal(w)
 			return
 		}
-		out = append(out, map[string]any{"id": id, "conversation_id": conversation, "client_id": client, "sender_id": sender, "sender_device": device, "payload": payload, "encrypted": enc, "media_id": media, "reply_to": reply, "forwarded_from": forward, "revision": revision, "pinned": pinned, "created_at": created, "edited_at": edited, "deleted_at": deleted, "expires_at": expires, "reactions": reactions, "receipts": receipts})
+		out = append(out, map[string]any{"id": id, "ordinal": ordinal, "conversation_id": conversation, "client_id": client, "sender_id": sender, "sender_device": device, "payload": payload, "encrypted": enc, "media_id": media, "reply_to": reply, "forwarded_from": forward, "revision": revision, "pinned": pinned, "created_at": created, "edited_at": edited, "deleted_at": deleted, "expires_at": expires, "reactions": reactions, "receipts": receipts})
 	}
 	if rows.Err() != nil {
 		s.internal(w)
+		return
+	}
+	if single != "" {
+		if len(out) == 0 {
+			fail(w, 404, "not_found")
+			return
+		}
+		respond(w, 200, out[0])
 		return
 	}
 	respond(w, 200, out)

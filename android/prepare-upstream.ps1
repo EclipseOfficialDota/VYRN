@@ -4,7 +4,9 @@ $upstream=Join-Path $root 'upstream'
 $pin=(Get-Content (Join-Path $root 'upstream.lock.json') -Raw | ConvertFrom-Json).commit
 $head=(& git -c "safe.directory=$($upstream.Replace('\','/'))" -C $upstream rev-parse HEAD).Trim()
 if($head -ne $pin){throw 'Unexpected Telegram revision'}
-function Write-Text([string]$Path,[string]$Text){[IO.File]::WriteAllText($Path,$Text,[Text.UTF8Encoding]::new($false))}
+function Write-Text([string]$Path,[string]$Text){
+ if(!(Test-Path -LiteralPath $Path) -or [IO.File]::ReadAllText($Path) -cne $Text){[IO.File]::WriteAllText($Path,$Text,[Text.UTF8Encoding]::new($false))}
+}
 function Edit([string]$Relative,[scriptblock]$Transform){$p=Join-Path $upstream $Relative;$old=[IO.File]::ReadAllText($p);$new=& $Transform $old;Write-Text $p $new}
 
 Edit 'settings.gradle' {

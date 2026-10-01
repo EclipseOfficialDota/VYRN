@@ -1,0 +1,83 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop, 'codex/**']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  repository:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Reject sensitive tracked files and oversized blobs
+        run: python3 scripts/check-repository.py
+      - name: Check administrator JavaScript
+        run: node --check admin/app.js
+      - name: Check shell scripts
+        run: bash -n scripts/backup.sh scripts/restore-smoke.sh
+      - name: Parse PowerShell scripts
+        shell: pwsh
+        run: |
+          Get-ChildItem scripts,android -Filter '*.ps1' -Recurse | ForEach-Object {
+            $parseErrors=$null
+            $tokens=$null
+            [System.Management.Automation.Language.Parser]::ParseFile($_.FullName,[ref]$tokens,[ref]$parseErrors) | Out-Null
+            if($parseErrors.Count){throw "PowerShell syntax error in $($_.Name)"}
+          }
+
+  backend:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:17-alpine@sha256:b0f9560a2de083e2cc7382e75f808c7381a32852a7ec49117deedb300e552b24
+        env:
+          POSTGRES_DB: vyrn_ci
+          POSTGRES_USER: vyrn_ci
+          # Disposable loopback-only CI database; no deployment credentials.
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports: ['127.0.0.1:5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U vyrn_ci -d vyrn_ci"
+          --health-interval 5s --health-timeout 3s --health-retries 12
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      DATABASE_URL: postgres://vyrn_ci@127.0.0.1:5432/vyrn_ci?sslmode=disable
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Check formatting
+        run: test -z "$(gofmt -l .)"
+      - run: go vet ./...
+      - name: Unit and PostgreSQL integration tests with race detector
+        run: go test -race -count=1 -coverprofile=coverage.out ./...
+      - name: Check reachable Go vulnerabilities
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 ./...
+      - name: Build production container
+        working-directory: .
+        run: docker build --tag vyrn-core:ci --file backend/Dockerfile backend
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: backend-coverage
+          path: backend/coverage.out
+          retention-days: 7
+          if-no-files-found: error

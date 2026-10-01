@@ -34,6 +34,7 @@ Open VYRN Control at `http://127.0.0.1:8080`. The same origin serves the API. Br
 Upstream pin: `f2908b14133bbffbf7ab04f641ecb5bfaf533242` (12.10.6 / 7112). Initialize its exact submodules before building. `android/prepare-upstream.ps1` applies VYRN changes without replacing Telegram's UI implementation. Telegram socket transport is disabled at `Connection::connect`; supported UI requests go through `VyrnBridge`.
 
 ```powershell
+./android/fetch-upstream.ps1
 ./scripts/build-android.ps1 -Flavor dev -BuildType debug
 ./scripts/verify-apks.ps1
 ```
@@ -42,8 +43,14 @@ This builds an early development client. The API endpoint defaults to `https://a
 
 Verified ARM64, ARMv7 and Universal Debug APKs are in `artifacts/`; hashes and manifest evidence are in `artifacts/apk-verification.json`. These are large unminified development artifacts.
 
+For real emulator-to-backend HTTPS tests, see [Android integration instructions](docs/ANDROID_TESTING.md). The opt-in local CA is never included in normal APKs. Foreground repository/adapter tests and process-restart checks pass; complete interactive UI acceptance remains unfinished.
+
 The independent Docker smoke stack uses `docker compose --project-name vyrn-local --env-file .local/dev.env -f deployment/compose.yaml -f deployment/compose.local.yaml up -d --build --wait`. It exposes only `127.0.0.1:18080`, keeps PostgreSQL private, and does not start Caddy or request public certificates. Bootstrap this separate empty database before using `scripts/test-local-stack.ps1`; that test restarts only the named local stack and verifies messages/events and idempotency.
 
 ## Production
 
 Follow [deployment instructions](docs/DEPLOYMENT.md). DNS, host provisioning, external backups and final signing have not been performed. Do not disable root/password SSH authentication without the user's explicit authorization. See [security](docs/SECURITY.md), [backup and restore](docs/BACKUP_RESTORE.md), [updates](docs/UPDATE_PROCESS.md) and [source redistribution](docs/GPL_COMPLIANCE.md).
+
+## Repository checks
+
+See [contributing](CONTRIBUTING.md). GitHub CI definitions cover repository hygiene, script syntax, backend race/integration tests, vulnerability scanning and Docker compilation. GitHub execution is pending repository creation and authentication. Android APKs remain locally built; do not infer Android acceptance or production readiness from backend CI alone.

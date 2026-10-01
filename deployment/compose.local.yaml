@@ -11,6 +11,20 @@ services:
       - ../admin:/admin:ro
   caddy:
     profiles: [production]
+  devtls:
+    image: caddy:2.10.2-alpine@sha256:4c6e91c6ed0e2fa03efd5b44747b625fec79bc9cd06ac5235a779726618e530d
+    profiles: [android]
+    ports: ["127.0.0.1:18443:443"]
+    volumes:
+      - ./Caddyfile.dev:/etc/caddy/Caddyfile:ro
+      - devtls_data:/data
+      - devtls_config:/config
+    networks: [edge]
+    depends_on: [core]
+    mem_limit: 128m
+volumes:
+  devtls_data:
+  devtls_config:
 networks:
   edge:
     ipam:

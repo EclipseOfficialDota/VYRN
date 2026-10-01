@@ -15,9 +15,9 @@ public final class Models {
     }
     public static final class Message {
         public final String id, sender, text;
-        public final int date;
+        public final int date, ordinal;
         public final boolean encrypted, deleted;
-        public Message(String id,String sender,String text,int date,boolean encrypted,boolean deleted){this.id=id;this.sender=sender;this.text=text;this.date=date;this.encrypted=encrypted;this.deleted=deleted;}
+        public Message(String id,String sender,String text,int date,int ordinal,boolean encrypted,boolean deleted){this.id=id;this.sender=sender;this.text=text;this.date=date;this.ordinal=ordinal;this.encrypted=encrypted;this.deleted=deleted;}
     }
     public interface Repository {
         User me() throws Exception;

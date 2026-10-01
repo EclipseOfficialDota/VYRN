@@ -46,7 +46,7 @@ public final class VyrnBridge {
         String id=privateConversations.get(peer.user_id);if(id==null){dialogs();id=privateConversations.get(peer.user_id);}if(id==null)throw new UnsupportedOperationException();return id;
     }
     private TLRPC.Message message(Models.Message m,TLRPC.Peer peer){
-        TLRPC.TL_message out=new TLRPC.TL_message();out.id=ids.local("message",m.id);out.peer_id=peer;TLRPC.TL_peerUser sender=new TLRPC.TL_peerUser();sender.user_id=ids.local("user",m.sender);out.from_id=sender;out.flags|=256;out.date=m.date;out.message=m.deleted?"":m.encrypted?(org.telegram.messenger.LocaleController.isRTL?"این پیام در این دستگاه قابل نمایش نیست.":"This message cannot be displayed on this device."):m.text;out.out=sender.user_id==UserConfig.getInstance(account).getClientUserId();out.media=new TLRPC.TL_messageMediaEmpty();return out;
+        TLRPC.TL_message out=new TLRPC.TL_message();out.id=ids.message(m.id,m.ordinal);out.peer_id=peer;TLRPC.TL_peerUser sender=new TLRPC.TL_peerUser();sender.user_id=ids.local("user",m.sender);out.from_id=sender;out.flags|=256;out.date=m.date;out.message=m.deleted?"":m.encrypted?(org.telegram.messenger.LocaleController.isRTL?"این پیام در این دستگاه قابل نمایش نیست.":"This message cannot be displayed on this device."):m.text;out.out=sender.user_id==UserConfig.getInstance(account).getClientUserId();out.media=new TLRPC.TL_messageMediaEmpty();return out;
     }
     private TLRPC.TL_messages_dialogs dialogs() throws Exception {
         TLRPC.TL_messages_dialogs result=new TLRPC.TL_messages_dialogs();
@@ -66,7 +66,8 @@ public final class VyrnBridge {
         if(request instanceof TLRPC.TL_messages_sendMessage){
             TLRPC.TL_messages_sendMessage in=(TLRPC.TL_messages_sendMessage)request;if(in.peer.chat_id==0)throw new UnsupportedOperationException("e2ee_not_ready");
             String stable=repository.vault.load().getString("user_id")+":"+in.random_id;String client=UUID.nameUUIDFromBytes(stable.getBytes(StandardCharsets.UTF_8)).toString();String id=repository.send(conversation(in.peer),client,in.message);
-            TLRPC.TL_updateShortSentMessage out=new TLRPC.TL_updateShortSentMessage();out.id=ids.local("message",id);out.date=(int)(System.currentTimeMillis()/1000);out.out=true;out.pts=out.id;out.pts_count=1;return out;
+            Models.Message sent=repository.message(id);
+            TLRPC.TL_updateShortSentMessage out=new TLRPC.TL_updateShortSentMessage();out.id=ids.message(sent.id,sent.ordinal);out.date=sent.date;out.out=true;out.pts=out.id;out.pts_count=1;return out;
         }
         if(request instanceof TLRPC.TL_messages_setTyping){TLRPC.TL_messages_setTyping in=(TLRPC.TL_messages_setTyping)request;repository.request("POST","/v1/conversations/"+conversation(in.peer)+"/typing",new JSONObject(),true);return new TLRPC.TL_boolTrue();}
         if(request instanceof TLRPC.TL_updates_getState){TLRPC.TL_updates_state state=new TLRPC.TL_updates_state();state.date=(int)(System.currentTimeMillis()/1000);return state;}

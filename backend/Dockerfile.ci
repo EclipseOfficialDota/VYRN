@@ -1,0 +1,8 @@
+# Disposable Linux test runner, including the C toolchain required by Go's race detector.
+FROM golang:1.26.8-alpine@sha256:8ac98ca534ac3f51e1f420a1dd2c15e74c75cfa0f23f3ad27eb5d7236c349a0c
+RUN apk add --no-cache gcc musl-dev
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+CMD ["go", "test", "-race", "-count=1", "./..."]
