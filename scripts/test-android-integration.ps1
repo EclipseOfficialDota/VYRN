@@ -38,8 +38,10 @@ if($process.ExitCode -ne 0){throw 'Private test fixture transfer failed'}
 $fixture=$null
 $rounds=@()
 try {
-    foreach($phase in @('first','restart')){
+    foreach($phase in @('first','offline','restart')){
         & $adb -s $Serial shell am force-stop $package
+        if($phase -eq 'offline'){& $adb -s $Serial reverse --remove tcp:18443}else{& $adb -s $Serial reverse tcp:18443 tcp:18443}
+        if($LASTEXITCODE -ne 0){throw 'Test network transition failed'}
         $result=(& $adb -s $Serial shell am instrument -w -e phase $phase "$package.test/xyz.eclipseofficial.vyrn.test.LocalIntegrationRunner") -join "`n"
         [IO.File]::WriteAllText((Join-Path $root ".local/android-integration-$phase.log"),$result)
         if($LASTEXITCODE -ne 0 -or $result -notmatch 'vyrn_result=passed'){
@@ -55,5 +57,6 @@ try {
     }
     @{date=[DateTimeOffset]::UtcNow.ToString('o');apk=[IO.Path]::GetFileName($apk);sha256=(Get-FileHash $apk).Hash.ToLowerInvariant();device='vyrn_api35';api=35;transport='HTTPS with scoped local CA';rounds=$rounds;full_ui_e2e='not tested'} | ConvertTo-Json -Depth 6 | Set-Content (Join-Path $root 'artifacts/android-integration.json') -Encoding utf8
 } finally {
+    & $adb -s $Serial reverse tcp:18443 tcp:18443
     & $adb -s $Serial shell run-as $package rm -f files/vyrn-test-fixture.json
 }

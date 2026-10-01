@@ -24,3 +24,9 @@
 - Use a separate local Docker project and headless Android emulator for verification. Production access and calls remain gated.
 - Use opt-in dev/debug HTTPS with a localhost-scoped public CA for Android integration. Do not alter system trust stores or permit this configuration in release builds.
 - Assign positive stable message ordinals on the server for the Telegram UI; UUIDs remain API identity. Use ordinal pagination so fetch order and device-local insertion order cannot reverse message IDs.
+
+## 2026-10-02 — outgoing offline messages
+- Persist group-text sends before network access. Bind entries and HTTP authentication to the originating user, retain stable client IDs, preserve per-conversation queue order, and persist acknowledgements before notifying the Telegram adapter.
+- Share the token-vault lock across repository instances so rotating refresh tokens cannot be reused concurrently and queued sends cannot switch identities mid-request.
+- Retry transient failures with a bounded exponential backoff and jitter. Keep failures available for explicit retry; remove accepted payload text from the outbox.
+- Pending cancellation/reconciliation and incoming durable synchronization remain mandatory acceptance gaps, not optional follow-ups.

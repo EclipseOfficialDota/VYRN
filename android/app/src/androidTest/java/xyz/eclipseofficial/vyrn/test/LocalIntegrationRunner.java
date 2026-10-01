@@ -31,6 +31,7 @@ import org.telegram.tgnet.TLObject;
 import org.telegram.tgnet.TLRPC;
 import xyz.eclipseofficial.vyrn.compat.VyrnBridge;
 import xyz.eclipseofficial.vyrn.data.IdMap;
+import xyz.eclipseofficial.vyrn.data.OutboxStore;
 import xyz.eclipseofficial.vyrn.data.RestRepository;
 import xyz.eclipseofficial.vyrn.data.TokenVault;
 import xyz.eclipseofficial.vyrn.domain.Models;
@@ -52,7 +53,7 @@ public final class LocalIntegrationRunner extends Instrumentation {
             Intent launch=new Intent(Intent.ACTION_MAIN).setClassName(context,"org.telegram.ui.LaunchActivity").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
             check(startActivitySync(launch)!=null,"foreground_activity");
             waitForIdleSync();
-            if(phase.equals("first")) first(); else if(phase.equals("restart")) restart(); else throw new IllegalArgumentException();
+            if(phase.equals("first")) first(); else if(phase.equals("offline")) offline(); else if(phase.equals("restart")) restart(); else throw new IllegalArgumentException();
             result.putString("vyrn_result", "passed");
             result.putString("checks", passed.toString());
             result.putInt("process_id", android.os.Process.myPid());
@@ -130,12 +131,15 @@ public final class LocalIntegrationRunner extends Instrumentation {
         JSONObject stale=a.vault.load(); stale.put("access_token","invalid"); a.vault.save(stale);
         ExecutorService pool=Executors.newFixedThreadPool(2);
         try {
-            Future<Models.User> x=pool.submit(()->a.me()), y=pool.submit(()->a.me());
+            Future<Models.User> x=pool.submit(()->a.me()), y=pool.submit(()->repo(9001).me());
             check(x.get().id.equals(ta.getString("user_id")) && y.get().id.equals(ta.getString("user_id")),"parallel_authenticated_requests");
         } finally { pool.shutdownNow(); }
         check(!oldRefresh.equals(a.vault.load().getString("refresh_token")),"refresh_rotated");
         check(repo(9001).me().id.equals(ta.getString("user_id")),"vault_reopened");
         passed.put("concurrent_refresh_rotation");
+        boolean accountBlocked=false;
+        try {a.requestForUser(tb.getString("user_id"),"GET","/v1/me",null,true);}catch(SecurityException expected){accountBlocked=true;}
+        check(accountBlocked,"account_bound_request");passed.put("account_bound_request");
 
         stage="message_mutations";
         a.request("PATCH","/v1/messages/"+messageId,new JSONObject().put("revision",1).put("payload",new JSONObject().put("text","Edited ویرایش")),true);
@@ -172,8 +176,55 @@ public final class LocalIntegrationRunner extends Instrumentation {
             check(mapped,"Telegram_top_message_id");
         } finally {bridge.repository.vault.clear();}
         passed.put("ordered_UI_identifiers").put("history_pagination").put("Telegram_dialog_adapter");
-        write("vyrn-test-state.json",new JSONObject().put("group",groupId).put("message",messageId).put("oldest",oldest).put("oldest_ordinal",upper).put("user",ta.getString("user_id")).put("process_id",android.os.Process.myPid()));
+        stage="outbox_retry_policy";
+        try(OutboxStore store=new OutboxStore(context,9009)){
+            String client=UUID.randomUUID().toString();OutboxStore.Entry e=store.enqueue(ta.getString("user_id"),client,groupId,"Retry fixture");
+            for(int attempt=1;attempt<=8;attempt++){check(store.failed(e,503,true)==(attempt<8),"bounded_attempts");e=store.get(e.user,e.client);}
+            check(e.state==OutboxStore.FAILED && e.attempts==8,"retry_stops");
+            e=store.enqueue(e.user,e.client,e.conversation,"Retry fixture");check(e.state==OutboxStore.QUEUED && e.attempts==0,"explicit_retry_resets");
+            check(!store.failed(e,403,false),"permanent_error_no_retry");
+        }
+        context.deleteDatabase("vyrn_outbox_9009.db");
+        String uncertainGroup=((JSONObject)a.request("POST","/v1/conversations",new JSONObject().put("kind","group").put("title","Lost acknowledgement").put("members",new JSONArray().put(tb.getString("user_id"))),true)).getString("id");
+        long uncertainRandom=UUID.randomUUID().getMostSignificantBits();String uncertainClient=clientId(ta.getString("user_id"),uncertainRandom);
+        try(OutboxStore store=new OutboxStore(context,2)){store.enqueue(ta.getString("user_id"),uncertainClient,uncertainGroup,"Lost acknowledgement");}
+        // Simulate a server commit whose response was lost before the local acknowledgement commit.
+        String uncertainServer=a.send(uncertainGroup,uncertainClient,"Lost acknowledgement");
+        passed.put("bounded_outbox_retry_policy");
+        write("vyrn-test-state.json",new JSONObject().put("uncertain_group",uncertainGroup).put("uncertain_random",uncertainRandom).put("uncertain_server",uncertainServer).put("group",groupId).put("message",messageId).put("oldest",oldest).put("oldest_ordinal",upper).put("user",ta.getString("user_id")).put("process_id",android.os.Process.myPid()));
         Files.delete(file("vyrn-test-fixture.json").toPath());
+    }
+
+    private CompletableFuture<TLObject> queueThroughUI(JSONObject state,long randomId,String text) throws Exception {
+        IdMap map=new IdMap(context,2);
+        TLRPC.TL_messages_sendMessage request=new TLRPC.TL_messages_sendMessage();
+        TLRPC.TL_inputPeerChat peer=new TLRPC.TL_inputPeerChat();
+        try{peer.chat_id=map.local("conversation",state.getString("group"));}finally{map.close();}
+        request.peer=peer;request.message=text;request.random_id=randomId;
+        CompletableFuture<TLObject> response=new CompletableFuture<>();
+        VyrnBridge.dispatch(2,request,(value,error)->{if(error!=null)response.completeExceptionally(new AssertionError());else response.complete(value);},null);
+        return response;
+    }
+    private String clientId(String user,long randomId){return UUID.nameUUIDFromBytes((user+":"+randomId).getBytes(StandardCharsets.UTF_8)).toString();}
+    private void offline() throws Exception {
+        stage="offline_UI_outbox";
+        JSONObject state=read("vyrn-test-state.json");
+        VyrnBridge.forAccount(2).repository.vault.save(repo(9001).vault.load());
+        long first=UUID.randomUUID().getMostSignificantBits(),second=UUID.randomUUID().getMostSignificantBits();
+        state.put("outbox_first",first).put("outbox_second",second);write("vyrn-test-state.json",state);
+        CompletableFuture<TLObject> one=queueThroughUI(state,first,"Offline one"),two=queueThroughUI(state,second,"Offline two");
+        Thread.sleep(6000);
+        check(!one.isDone() && !two.isDone(),"offline_no_false_ack");
+        try(OutboxStore store=new OutboxStore(context,2)){
+            OutboxStore.Entry pending=store.get(state.getString("user"),clientId(state.getString("user"),first));
+            check(pending!=null && pending.state==OutboxStore.QUEUED && pending.attempts>0,"outbox_persisted_before_retry");
+            OutboxStore.Entry later=store.get(state.getString("user"),clientId(state.getString("user"),second));
+            check(later!=null && later.attempts==0,"outbox_conversation_order");
+            check(store.next(UUID.randomUUID().toString())==null,"outbox_account_isolation");
+            boolean conflict=false;try{store.enqueue(state.getString("user"),pending.client,pending.conversation,"different");}catch(IllegalStateException expected){conflict=true;}
+            check(conflict,"outbox_idempotency_conflict");
+        }
+        passed.put("offline_UI_queue").put("no_premature_ack").put("bounded_backoff_started").put("conversation_send_order").put("account_isolation").put("retry_payload_immutable");
     }
 
     private void restart() throws Exception {
@@ -182,21 +233,38 @@ public final class LocalIntegrationRunner extends Instrumentation {
         check(state.getInt("process_id")!=android.os.Process.myPid(),"new_process");
         RestRepository a=repo(9001), b=repo(9002);
         check(a.me().id.equals(state.getString("user")),"persisted_session");
+        stage="restart_outbox_reconnect";
+        TLRPC.TL_updateShortSentMessage first=(TLRPC.TL_updateShortSentMessage)queueThroughUI(state,state.getLong("outbox_first"),"Offline one").get(45,TimeUnit.SECONDS);
+        TLRPC.TL_updateShortSentMessage second=(TLRPC.TL_updateShortSentMessage)queueThroughUI(state,state.getLong("outbox_second"),"Offline two").get(45,TimeUnit.SECONDS);
+        check(first.id<second.id,"reconnected_send_order");
+        TLRPC.TL_updateShortSentMessage replay=(TLRPC.TL_updateShortSentMessage)queueThroughUI(state,state.getLong("outbox_first"),"Offline one").get(5,TimeUnit.SECONDS);
+        check(replay.id==first.id,"outbox_completed_retry");
+        JSONObject uncertain=new JSONObject().put("group",state.getString("uncertain_group"));
+        TLRPC.TL_updateShortSentMessage recovered=(TLRPC.TL_updateShortSentMessage)queueThroughUI(uncertain,state.getLong("uncertain_random"),"Lost acknowledgement").get(45,TimeUnit.SECONDS);
+        List<Models.Message> uncertainHistory=b.messages(state.getString("uncertain_group"),null,100);
+        check(uncertainHistory.size()==1 && uncertainHistory.get(0).id.equals(state.getString("uncertain_server")) && uncertainHistory.get(0).ordinal==recovered.id,"lost_ack_no_duplicate");
+        passed.put("lost_acknowledgement_recovery");
         List<Models.Message> messages=b.messages(state.getString("group"),null,100);
-        check(messages.size()==1 && messages.get(0).text.equals("Edited ویرایش"),"persisted_history");
+        check(messages.size()==3 && messages.get(0).text.equals("Offline two") && messages.get(1).text.equals("Offline one") && messages.get(2).text.equals("Edited ویرایش"),"persisted_history");
+        try(OutboxStore store=new OutboxStore(context,2)){
+            OutboxStore.Entry sent=store.get(state.getString("user"),clientId(state.getString("user"),state.getLong("outbox_first")));
+            check(sent.state==OutboxStore.SENT && sent.text==null,"outbox_ack_persisted_body_removed");
+        }
+        passed.put("outbox_process_restart_delivery").put("outbox_no_duplicate").put("acknowledged_payload_removed");
         IdMap map=new IdMap(context,9001);
         try {check(map.remote("message",state.getInt("oldest_ordinal")).equals(state.getString("oldest")),"persisted_UI_identifier");}finally{map.close();}
         passed.put("process_restart_Keystore_session").put("process_restart_history");
         passed.put("process_restart_UI_identifiers");
         stage="delete_and_revoke";
         a.request("DELETE","/v1/messages/"+state.getString("message"),null,true);
-        check(b.messages(state.getString("group"),null,100).get(0).deleted,"delete_tombstone");
+        check(b.message(state.getString("message")).deleted,"delete_tombstone");
         a.request("POST","/v1/auth/logout",new JSONObject(),true);
         boolean revoked=false;
         try { a.me(); } catch(RestRepository.ApiException e) { revoked=e.status==401; }
         check(revoked,"revoked_session_denied");
         b.request("POST","/v1/auth/logout",new JSONObject(),true);
         a.vault.clear(); b.vault.clear();
+        VyrnBridge.forAccount(2).repository.vault.clear();
         passed.put("delete_tombstone").put("session_revocation");
         Files.delete(file("vyrn-test-state.json").toPath());
     }

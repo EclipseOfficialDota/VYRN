@@ -14,7 +14,7 @@ Updated 2026-10-01. A route existing or a build compiling does **not** establish
 | Auth and multi-session | Backend invite/normalization/device-limit/reuse/recovery tests; Android Keystore, refresh and process-restart integration pass | Android account/session management UI and full multi-device flows |
 | Group messages | REST permissions/mutations and Android repository/Telegram dialog adapter tests; server ordinals and pagination verified | Android wiring of all features, legacy debug UI-cache upgrade and large-conversation tests |
 | E2EE private chat | Plaintext fails closed | Reviewed Signal library integration, prekeys, ratchets, verification, device changes, adversarial tests |
-| Sync | Cursor ordering, idempotency, reconnect and offline-event tests | Android durable sync/outbox/acknowledgement implementation |
+| Sync | Backend cursor/reconnect tests; Android group-text outbox survives real disconnect/process restart, preserves order and deduplicates lost acknowledgements | Outbox cancellation/reconciliation and retention; durable incoming inbox/WebSocket acknowledgements, queued media, full multi-device/UI tests |
 | Media/voice | Authenticated upload/download and low-disk tests | Android media/voice UI, encryption and lifecycle tests |
 | Profile/presence/block | Backend endpoints and websocket activity timestamps | Complete privacy controls and Android integration |
 | Reactions/receipts | Mutations/read models and monotonic read-state integration tests pass | Android UI rendering |

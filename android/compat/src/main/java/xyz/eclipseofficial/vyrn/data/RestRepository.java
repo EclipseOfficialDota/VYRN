@@ -20,7 +20,11 @@ public final class RestRepository implements Models.Repository {
         public final int status;public final String code;
         ApiException(int status,String code){super(code);this.status=status;this.code=code;}
     }
-    public synchronized Object request(String method,String path,JSONObject body,boolean authenticated) throws Exception {
+    public Object request(String method,String path,JSONObject body,boolean authenticated) throws Exception {
+        return requestForUser(null,method,path,body,authenticated);
+    }
+    public Object requestForUser(String expectedUser,String method,String path,JSONObject body,boolean authenticated) throws Exception { synchronized(vault.guard()) {
+        if(expectedUser!=null && !expectedUser.equals(vault.load().optString("user_id")))throw new SecurityException("account_changed");
         String access=authenticated?vault.load().optString("access_token"):"";
         try{return exchange(method,path,body,access);}catch(ApiException failure){
             if(!authenticated||failure.status!=401)throw failure;
@@ -28,7 +32,7 @@ public final class RestRepository implements Models.Repository {
             JSONObject renewed=(JSONObject)exchange("POST","/v1/auth/refresh",new JSONObject().put("refresh_token",refresh),"");
             vault.save(renewed);return exchange(method,path,body,renewed.getString("access_token"));
         }
-    }
+    }}
     private Object exchange(String method,String path,JSONObject body,String access) throws Exception {
         URL endpoint=new URL(BuildConfig.VYRN_API_URL+path);
         if(!"https".equals(endpoint.getProtocol())||endpoint.getHost().matches("[0-9.]+"))throw new SecurityException("https_hostname_required");
@@ -65,4 +69,8 @@ public final class RestRepository implements Models.Repository {
         JSONObject input=new JSONObject().put("client_id",clientId).put("payload",new JSONObject().put("text",text)).put("encrypted",false);
         return ((JSONObject)request("POST","/v1/conversations/"+conversation+"/messages",input,true)).getString("id");
     }
+    public Models.Message sendForUser(String user,String conversation,String clientId,String text) throws Exception { synchronized(vault.guard()) {
+        if(!user.equals(vault.load().optString("user_id")))throw new SecurityException("account_changed");
+        return message(send(conversation,clientId,text));
+    }}
 }

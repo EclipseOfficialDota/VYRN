@@ -27,6 +27,8 @@ Updated 2026-10-02. Development is unfinished. No production release or VPS depl
 - Admin login, TOTP, dashboard and Persian RTL group page checked in browser. Screenshot artifacts/admin-fa.png. Browser refresh rotation now serialized.
 - Android SDK/JDK17/NDK27.2/CMake installed locally; exact upstream submodules present. dev Debug ARM64, ARMv7 and combined Universal APKs built. Signatures, package xyz.eclipseofficial.vyrn.dev, minAPI26, target36, ABI contents, cleartext off/backup off/RTL on verified by scripts/verify-apks.ps1. Large unminified debug artifacts.
 - Android35 foreground integration passes17 named checks over actual local HTTPS: invite registration, Keystore persistence, group delivery, idempotency, Persian text, concurrent refresh, edit/reaction/receipt, pagination, stable IDs, Telegram dialog adapter, process restart, delete and revoke. Evidence artifacts/android-integration.json; this is repository/adapter testing, not complete interactive UI acceptance.
+- Android suite now passes29 named checks across first/offline/restart processes. Group-text sends go through a persisted SQLite outbox and asynchronous Telegram adapter acknowledgement. Two queued messages preserve conversation order across actual ADB forwarding removal and process death. A simulated lost acknowledgement recovers without duplication. Retries stop after8 failures with exponential backoff/jitter; explicit resend resets the retry budget. Accepted bodies are removed from the outbox. Queue entries and HTTP sends are bound to the originating user; TokenVault now shares an account lock across repository instances, and the cross-instance refresh test passes.
+- Outbox implementation is an intermediate checkpoint: pending-message cancellation is NOT wired from ConnectionsManager.cancelRequest yet. Address cancellation/reconciliation before calling this production-ready. Full incoming durable inbox/WebSocket sync, queued-media support, sent-row retention and actual interactive UI restoration are still outstanding.
 - Dedicated key .local/ssh/vyrn_ed25519; SSH key login rejected. Install only its .pub via provider console/existing session; independently verify host fingerprint. No remote command ran.
 
 ## Local runtime and commands
@@ -43,7 +45,7 @@ Updated 2026-10-02. Development is unfinished. No production release or VPS depl
 
 ## Unfinished implementation, separate from external gates
 1. Android discovery, group creation/settings/members, profile/session/recovery, media/voice, edit/delete/reactions/drafts/receipts. Current adapter supports login, dialogs/history/group text/typing; other upstream requests fail unavailable.
-2. Durable Android inbox/outbox, websocket reconnect, ack after local persistence, process-restart/multi-device tests. Backend sync is not client sync.
+2. Finish outbox cancellation/reconciliation and retention; implement durable Android inbox/WebSocket consumption, ack after persistence, full process-restart/multi-device UI tests. Group-text outbox/reconnect tests pass; backend sync is not complete client sync.
 3. Reviewed Signal library, device/prekey API, identity verification/rotation and adversarial crypto tests. Private chat is not ready; plaintext rejected. Envelope schema is not E2EE completion.
 4. Background sync/internal push, notifications, Android signed update/download/install and remote config.
 5. Admin operational controls/metrics, per-admin TOTP, pagination/load/security review, full branding/source audit, media-inclusive external backup proof.
