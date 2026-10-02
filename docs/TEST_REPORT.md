@@ -110,6 +110,12 @@ Date: 2026-10-01. This records performed checks, not planned tests.
 - Eleven PostgreSQL API integration tests pass, including authenticated discovery, case-insensitive/Persian matching, literal wildcard handling, result/input bounds, exclusion of self/disabled users, blocks in either direction and absence of login fields. Security/update unit tests and go vet also pass.
 - These tests exercise the native request/controller path, not screen taps. Empty contact lists still rely on global display-name search. Group settings/member management, creation with a nonzero auto-delete period, interrupted-create acknowledgement/retry, and complete UI acceptance remain unfinished.
 
+## Creation-time group auto-delete checkpoint on 2026-10-02
+
+- All82 named Android checks pass. The original MessagesController creates a group with a one-day period; the first message has the exact server expiry interval, the dialog adapter exposes the native TTL field/flag and the period survives real process death.
+- Twelve PostgreSQL API integration tests pass. The new test verifies zero/minimum/maximum periods, first-send expiry, matching creation/member/recipient-event state and rejection of invalid TTL/member inputs without orphan conversations. go vet passes.
+- Creation-time group TTL is now atomic. Screen-driven settings, changing group TTL from native settings, per-message countdown visuals and invited-device realtime TTL mapping remain unfinished; these checks do not establish complete auto-delete UI acceptance.
+
 ## External checks
 
 - Dedicated SSH key authentication to port 3939 was rejected. No server commands ran.

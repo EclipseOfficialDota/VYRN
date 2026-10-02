@@ -369,12 +369,16 @@ public final class LocalIntegrationRunner extends Instrumentation {
         CompletableFuture<Long> created=new CompletableFuture<>();NotificationCenter center=NotificationCenter.getInstance(2);
         NotificationCenter.NotificationCenterDelegate observer=(id,account,args)->{if(id==NotificationCenter.chatDidCreated)created.complete((Long)args[0]);else created.completeExceptionally(new AssertionError());};
         try {
-            AndroidUtilities.runOnUIThread(()->{MessagesController controller=MessagesController.getInstance(2);controller.putUser(member,false);center.addObserver(observer,NotificationCenter.chatDidCreated);center.addObserver(observer,NotificationCenter.chatDidFailCreate);ArrayList<Long> selected=new ArrayList<>();selected.add(member.id);controller.createChat("گروه از رابط اصلی",selected,"",ChatObject.CHAT_TYPE_CHAT,false,null,null,-1,null);});
+            AndroidUtilities.runOnUIThread(()->{MessagesController controller=MessagesController.getInstance(2);controller.putUser(member,false);center.addObserver(observer,NotificationCenter.chatDidCreated);center.addObserver(observer,NotificationCenter.chatDidFailCreate);ArrayList<Long> selected=new ArrayList<>();selected.add(member.id);controller.createChat("گروه از رابط اصلی",selected,"",ChatObject.CHAT_TYPE_CHAT,false,null,null,86400,null);});
             long local=created.get(30,TimeUnit.SECONDS);String group;try(IdMap map=new IdMap(context,2)){group=map.remote("conversation",local);}
             TLRPC.Chat cached=MessagesStorage.getInstance(2).getChat(local);check(cached!=null && cached.title.equals("گروه از رابط اصلی") && cached.participants_count==2 && cached.creator,"created_group_native_cache");
             List<Models.User> members=b.members(group);check(members.size()==2 && members.stream().anyMatch(u->u.id.equals(memberId)),"created_group_membership");
             TLRPC.TL_updateShortSentMessage ack=(TLRPC.TL_updateShortSentMessage)queueThroughUI(new JSONObject().put("group",group),UUID.randomUUID().getMostSignificantBits(),"پیام در گروه جدید").get(30,TimeUnit.SECONDS);
             List<Models.Message> messages=b.messages(group,null,100);check(messages.size()==1 && messages.get(0).ordinal==ack.id && messages.get(0).text.equals("پیام در گروه جدید"),"created_group_message_delivery");
+            JSONObject raw=(JSONObject)a.request("GET","/v1/messages/"+messages.get(0).id,null,true);check(java.time.Duration.between(java.time.Instant.parse(raw.getString("created_at")),java.time.Instant.parse(raw.getString("expires_at"))).getSeconds()==86400,"first_message_uses_creation_TTL");
+            CompletableFuture<TLObject> snapshot=new CompletableFuture<>();ConnectionsManager.getInstance(2).sendRequest(new TLRPC.TL_messages_getDialogs(),(value,error)->{if(error!=null)snapshot.completeExceptionally(new AssertionError());else snapshot.complete(value);});
+            TLRPC.TL_messages_dialogs dialogs=(TLRPC.TL_messages_dialogs)snapshot.get(30,TimeUnit.SECONDS);TLRPC.Dialog ttlDialog=null;for(TLRPC.Dialog dialog:dialogs.dialogs)if(dialog.id==-local)ttlDialog=dialog;
+            check(ttlDialog!=null && ttlDialog.ttl_period==86400 && (ttlDialog.flags&32)!=0,"created_group_dialog_TTL");passed.put("first_message_uses_creation_TTL").put("created_group_dialog_TTL");
             passed.put("MessagesController_group_creation").put("created_group_native_cache").put("created_group_member_delivery");return group;
         } finally {AndroidUtilities.runOnUIThread(()->{center.removeObserver(observer,NotificationCenter.chatDidCreated);center.removeObserver(observer,NotificationCenter.chatDidFailCreate);});}
     }
@@ -522,6 +526,7 @@ public final class LocalIntegrationRunner extends Instrumentation {
         }
         passed.put("committed_token_cancel_ack").put("token_cancel_process_restart");
         try(IdMap map=new IdMap(context,2)){long local=map.local("conversation",state.getString("native_created_group"));TLRPC.Chat cached=MessagesStorage.getInstance(2).getChat(local);check(cached!=null && cached.title.equals("گروه از رابط اصلی"),"created_group_survives_restart");}passed.put("created_group_survives_restart");
+        boolean ttlRestored=false;for(Models.Conversation group:a.conversations())if(group.id.equals(state.getString("native_created_group")))ttlRestored=group.disappearingSeconds==86400;check(ttlRestored,"created_group_TTL_survives_restart");passed.put("created_group_TTL_survives_restart");
         stage="Telegram_UI_cancellation_restart";
         try(IdMap map=new IdMap(context,2)){check(UserConfig.getInstance(2).getClientUserId()==map.local("user",state.getString("user")),"Telegram_identity_restored");}passed.put("Telegram_identity_restored");
         try(OutboxStore store=new OutboxStore(context,2)){

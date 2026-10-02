@@ -73,3 +73,8 @@
 - Search only public display names after authentication; expose no login email/admin data. Bound queries to100 characters and results to50, treat SQL wildcards literally and omit self, disabled users and blocks in either direction.
 - Route Telegram contacts.search and messages.createChat through repositories. Return the invitedUsers/updates/chat/user shapes expected by the original MessagesController rather than replacing its group-creation UI.
 - Serialize mapped user name/photo/status flags correctly so native cache persistence preserves display names. Nonzero create-time auto-delete remains unavailable until it is applied atomically on the server.
+
+## 2026-10-02 — atomic creation-time group auto-delete
+- Accept the native createChat TTL flag and persist group disappearing_seconds in the initial conversation transaction with membership and recipient events. Never create a group and then patch its TTL in a separate request.
+- Validate the same0-to31536000-second bound used by existing settings. Initial private-conversation creation still requires zero; its existing settings API remains unchanged.
+- Map persisted TTL into native dialog fields/serialization flags and the creator's peer-history-TTL update. The first send derives its expiry directly from the committed conversation setting.

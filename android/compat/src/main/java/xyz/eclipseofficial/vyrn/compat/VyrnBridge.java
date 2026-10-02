@@ -190,7 +190,7 @@ public final class VyrnBridge {
         TLRPC.TL_messages_dialogs result=new TLRPC.TL_messages_dialogs();
         for(Models.Conversation c:repository.conversations()){
             List<Models.User> members=repository.members(c.id);TLRPC.Peer peer=peer(c,members);for(Models.User u:members)result.users.add(mapUser(u));if(c.kind.equals("group"))result.chats.add(chat(c));
-            TLRPC.TL_dialog dialog=new TLRPC.TL_dialog();dialog.peer=peer;dialog.id=peer.chat_id!=0?-peer.chat_id:peer.user_id;dialog.notify_settings=new TLRPC.TL_peerNotifySettings();
+            TLRPC.TL_dialog dialog=new TLRPC.TL_dialog();dialog.peer=peer;dialog.id=peer.chat_id!=0?-peer.chat_id:peer.user_id;dialog.notify_settings=new TLRPC.TL_peerNotifySettings();dialog.ttl_period=c.disappearingSeconds;if(c.disappearingSeconds>0)dialog.flags|=32;
             List<Models.Message> messages=repository.messages(c.id,null,1);if(!messages.isEmpty()){TLRPC.Message message=message(messages.get(0),peer);result.messages.add(message);dialog.top_message=message.id;dialog.last_message_date=message.date;}result.dialogs.add(dialog);
         }return result;
     }
@@ -221,9 +221,10 @@ public final class VyrnBridge {
             for(Models.User found:repository.searchUsers(in.q,in.limit)){TLRPC.User user=mapUser(found);result.users.add(user);TLRPC.TL_peerUser peer=new TLRPC.TL_peerUser();peer.user_id=user.id;result.results.add(peer);}return result;
         }
         if(request instanceof TLRPC.TL_messages_createChat){
-            TLRPC.TL_messages_createChat in=(TLRPC.TL_messages_createChat)request;if(in.ttl_period!=0)throw new UnsupportedOperationException("group_creation_ttl_not_ready");
+            TLRPC.TL_messages_createChat in=(TLRPC.TL_messages_createChat)request;int ttl=(in.flags&1)!=0?in.ttl_period:0;
             ArrayList<String> members=new ArrayList<>();for(TLRPC.InputUser member:in.users){if(member instanceof TLRPC.TL_inputUserSelf)continue;if(!(member instanceof TLRPC.TL_inputUser))throw new IllegalArgumentException("invalid_group_member");members.add(ids.remote("user",member.user_id));}
-            Models.Conversation created=repository.createGroup(in.title,members);TLRPC.TL_updates updates=new TLRPC.TL_updates();updates.date=(int)(System.currentTimeMillis()/1000);updates.chats.add(chat(created));
+            Models.Conversation created=repository.createGroup(in.title,members,ttl);TLRPC.TL_updates updates=new TLRPC.TL_updates();updates.date=(int)(System.currentTimeMillis()/1000);updates.chats.add(chat(created));
+            if(created.disappearingSeconds>0){TL_update.TL_updatePeerHistoryTTL update=new TL_update.TL_updatePeerHistoryTTL();TLRPC.TL_peerChat peer=new TLRPC.TL_peerChat();peer.chat_id=ids.local("conversation",created.id);update.peer=peer;update.flags=1;update.ttl_period=created.disappearingSeconds;updates.updates.add(update);}
             for(Models.User member:repository.members(created.id))updates.users.add(mapUser(member));TLRPC.TL_messages_invitedUsers result=new TLRPC.TL_messages_invitedUsers();result.updates=updates;return result;
         }
         if(request instanceof TLRPC.TL_messages_getDialogs)return dialogs();

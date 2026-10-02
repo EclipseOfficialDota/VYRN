@@ -161,12 +161,13 @@ func (s *Server) createConversation(w http.ResponseWriter, r *http.Request) {
 		Kind    string   `json:"kind"`
 		Title   string   `json:"title"`
 		Members []string `json:"members"`
+		Seconds int      `json:"disappearing_seconds"`
 	}
 	if !decode(w, r, &in) {
 		return
 	}
 	user := current(r).UserID
-	if (in.Kind != "private" && in.Kind != "group") || utf8.RuneCountInString(in.Title) > 100 || len(in.Members) > 249 {
+	if (in.Kind != "private" && in.Kind != "group") || utf8.RuneCountInString(in.Title) > 100 || len(in.Members) > 249 || in.Seconds < 0 || in.Seconds > 31536000 || in.Kind != "group" && in.Seconds != 0 {
 		fail(w, 400, "invalid_request")
 		return
 	}
@@ -219,7 +220,7 @@ func (s *Server) createConversation(w http.ResponseWriter, r *http.Request) {
 	}
 	id := uuid.NewString()
 	var actual string
-	err = tx.QueryRow(ctx, `INSERT INTO conversations(id,kind,title,private_pair,owner_id) VALUES($1,$2,$3,$4,$5) ON CONFLICT(private_pair) DO UPDATE SET private_pair=excluded.private_pair RETURNING id::text`, id, in.Kind, in.Title, pair, user).Scan(&actual)
+	err = tx.QueryRow(ctx, `INSERT INTO conversations(id,kind,title,private_pair,owner_id,disappearing_seconds) VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT(private_pair) DO UPDATE SET private_pair=excluded.private_pair RETURNING id::text`, id, in.Kind, in.Title, pair, user, in.Seconds).Scan(&actual)
 	if err != nil {
 		s.internal(w)
 		return
@@ -242,7 +243,7 @@ func (s *Server) createConversation(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	body := map[string]any{"id": id, "kind": in.Kind, "title": in.Title, "members": ids}
+	body := map[string]any{"id": id, "kind": in.Kind, "title": in.Title, "members": ids, "disappearing_seconds": in.Seconds}
 	if emit(ctx, tx, ids, "conversation.created", body) != nil || tx.Commit(ctx) != nil {
 		s.internal(w)
 		return

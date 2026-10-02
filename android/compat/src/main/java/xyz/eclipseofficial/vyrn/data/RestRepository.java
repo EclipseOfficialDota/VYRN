@@ -53,16 +53,16 @@ public final class RestRepository implements Models.Repository {
         JSONArray data=(JSONArray)request("GET","/v1/users/search?q="+java.net.URLEncoder.encode(query,"UTF-8")+"&limit="+Math.max(1,Math.min(limit,50)),null,true);
         List<Models.User> result=new ArrayList<>();for(int i=0;i<data.length();i++)result.add(user(data.getJSONObject(i)));return result;
     }
-    public Models.Conversation createGroup(String title,List<String> members) throws Exception {
-        JSONObject group=(JSONObject)request("POST","/v1/conversations",new JSONObject().put("kind","group").put("title",title).put("members",new JSONArray(members)),true);
-        return new Models.Conversation(group.getString("id"),"group",group.getString("title"),"owner",group.getJSONArray("members").length());
+    public Models.Conversation createGroup(String title,List<String> members,int disappearingSeconds) throws Exception {
+        JSONObject group=(JSONObject)request("POST","/v1/conversations",new JSONObject().put("kind","group").put("title",title).put("members",new JSONArray(members)).put("disappearing_seconds",disappearingSeconds),true);
+        return new Models.Conversation(group.getString("id"),"group",group.getString("title"),"owner",group.getJSONArray("members").length(),group.getInt("disappearing_seconds"));
     }
     private Models.User user(JSONObject data) throws Exception{return new Models.User(data.getString("id"),data.getString("display_name"));}
     public List<Models.User> members(String conversation) throws Exception {
         JSONArray data=(JSONArray)request("GET","/v1/conversations/"+conversation+"/members",null,true);List<Models.User> result=new ArrayList<>();for(int i=0;i<data.length();i++)result.add(user(data.getJSONObject(i)));return result;
     }
     public List<Models.Conversation> conversations() throws Exception {
-        JSONArray data=(JSONArray)request("GET","/v1/conversations",null,true);List<Models.Conversation> result=new ArrayList<>();for(int i=0;i<data.length();i++){JSONObject c=data.getJSONObject(i);result.add(new Models.Conversation(c.getString("id"),c.getString("kind"),c.getString("title"),c.getString("role"),c.getInt("member_count")));}return result;
+        JSONArray data=(JSONArray)request("GET","/v1/conversations",null,true);List<Models.Conversation> result=new ArrayList<>();for(int i=0;i<data.length();i++){JSONObject c=data.getJSONObject(i);result.add(new Models.Conversation(c.getString("id"),c.getString("kind"),c.getString("title"),c.getString("role"),c.getInt("member_count"),c.getInt("disappearing_seconds")));}return result;
     }
     public List<Models.Message> messages(String conversation,String before,int limit) throws Exception{
         String path="/v1/conversations/"+conversation+"/messages?limit="+Math.max(1,Math.min(limit,100));if(before!=null)path+="&before="+before;

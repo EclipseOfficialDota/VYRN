@@ -10,8 +10,8 @@ public final class Models {
     }
     public static final class Conversation {
         public final String id, kind, title, role;
-        public final int members;
-        public Conversation(String id,String kind,String title,String role,int members) { this.id=id;this.kind=kind;this.title=title;this.role=role;this.members=members; }
+        public final int members,disappearingSeconds;
+        public Conversation(String id,String kind,String title,String role,int members,int disappearingSeconds) { this.id=id;this.kind=kind;this.title=title;this.role=role;this.members=members;this.disappearingSeconds=disappearingSeconds; }
     }
     public static final class Message {
         public final String id, sender, text;
