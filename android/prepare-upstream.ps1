@@ -69,6 +69,11 @@ Edit 'TMessagesProj/src/main/java/org/telegram/messenger/MessagesController.java
  $updates='public boolean processUpdateArray(ArrayList<TLRPC.Update> updates, ArrayList<TLRPC.User> usersArr, ArrayList<TLRPC.Chat> chatsArr, boolean fromGetDifference, int date) {'
  if(!$t.Contains($updates)){throw 'Pinned native update array marker missing'}
  $t=$t.Replace($updates,$updates+"`n        if (!xyz.eclipseofficial.vyrn.compat.VyrnBridge.filterDeletedUpdates(currentAccount, updates)) return false;")
+ $ui='public boolean updateInterfaceWithMessages(long dialogId, ArrayList<MessageObject> messages, int mode) {'
+ $edited='                    ArrayList<MessageObject> arrayList = editingMessagesFinal.valueAt(b);'
+ foreach($guard in @($ui,$edited)){if(!$t.Contains($guard)){throw 'Pinned native UI application marker missing'}}
+ $t=$t.Replace($ui,$ui+"`n        if (!xyz.eclipseofficial.vyrn.compat.VyrnBridge.retainLiveMessages(currentAccount, messages)) return false;")
+ $t=$t.Replace($edited,$edited+"`n                    if (!xyz.eclipseofficial.vyrn.compat.VyrnBridge.retainLiveMessages(currentAccount, arrayList) || arrayList.isEmpty()) continue;")
  $marker='public void setDialogHistoryTTL(long did, int ttl) {'
  if(!$t.Contains($marker)){throw 'Pinned history TTL marker missing'}
  # Commit native cache/UI changes only after the server accepts the setting.
@@ -124,6 +129,24 @@ Edit 'TMessagesProj/src/main/java/org/telegram/ui/Components/ChatActivityEnterVi
  $marker='        editingMessageObject = messageObject;'
  if(!$t.Contains($marker)){throw 'Pinned composer edit marker missing'}
  $t.Replace($marker,$marker+"`n        xyz.eclipseofficial.vyrn.compat.VyrnBridge.captureEdit(currentAccount, messageObject);")
+}
+Edit 'TMessagesProj/src/main/java/org/telegram/messenger/NotificationCenter.java' {
+ param($t)
+ $t=(& git -c "safe.directory=$($upstream.Replace('\','/'))" -C $upstream show "${pin}:TMessagesProj/src/main/java/org/telegram/messenger/NotificationCenter.java") -join "`n"
+ $marker='public void postNotificationNameInternal(int id, boolean allowDuringAnimation, Object... args) {'
+ if(!$t.Contains($marker)){throw 'Pinned native notification dispatch marker missing'}
+ $guard=@'
+
+        if (currentAccount >= 0 && (id == didReceiveNewMessages || id == replaceMessagesObjects || id == messagesDidLoad)) {
+            int index = id == messagesDidLoad ? 2 : 1;
+            if (args.length > index && args[index] instanceof ArrayList) {
+                ArrayList<MessageObject> messages = (ArrayList<MessageObject>) args[index];
+                if (!xyz.eclipseofficial.vyrn.compat.VyrnBridge.retainLiveMessages(currentAccount, messages)) return;
+                if (id != messagesDidLoad && messages.isEmpty()) return;
+            }
+        }
+'@
+ $t.Replace($marker,$marker+$guard)
 }
 Edit 'TMessagesProj/src/main/java/org/telegram/messenger/MessageCustomParamsHelper.java' {
  param($t)

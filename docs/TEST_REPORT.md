@@ -2,6 +2,16 @@
 
 Updated: 2026-10-03. This records performed checks, not planned tests.
 
+## Deletion at final UI application checkpoint — 2026-10-03
+
+- All158 API35 checks pass:106 first,15 offline,37 restart. Evidence: artifacts/android-integration.json with the tested APK hash.
+- Native updateInterfaceWithMessages checks persistent deletion fences before changing dialog state or emitting new messages. The native edit UI loop checks again before changing cached dialog objects. NotificationCenter checks new/edit/history lists at actual dispatch, including re-dispatch after animation deferral; pending negative IDs are retained and an empty history page still completes its load event.
+- Deterministic tests hold the actual UI queue, submit a live new/edit update through the original processor and prove it was not a deletion update at entry. A real authenticated server deletion then reaches the durable native fence while the UI is held. Releasing the UI must produce no matching new/edit message notification and leave no cached row. Both cases pass after real process restart.
+- Independent native messagesDidLoad dispatch tests remove a deleted positive row while retaining a pending negative-ID row and preserving the original requested count. Both initial and restart dispatch checks pass. This is notification-path evidence, not a complete interactive/history-network acceptance test.
+- Intensive extra queue checks were moved into the fresh restart rate-limit window after HTTP429 in the first phase; server rate limits remain unchanged. Later registration failures were traced to an exhausted local test invite. Only that invite, matched by a privately computed digest, was replenished in local PostgreSQL; no token or digest was printed and no production operation occurred.
+- Local instrumentation and normal ARM debug builds pass. All three normal APKs pass signature/package/API/ABI/manifest verification. Backend unchanged; preceding18 PostgreSQL tests/vet remain evidence.
+- Full rendered chat/dialog acceptance, late dialog-list metadata, account-switch and native database recovery/migration tests remain unfinished. Queue-based UI fence reads have not been benchmarked under storage contention; this checkpoint does not establish complete production UI performance or sync acceptance.
+
 ## Confirmed deletion at native update entry — 2026-10-03
 
 - All154 API35 Android checks pass:105 first,15 offline,34 restart. artifacts/android-integration.json records the actual tested APK hash.
