@@ -2,6 +2,15 @@
 
 Updated: 2026-10-03. This records performed checks, not planned tests.
 
+## Original name-editor persistence checkpoint — 2026-10-03
+
+- Instrumentation presents the actual original ChangeNameActivity, edits its real fields and clicks its original Done view. A combined overlong name produces its visible error dialog, re-enables retry and preserves local/server names. A valid save while the vault's network guard is held leaves names unchanged and Done disabled; success arrives only after releasing the guard and receiving the server response.
+- Success preserves the original native user object/photo, sets the optional first/surname flags, writes the real native user cache and saves the new names. The fixture begins with a cached user whose surname flag is absent, so later serialization must include the newly accepted surname.
+- The first real restart found old names in UserConfig despite correct server state and an initially correct native cache. Original saveConfig defers through NotificationCenter.doOnIdle and uses asynchronous preference persistence. The name editor now invokes a narrow, expected-user-guarded serialization/commit under UserConfig's existing lock before reporting success or closing. Commit failure restores the prior local names/flags and explains that the server saved the change but local storage failed. It does not replace the current account with the captured user.
+- All205 API35 checks pass:92 first,34 mutations,13 profile,16 offline,50 restart. All original checks remain; the mutation tests now run in a separate stopped/paced process to avoid exhausting the unchanged production request window. Actual process reopen reads the confirmed first/surname from both UserConfig and native SQLite while the server biography/names remain correct.
+- Final local instrumentation and all three normal ARM Debug APKs build; APK signature/package/API/ABI/manifest verification passes. Backend unchanged; preceding20 PostgreSQL tests/vet remain evidence. Scanner passes118 tracked files.
+- This covers real editor widget/button/error/confirmation paths and process-death persistence. Full visual RTL/theme/tablet/gesture acceptance, adversarial account-switch races, local-disk failure injection, biography/photo workflows and production acceptance remain unfinished.
+
 ## Structured profile and partial-update checkpoint — 2026-10-03
 
 - Migration005 adds nullable first_name with legacy display-name fallback, last_name and about. Self/public profiles, discovery and member snapshots expose actual separate names. Partial profile changes serialize under the user's row lock, preserve omitted fields and validate the combined100-character name and280-character biography. Legacy display_name updates reset the separate surname; explicit avatar_id:null removes the photo.

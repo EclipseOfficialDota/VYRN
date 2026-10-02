@@ -63,7 +63,7 @@ public final class LocalIntegrationRunner extends Instrumentation {
             Intent launch=new Intent(Intent.ACTION_MAIN).setClassName(context,"org.telegram.ui.LaunchActivity").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
             check(startActivitySync(launch)!=null,"foreground_activity");
             waitForIdleSync();
-            if(phase.equals("first")) first(); else if(phase.equals("profile")) profile(); else if(phase.equals("offline")) offline(); else if(phase.equals("restart")) restart(); else throw new IllegalArgumentException();
+            if(phase.equals("first")) first(); else if(phase.equals("mutations")) mutations(); else if(phase.equals("profile")) profile(); else if(phase.equals("offline")) offline(); else if(phase.equals("restart")) restart(); else throw new IllegalArgumentException();
             result.putString("vyrn_result", "passed");
             result.putString("checks", passed.toString());
             result.putInt("process_id", android.os.Process.myPid());
@@ -326,8 +326,6 @@ public final class LocalIntegrationRunner extends Instrumentation {
         check(bridge.repository.vault.isUser(ta.getString("user_id")) && !bridge.repository.vault.isUser(tb.getString("user_id")),"nonblocking_identity_snapshot");passed.put("nonblocking_identity_snapshot");
         verifyNativeSessions(a,b,fixture);
         String createdGroup=createGroupThroughTelegram(a,b,tb.getString("user_id"));
-        verifyNativeTextEdit(a,createdGroup,ta.getString("user_id"));
-        verifyNativeDeletion(a,b,createdGroup,ta.getString("user_id"));
         write("vyrn-test-state.json",new JSONObject().put("native_created_group",createdGroup).put("ui_deleted_random",uiDeletedRandom).put("ui_deleted_server",uiDeletedServer).put("ui_deleted_ordinal",uiDeletedOrdinal).put("ui_committed_random",uiCommittedRandom).put("ui_committed_server",uiCommittedServer).put("token_group",tokenGroup).put("uncertain_group",uncertainGroup).put("uncertain_random",uncertainRandom).put("uncertain_server",uncertainServer).put("group",groupId).put("message",messageId).put("oldest",oldest).put("oldest_ordinal",upper).put("user",ta.getString("user_id")).put("process_id",android.os.Process.myPid()));
         Files.delete(file("vyrn-test-fixture.json").toPath());
 
@@ -387,8 +385,53 @@ public final class LocalIntegrationRunner extends Instrumentation {
         try(IdMap ids=new IdMap(context,2)){for(TLRPC.Message message:((TLRPC.messages_Messages)result.get(30,TimeUnit.SECONDS)).messages)if(ids.remote("message",message.id).equals(server))return new MessageObject(2,message,false,false);}
         throw new AssertionError();
     }
+    private void mutations() throws Exception {
+        JSONObject state=read("vyrn-test-state.json");RestRepository a=repo(9001),b=repo(9002);check(a.me().id.equals(state.getString("user")),"mutations_process_identity");
+        verifyNativeTextEdit(a,state.getString("native_created_group"),state.getString("user"));verifyNativeDeletion(a,b,state.getString("native_created_group"),state.getString("user"));
+    }
     private void profile() throws Exception {
-        RestRepository a=repo(9001),b=repo(9002);check(a.me().id.equals(read("vyrn-test-state.json").getString("user")),"profile_process_identity");verifyNativeProfile(a,b);
+        RestRepository a=repo(9001),b=repo(9002);check(a.me().id.equals(read("vyrn-test-state.json").getString("user")),"profile_process_identity");verifyNativeProfile(a,b);verifyNameEditor(a);
+    }
+    private <T> T onUi(java.util.concurrent.Callable<T> action) throws Exception {
+        CompletableFuture<T> result=new CompletableFuture<>();AndroidUtilities.runOnUIThread(()->{try{result.complete(action.call());}catch(Throwable failure){result.completeExceptionally(failure);}});return result.get(15,TimeUnit.SECONDS);
+    }
+    private Object editorField(org.telegram.ui.ChangeNameActivity editor,String name) throws Exception {java.lang.reflect.Field field=editor.getClass().getDeclaredField(name);field.setAccessible(true);return field.get(editor);}
+    private void enterName(org.telegram.ui.ChangeNameActivity editor,String first,String last) throws Exception {
+        onUi(()->{((android.widget.EditText)editorField(editor,"firstNameField")).setText(first);((android.widget.EditText)editorField(editor,"lastNameField")).setText(last);return true;});
+    }
+    private void verifyNameEditor(RestRepository a) throws Exception {
+        stage="original_name_editor";
+        onUi(()->{UserConfig.getInstance(2).getCurrentUser().flags&=~4;return true;});
+        org.telegram.ui.ChangeNameActivity editor=onUi(()->{
+            org.telegram.ui.ActionBar.BaseFragment parent=(org.telegram.ui.ActionBar.BaseFragment)org.telegram.ui.LaunchActivity.class.getMethod("getSafeLastFragment").invoke(null);
+            org.telegram.ui.ChangeNameActivity opened=new org.telegram.ui.ChangeNameActivity(null);opened.setCurrentAccount(2);
+            check(parent!=null && parent.presentFragment(opened,false,true),"name_editor_presented");return opened;
+        });
+        String before=onUi(()->UserConfig.getInstance(2).getCurrentUser().first_name);
+        enterName(editor,"A".repeat(60),"B".repeat(60));
+        onUi(()->{((android.view.View)editorField(editor,"doneButton")).performClick();return true;});
+        long deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(30);
+        while(!onUi(()->editor.getVisibleDialog()!=null) && System.nanoTime()<deadline)Thread.sleep(50);
+        check(onUi(()->editor.getVisibleDialog()!=null && ((android.view.View)editorField(editor,"doneButton")).isEnabled() && !((Boolean)editorField(editor,"vyrnSaving")) && UserConfig.getInstance(2).getCurrentUser().first_name.equals(before)),"name_editor_failed_save_preserves_local");
+        check(a.me().firstName.equals("نام جدید"),"name_editor_failed_save_preserves_server");
+        onUi(()->{editor.dismissCurrentDialog();return true;});enterName(editor,"نام نهایی","آزمایش");
+        CompletableFuture<Boolean> accepted=new CompletableFuture<>();NotificationCenter.NotificationCenterDelegate observer=(id,account,args)->accepted.complete(true);
+        onUi(()->{NotificationCenter.getInstance(2).addObserver(observer,NotificationCenter.mainUserInfoChanged);return true;});
+        TLRPC.User previous=onUi(()->UserConfig.getInstance(2).getCurrentUser());TLRPC.UserProfilePhoto photo=previous.photo;
+        try{
+            synchronized(VyrnBridge.forAccount(2).repository.vault.guard()){
+                onUi(()->{((android.view.View)editorField(editor,"doneButton")).performClick();check(!((android.view.View)editorField(editor,"doneButton")).isEnabled() && UserConfig.getInstance(2).getCurrentUser().first_name.equals(before),"name_editor_waits_for_server");return true;});
+                check(!accepted.isDone(),"name_editor_no_optimistic_confirmation");
+            }
+            accepted.get(30,TimeUnit.SECONDS);
+        }finally{onUi(()->{NotificationCenter.getInstance(2).removeObserver(observer,NotificationCenter.mainUserInfoChanged);return true;});}
+        check(onUi(()->UserConfig.getInstance(2).getCurrentUser()==previous && previous.first_name.equals("نام نهایی") && previous.last_name.equals("آزمایش") && (previous.flags&6)==6 && previous.photo==photo),"name_editor_confirmed_preserves_attributes");
+        check(a.me().firstName.equals("نام نهایی") && a.me().lastName.equals("آزمایش"),"name_editor_server_confirmed");
+        // A queue barrier precedes a real native-cache read; no test-only storage implementation.
+        CompletableFuture<Boolean> written=new CompletableFuture<>();MessagesStorage storage=MessagesStorage.getInstance(2);storage.getStorageQueue().postRunnable(()->written.complete(true));written.get(10,TimeUnit.SECONDS);
+        TLRPC.User cached=storage.getUserSync(previous.id);check(cached!=null && cached.first_name.equals("نام نهایی") && cached.last_name.equals("آزمایش"),"name_editor_native_user_cache");
+        write("vyrn-profile-ui.json",new JSONObject().put("user",previous.id).put("first","نام نهایی").put("last","آزمایش"));
+        passed.put("name_editor_presented").put("name_editor_failed_save_preserves_local").put("name_editor_failed_save_preserves_server").put("name_editor_waits_for_server").put("name_editor_no_optimistic_confirmation").put("name_editor_confirmed_preserves_attributes").put("name_editor_server_confirmed").put("name_editor_native_user_cache");
     }
     private void verifyNativeProfile(RestRepository a,RestRepository b) throws Exception {
         stage="native_profile";
@@ -842,7 +885,11 @@ public final class LocalIntegrationRunner extends Instrumentation {
         verifyLegacyDeletionCache();
         RestRepository a=repo(9001), b=repo(9002);
         check(a.me().id.equals(state.getString("user")),"persisted_session");
-        Models.User restoredProfile=a.me();check(restoredProfile.firstName.equals("نام جدید") && restoredProfile.lastName.equals("خانوادگی") && restoredProfile.about.equals("دربارهٔ VYRN"),"profile_names_bio_after_restart");passed.put("profile_names_bio_after_restart");
+        Models.User restoredProfile=a.me();JSONObject profile=read("vyrn-profile-ui.json");check(restoredProfile.firstName.equals(profile.getString("first")) && restoredProfile.lastName.equals(profile.getString("last")) && restoredProfile.about.equals("دربارهٔ VYRN"),"profile_names_bio_after_restart");passed.put("profile_names_bio_after_restart");
+        TLRPC.User restoredNative=UserConfig.getInstance(2).getCurrentUser(),restoredCached=MessagesStorage.getInstance(2).getUserSync(profile.getLong("user"));
+        check(restoredNative!=null && restoredNative.id==profile.getLong("user"),"name_editor_restarted_config_identity");
+        check(restoredNative.first_name.equals(profile.getString("first")),"name_editor_restarted_config_first");check(restoredNative.last_name.equals(profile.getString("last")),"name_editor_restarted_config_last");
+        check(restoredCached!=null,"name_editor_restarted_cache_present");check(restoredCached.first_name.equals(profile.getString("first")),"name_editor_restarted_cache_first");check(restoredCached.last_name.equals(profile.getString("last")),"name_editor_restarted_cache_last");passed.put("name_editor_user_config_cache_after_restart");
         stage="restart_durable_cancellation";
         try(OutboxSender sender=new OutboxSender(context,9008,a)){
             check(sender.cancelDurably(state.getString("user"),state.getString("cancelled_client")).get(45,TimeUnit.SECONDS),"cancel_confirmed_after_restart");

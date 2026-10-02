@@ -46,6 +46,28 @@ Edit 'TMessagesProj/src/main/java/org/telegram/ui/LaunchActivity.java' {
  $t=(& git -c "safe.directory=$($upstream.Replace('\','/'))" -C $upstream show "${pin}:TMessagesProj/src/main/java/org/telegram/ui/LaunchActivity.java") -join "`n"
  $t -replace '(?s)private BaseFragment getClientNotActivatedFragment\(\) \{.*?\n    \}', 'private BaseFragment getClientNotActivatedFragment() { return new xyz.eclipseofficial.vyrn.compat.VyrnLoginActivity(); }'
 }
+Edit 'TMessagesProj/src/main/java/org/telegram/messenger/UserConfig.java' {
+ param($t)
+ $t=(& git -c "safe.directory=$($upstream.Replace('\','/'))" -C $upstream show "${pin}:TMessagesProj/src/main/java/org/telegram/messenger/UserConfig.java") -join "`n"
+ $marker='public void saveConfig(boolean withFile) {'
+ if(!$t.Contains($marker)){throw 'Pinned current-user persistence marker missing'}
+ $method=@'
+/** Persist a server-confirmed VYRN profile before reporting success or closing its editor. */
+    public boolean vyrnSaveCurrentUser(TLRPC.User expectedUser) {
+        synchronized (sync) {
+            if (!configLoaded || currentUser == null || currentUser != expectedUser) return false;
+            SerializedData data = new SerializedData();
+            try {
+                currentUser.serializeToStream(data);
+                return getPreferences().edit().putString("user", Base64.encodeToString(data.toByteArray(), Base64.DEFAULT)).commit();
+            } catch (Exception failure) { return false; }
+            finally { data.cleanup(); }
+        }
+    }
+
+'@
+ $t.Replace($marker,$method+"`n    "+$marker)
+}
 Edit 'TMessagesProj/src/main/java/org/telegram/ui/ChangeNameActivity.java' {
  param($t)
  $t=(& git -c "safe.directory=$($upstream.Replace('\','/'))" -C $upstream show "${pin}:TMessagesProj/src/main/java/org/telegram/ui/ChangeNameActivity.java") -join "`n"
@@ -70,8 +92,16 @@ private void saveName() {
             }
             TLRPC.User accepted = (TLRPC.User) response;
             TLRPC.User user = UserConfig.getInstance(currentAccount).getCurrentUser(); if (user == null) return;
+            String previousFirst = user.first_name, previousLast = user.last_name;
+            int previousFlags = user.flags;
             user.first_name = accepted.first_name; user.last_name = accepted.last_name;
-            UserConfig.getInstance(currentAccount).setCurrentUser(user); UserConfig.getInstance(currentAccount).saveConfig(true);
+            user.flags |= 2 | 4;
+            if (!UserConfig.getInstance(currentAccount).vyrnSaveCurrentUser(user)) {
+                user.first_name = previousFirst; user.last_name = previousLast;
+                user.flags = previousFlags;
+                org.telegram.ui.Components.AlertsCreator.showSimpleAlert(this, LocaleController.isRTL ? "نام روی سرور ذخیره شد، اما ذخیرهٔ محلی انجام نشد. دوباره تلاش کنید." : "Your name was saved on the server, but local storage failed. Try again."); return;
+            }
+            if (UserConfig.getInstance(currentAccount).getCurrentUser() != user) return;
             MessagesController.getInstance(currentAccount).putUser(user, false);
             java.util.ArrayList<TLRPC.User> users = new java.util.ArrayList<>(); users.add(user);
             org.telegram.messenger.MessagesStorage.getInstance(currentAccount).putUsersAndChats(users, null, true, true);
