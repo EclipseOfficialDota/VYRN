@@ -83,3 +83,8 @@
 - Read conversation metadata and member roles/join dates in one authorized PostgreSQL statement. Targeted lookup must work for groups outside the bounded500-item list; removed members and outsiders receive the same404.
 - Map that snapshot to the original messages.getFullChat response with native owner/admin/member participant types, actual membership dates, TTL flags and group creation date. Unknown inviter metadata stays unset.
 - Use targeted repository lookup for incoming-event conversation metadata as well. Native role reads/cache are separate from unfinished member-management mutations and permission controls.
+
+## 2026-10-02 — native group rename and partial settings
+- Change only supplied conversation settings under the existing row lock, return effective values into recipient events and preserve omitted fields. A title-only rename must not reset auto-delete or overwrite a concurrent TTL change.
+- Route native editChatTitle through the repository and return a standard updateChat metadata notification alongside the authoritative chat. The original MessagesController processes cache/UI refreshes.
+- Verify queued native cache writes on the storage queue before asserting rename persistence; network callbacks alone do not prove cache completion.

@@ -123,6 +123,14 @@ Date: 2026-10-01. This records performed checks, not planned tests.
 - Native full-group loading and read-only role display are tested through controller entry points, not screen taps. Member-management mutations, native permission controls, group photos and complete screen acceptance remain unfinished.
 - A temporary automatic approval-review usage-limit failure prevented the first debug build; usage availability was rechecked after reset and the same reviewed action completed. No approval bypass was used.
 
+## Native group-rename checkpoint on 2026-10-02
+
+- All89 named Android checks pass. The original MessagesController.changeChatTitle renames the Persian group, native cache verification runs after queued writes, the invited member sees the server title with the one-day auto-delete period preserved, and the new cached title survives real process death.
+- An initial rename check raced the native storage queue. Ordered cache verification and a standard updateChat metadata notification resolved the failure; the complete first/offline/restart suite then passed.
+- Fourteen PostgreSQL API integration tests and go vet pass. New checks cover independent title/TTL patches, invalid/empty patches, ordinary-member denial, explicit zero to disable TTL and five actual concurrent rename/TTL pairs without lost updates.
+- All three ARM Debug APKs rebuilt successfully for the rename checkpoint; the verifier passed signatures, package, API levels, ABI contents and manifest policy. Physical-device installation remains untested.
+- This covers controller-based rename and local persistence. Screen interactions, permission controls, invited-device realtime metadata, other group mutations and complete UI acceptance remain unfinished.
+
 ## External checks
 
 - Dedicated SSH key authentication to port 3939 was rejected. No server commands ran.

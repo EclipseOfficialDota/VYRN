@@ -216,6 +216,10 @@ public final class VyrnBridge {
     public int syncPending() throws Exception {String user=repository.vault.load().optString("user_id");return user.isEmpty()?0:realtime.pending(user);}
     public int syncDead() throws Exception {String user=repository.vault.load().optString("user_id");return user.isEmpty()?0:realtime.dead(user);}
     private synchronized TLObject handle(TLObject request) throws Exception {
+        if(request instanceof TLRPC.TL_messages_editChatTitle){
+            TLRPC.TL_messages_editChatTitle in=(TLRPC.TL_messages_editChatTitle)request;String id=ids.remote("conversation",in.chat_id);repository.renameGroup(id,in.title);
+            Models.ConversationDetails details=repository.conversationDetails(id);TLRPC.TL_updates result=new TLRPC.TL_updates();result.date=(int)(System.currentTimeMillis()/1000);TLRPC.Chat group=chat(details.conversation);group.date=details.createdDate;result.chats.add(group);TL_update.TL_updateChat changed=new TL_update.TL_updateChat();changed.chat_id=in.chat_id;result.updates.add(changed);return result;
+        }
         if(request instanceof TLRPC.TL_messages_getFullChat){
             TLRPC.TL_messages_getFullChat in=(TLRPC.TL_messages_getFullChat)request;Models.ConversationDetails details=repository.conversationDetails(ids.remote("conversation",in.chat_id));
             if(!details.conversation.kind.equals("group"))throw new IllegalArgumentException("group_required");

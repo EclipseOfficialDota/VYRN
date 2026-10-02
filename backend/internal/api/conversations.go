@@ -427,14 +427,14 @@ func (s *Server) removeMember(w http.ResponseWriter, r *http.Request) {
 }
 func (s *Server) updateConversation(w http.ResponseWriter, r *http.Request) {
 	var in struct {
-		Title   string `json:"title"`
-		Seconds int    `json:"disappearing_seconds"`
+		Title   *string `json:"title"`
+		Seconds *int    `json:"disappearing_seconds"`
 	}
 	if !decode(w, r, &in) {
 		return
 	}
 	id := r.PathValue("id")
-	if !validID(id) || utf8.RuneCountInString(in.Title) > 100 || in.Seconds < 0 || in.Seconds > 31536000 {
+	if !validID(id) || in.Title == nil && in.Seconds == nil || in.Title != nil && utf8.RuneCountInString(*in.Title) > 100 || in.Seconds != nil && (*in.Seconds < 0 || *in.Seconds > 31536000) {
 		fail(w, 400, "invalid_request")
 		return
 	}
@@ -450,11 +450,13 @@ func (s *Server) updateConversation(w http.ResponseWriter, r *http.Request) {
 		fail(w, 403, "forbidden")
 		return
 	}
-	if kind == "group" && strings.TrimSpace(in.Title) == "" {
+	if kind == "group" && in.Title != nil && strings.TrimSpace(*in.Title) == "" {
 		fail(w, 400, "invalid_request")
 		return
 	}
-	if _, err = tx.Exec(ctx, `UPDATE conversations SET title=$2,disappearing_seconds=$3 WHERE id=$1`, id, in.Title, in.Seconds); err != nil {
+	var title string
+	var seconds int
+	if err = tx.QueryRow(ctx, `UPDATE conversations SET title=COALESCE($2,title),disappearing_seconds=COALESCE($3,disappearing_seconds) WHERE id=$1 RETURNING title,disappearing_seconds`, id, in.Title, in.Seconds).Scan(&title, &seconds); err != nil {
 		s.internal(w)
 		return
 	}
@@ -463,7 +465,7 @@ func (s *Server) updateConversation(w http.ResponseWriter, r *http.Request) {
 		s.internal(w)
 		return
 	}
-	if emit(ctx, tx, users, "conversation.updated", map[string]any{"id": id, "title": in.Title, "disappearing_seconds": in.Seconds}) != nil || tx.Commit(ctx) != nil {
+	if emit(ctx, tx, users, "conversation.updated", map[string]any{"id": id, "title": title, "disappearing_seconds": seconds}) != nil || tx.Commit(ctx) != nil {
 		s.internal(w)
 		return
 	}
