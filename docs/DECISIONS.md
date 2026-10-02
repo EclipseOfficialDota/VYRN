@@ -104,3 +104,8 @@
 - Update loaded full-group participants before standard TTL processing can serialize old members. Membership updates use the standard participant notification without requesting the same full snapshot again.
 - Telegram creator participant serialization has no join-date field. Verify owner cache date zero and exact server dates for member/admin classes; do not invent a custom wire format.
 - Current-account removal/stale authorization events, native mutation UI/permissions, absent full-cache recovery and account-switch races remain unfinished.
+
+## 2026-10-02 — invitations preserve existing roles
+- Native Telegram promotion can add a user before editing their admin role. Add invitations must not reuse an upsert that changes an existing role to member.
+- The member endpoint accepts preserve_existing=true. Authorization and the conversation row lock apply before the existing-member no-op; explicit role updates retain existing behavior. This prevents a concurrent invitation from undoing promotion.
+- Fifteen API tests and go vet pass, including five actual concurrent invite/promotion pairs, owner preservation, member denial and admin invitation of a new member. Native mutation wiring and running Core replacement remain pending.

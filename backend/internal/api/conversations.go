@@ -316,8 +316,9 @@ func (s *Server) listMembers(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) addMember(w http.ResponseWriter, r *http.Request) {
 	var in struct {
-		User string `json:"user_id"`
-		Role string `json:"role"`
+		User             string `json:"user_id"`
+		Role             string `json:"role"`
+		PreserveExisting bool   `json:"preserve_existing"`
 	}
 	if !decode(w, r, &in) {
 		return
@@ -346,6 +347,10 @@ func (s *Server) addMember(w http.ResponseWriter, r *http.Request) {
 	var targetRole string
 	err = tx.QueryRow(ctx, `SELECT role FROM members WHERE conversation_id=$1 AND user_id=$2`, id, in.User).Scan(&targetRole)
 	if err == nil {
+		if in.PreserveExisting {
+			w.WriteHeader(204)
+			return
+		}
 		if role != "owner" || targetRole == "owner" {
 			fail(w, 403, "forbidden")
 			return

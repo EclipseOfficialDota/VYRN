@@ -153,6 +153,12 @@ Date: 2026-10-01. This records performed checks, not planned tests.
 - Earlier name/TTL, outbox, cancellation and restart regressions pass. Backend unchanged; fourteen API tests and go vet retain their preceding verified checkpoint. All three normal ARM Debug APKs built successfully; signature, package, API, ABI and manifest policy verification pass.
 - This is one receiving emulator with authenticated repository mutations. Current-account removal, stale events after authorization loss, native member-management screens/permissions and complete two-device UI acceptance remain untested.
 
+## Invitation role preservation checkpoint — 2026-10-02
+
+- All15 PostgreSQL API integration tests and go vet pass. New coverage verifies authorized existing-member invitation as a no-op, owner preservation, ordinary-member denial, admin invitation of a new member and five actual concurrent HTTP invite/promotion pairs without losing admin status.
+- preserve_existing is evaluated under the same conversation row lock used by role updates. Existing explicit role changes retain their behavior.
+- No Android code changed at this checkpoint. Its latest evidence remains103 named emulator checks and three verified normal ARM Debug APKs from8d02008. The running local Core has not yet been replaced; native management controller wiring remains unfinished.
+
 ## External checks
 
 - Dedicated SSH key authentication to port 3939 was rejected. No server commands ran.
