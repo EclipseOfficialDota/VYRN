@@ -48,8 +48,11 @@ Updated 2026-10-02. Development is unfinished. No production release or VPS depl
 - RTK absent; direct commands used. Some network tools need Windows system proxy explicitly, preserving TLS validation. Docker/ADB may need normal-account escalation. Do not alter global security settings.
 
 ## Unfinished implementation, separate from external gates
+
+Latest checkpoint: Android outbox schema3 persists cancellation intent. All47 named emulator checks pass, including offline cancellation with process death, permanent delayed-retry rejection, committed-message reconciliation, cancellation during a send claim and populated schema2 upgrade. The local WSL Core was rebuilt/restarted with migration004 and readiness passed. PostgreSQL remains loopback-only. Telegram request-token wiring is still unfinished.
+
 1. Android discovery, group creation/settings/members, profile/session/recovery, media/voice, edit/delete/reactions/drafts/receipts. Current adapter supports login, dialogs/history/group text/typing; other upstream requests fail unavailable.
-2. Wire cancellation from Telegram request tokens and resolve uncertain sends against server state; complete Telegram mappings for every durable event, crash recovery, background scheduling and full process-restart/multi-device UI tests. Outbox claims, retention and local cancellation safety pass; foreground group-text outbox/reconnect and incoming-message WebSocket tests are not complete client sync.
+2. Wire cancellation from Telegram request tokens; complete Telegram mappings for every durable event, crash recovery, background scheduling and full process-restart/multi-device UI tests. Internal durable cancellation now reconciles uncertain sends against server state. Outbox claims, retention and cancellation safety pass; foreground group-text outbox/reconnect and incoming-message WebSocket tests are not complete client sync.
 3. Reviewed Signal library, device/prekey API, identity verification/rotation and adversarial crypto tests. Private chat is not ready; plaintext rejected. Envelope schema is not E2EE completion.
 4. Background sync/internal push, notifications, Android signed update/download/install and remote config.
 5. Admin operational controls/metrics, per-admin TOTP, pagination/load/security review, full branding/source audit, media-inclusive external backup proof.

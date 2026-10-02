@@ -29,7 +29,7 @@
 - Persist group-text sends before network access. Bind entries and HTTP authentication to the originating user, retain stable client IDs, preserve per-conversation queue order, and persist acknowledgements before notifying the Telegram adapter.
 - Share the token-vault lock across repository instances so rotating refresh tokens cannot be reused concurrently and queued sends cannot switch identities mid-request.
 - Retry transient failures with a bounded exponential backoff and jitter. Keep failures available for explicit retry; remove accepted payload text from the outbox.
-- Pending cancellation/reconciliation remains a mandatory acceptance gap, not an optional follow-up.
+- Request-token cancellation in the Telegram UI remains a mandatory acceptance gap. Durable store/sender cancellation and server reconciliation are tested separately below.
 
 ## 2026-10-02 — incoming foreground synchronization
 - Authenticate WebSockets with the bearer header and keep credentials out of URLs. Persist raw events and the resume cursor atomically before acknowledging a batch.
@@ -41,3 +41,9 @@
 - Report local cancellation only when no sender has ever claimed the row. Preserve uncertain sends for server reconciliation, including legacy rows whose attempt history cannot be proved.
 - Keep accepted acknowledgement records for seven days and cancelled records for one day. Preserve pending and failed payloads for explicit user resolution.
 - Resolve uncertain cancellations transactionally on the server. Share a sender/client-ID advisory lock between send and cancel; permanently fence absent sends and return the original message ID for committed sends. Retain fences for delayed offline replays; deleting a committed message remains an explicit separate operation.
+
+## 2026-10-02 — durable Android cancellation
+- Persist cancellation intent before scheduling network reconciliation. Keep an active send claim exclusive; a failed send with newly recorded cancellation retries cancellation instead of its original payload.
+- Prioritize cancellation intents, preserve them through bounded retries and process restart, and prevent explicit resend from reviving a cancelled client ID.
+- Confirm cancellation only after local proof of never-attempted delivery or a server cancellation fence. Reconcile committed sends through an account-bound message fetch and persist the acknowledgement before completing callbacks.
+- Keep Telegram request-token wiring and interactive UI acceptance open; internal sender tests do not establish that user flow.

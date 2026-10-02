@@ -65,6 +65,7 @@ public final class RestRepository implements Models.Repository {
         return new Models.Message(m.getString("id"),m.getString("sender_id"),encrypted?"":m.getJSONObject("payload").optString("text"),(int)Instant.parse(m.getString("created_at")).getEpochSecond(),ordinal,encrypted,!m.isNull("deleted_at"));
     }
     public Models.Message message(String id) throws Exception {return message((JSONObject)request("GET","/v1/messages/"+id,null,true));}
+    public Models.Message messageForUser(String user,String id) throws Exception {return message((JSONObject)requestForUser(user,"GET","/v1/messages/"+id,null,true));}
     public String send(String conversation,String clientId,String text) throws Exception{
         JSONObject input=new JSONObject().put("client_id",clientId).put("payload",new JSONObject().put("text",text)).put("encrypted",false);
         return ((JSONObject)request("POST","/v1/conversations/"+conversation+"/messages",input,true)).getString("id");

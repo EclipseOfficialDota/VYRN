@@ -18,15 +18,17 @@ public final class OutboxStore extends SQLiteOpenHelper {
     public static final class Entry {
         public String user, client, conversation, text, server;
         public int state, attempts, ordinal, date, error;
+        public boolean cancellation;
     }
-    public OutboxStore(Context context,int account){super(context,"vyrn_outbox_"+account+".db",null,2);}
+    public OutboxStore(Context context,int account){super(context,"vyrn_outbox_"+account+".db",null,3);}
     @Override public void onCreate(SQLiteDatabase db){
         db.execSQL("CREATE TABLE outbox(queue_id INTEGER PRIMARY KEY AUTOINCREMENT,user_id TEXT NOT NULL,client_id TEXT NOT NULL,conversation_id TEXT NOT NULL,body TEXT,fingerprint TEXT NOT NULL,state INTEGER NOT NULL DEFAULT 0,attempts INTEGER NOT NULL DEFAULT 0,attempted INTEGER NOT NULL DEFAULT 0,next_at INTEGER NOT NULL DEFAULT 0,server_id TEXT,ordinal INTEGER,date INTEGER,error INTEGER NOT NULL DEFAULT 0,created_at INTEGER NOT NULL,completed_at INTEGER,UNIQUE(user_id,client_id))");
         db.execSQL("CREATE INDEX outbox_ready ON outbox(user_id,state,next_at,created_at)");
+        db.execSQL("ALTER TABLE outbox ADD COLUMN cancel_requested INTEGER NOT NULL DEFAULT 0");
     }
-    @Override public void onUpgrade(SQLiteDatabase db,int oldVersion,int newVersion){if(oldVersion<2){db.execSQL("ALTER TABLE outbox ADD COLUMN completed_at INTEGER");db.execSQL("ALTER TABLE outbox ADD COLUMN attempted INTEGER NOT NULL DEFAULT 1");db.execSQL("UPDATE outbox SET completed_at=created_at WHERE state=1");}}
-    private Entry entry(Cursor c){Entry e=new Entry();e.user=c.getString(0);e.client=c.getString(1);e.conversation=c.getString(2);e.text=c.getString(3);e.state=c.getInt(4);e.attempts=c.getInt(5);e.server=c.getString(6);e.ordinal=c.getInt(7);e.date=c.getInt(8);e.error=c.getInt(9);return e;}
-    private static final String COLUMNS="user_id,client_id,conversation_id,body,state,attempts,server_id,ordinal,date,error";
+    @Override public void onUpgrade(SQLiteDatabase db,int oldVersion,int newVersion){if(oldVersion<2){db.execSQL("ALTER TABLE outbox ADD COLUMN completed_at INTEGER");db.execSQL("ALTER TABLE outbox ADD COLUMN attempted INTEGER NOT NULL DEFAULT 1");db.execSQL("UPDATE outbox SET completed_at=created_at WHERE state=1");}if(oldVersion<3)db.execSQL("ALTER TABLE outbox ADD COLUMN cancel_requested INTEGER NOT NULL DEFAULT 0");}
+    private Entry entry(Cursor c){Entry e=new Entry();e.user=c.getString(0);e.client=c.getString(1);e.conversation=c.getString(2);e.text=c.getString(3);e.state=c.getInt(4);e.attempts=c.getInt(5);e.server=c.getString(6);e.ordinal=c.getInt(7);e.date=c.getInt(8);e.error=c.getInt(9);e.cancellation=c.getInt(10)!=0;return e;}
+    private static final String COLUMNS="user_id,client_id,conversation_id,body,state,attempts,server_id,ordinal,date,error,cancel_requested";
     public synchronized Entry get(String user,String client){try(Cursor c=getReadableDatabase().rawQuery("SELECT "+COLUMNS+" FROM outbox WHERE user_id=? AND client_id=?",new String[]{user,client})){return c.moveToFirst()?entry(c):null;}}
     public synchronized Entry enqueue(String user,String client,String conversation,String text) throws Exception {
         java.util.UUID.fromString(user);java.util.UUID.fromString(client);java.util.UUID.fromString(conversation);
@@ -34,10 +36,11 @@ public final class OutboxStore extends SQLiteOpenHelper {
         String fingerprint=Base64.encodeToString(MessageDigest.getInstance("SHA-256").digest((conversation+"\0"+text).getBytes(StandardCharsets.UTF_8)),Base64.NO_WRAP);
         SQLiteDatabase db=getWritableDatabase();db.beginTransaction();
         try {
-            try(Cursor c=db.rawQuery("SELECT fingerprint,state FROM outbox WHERE user_id=? AND client_id=?",new String[]{user,client})){
+            try(Cursor c=db.rawQuery("SELECT fingerprint,state,cancel_requested FROM outbox WHERE user_id=? AND client_id=?",new String[]{user,client})){
                 if(c.moveToFirst()){
                     if(!fingerprint.equals(c.getString(0)))throw new IllegalStateException("idempotency_conflict");
-                    if(c.getInt(1)==FAILED || c.getInt(1)==CANCELLED){ContentValues v=new ContentValues();v.put("state",QUEUED);v.put("body",text);v.put("attempts",0);v.put("next_at",0);v.put("error",0);v.putNull("completed_at");db.update("outbox",v,"user_id=? AND client_id=?",new String[]{user,client});}
+                    if(c.getInt(2)!=0 || c.getInt(1)==CANCELLED)throw new IllegalStateException("send_cancelled_or_pending");
+                    if(c.getInt(1)==FAILED){ContentValues v=new ContentValues();v.put("state",QUEUED);v.put("body",text);v.put("attempts",0);v.put("next_at",0);v.put("error",0);v.putNull("completed_at");db.update("outbox",v,"user_id=? AND client_id=?",new String[]{user,client});}
                 }else{
                     if(DatabaseUtils.longForQuery(db,"SELECT count(*) FROM outbox WHERE user_id=? AND state IN (0,2,3)",new String[]{user})>=1000)throw new IllegalStateException("outbox_full");
                     ContentValues v=new ContentValues();v.put("user_id",user);v.put("client_id",client);v.put("conversation_id",conversation);v.put("body",text);v.put("fingerprint",fingerprint);v.put("created_at",System.currentTimeMillis());db.insertOrThrow("outbox",null,v);
@@ -50,16 +53,19 @@ public final class OutboxStore extends SQLiteOpenHelper {
     public synchronized void recover(){SQLiteDatabase db=getWritableDatabase();ContentValues v=new ContentValues();v.put("state",QUEUED);v.put("next_at",0);db.update("outbox",v,"state=?",new String[]{Integer.toString(SENDING)});prune(db);}
     public synchronized Entry next(String user){
         SQLiteDatabase db=getWritableDatabase();db.beginTransaction();
-        try(Cursor c=db.rawQuery("SELECT "+COLUMNS+" FROM outbox q WHERE user_id=? AND state=0 AND next_at<=? AND NOT EXISTS(SELECT 1 FROM outbox earlier WHERE earlier.user_id=q.user_id AND earlier.conversation_id=q.conversation_id AND earlier.state IN (0,3) AND earlier.queue_id<q.queue_id) ORDER BY queue_id LIMIT 1",new String[]{user,Long.toString(System.currentTimeMillis())})){
+        try(Cursor c=db.rawQuery("SELECT "+COLUMNS+" FROM outbox q WHERE user_id=? AND state=0 AND next_at<=? AND (cancel_requested=1 OR NOT EXISTS(SELECT 1 FROM outbox earlier WHERE earlier.user_id=q.user_id AND earlier.conversation_id=q.conversation_id AND earlier.state IN (0,3) AND earlier.queue_id<q.queue_id)) ORDER BY cancel_requested DESC,queue_id LIMIT 1",new String[]{user,Long.toString(System.currentTimeMillis())})){
             if(!c.moveToFirst()){db.setTransactionSuccessful();return null;}Entry result=entry(c);ContentValues claimed=new ContentValues();claimed.put("state",SENDING);claimed.put("attempted",1);
             if(db.update("outbox",claimed,"user_id=? AND client_id=? AND state=?",new String[]{user,result.client,Integer.toString(QUEUED)})!=1)throw new IllegalStateException("outbox_claim_failed");result.state=SENDING;db.setTransactionSuccessful();return result;
         }finally{db.endTransaction();}
     }
     public synchronized void accepted(Entry entry,Models.Message result){
-        ContentValues v=new ContentValues();v.put("state",SENT);v.putNull("body");v.put("server_id",result.id);v.put("ordinal",result.ordinal);v.put("date",result.date);v.put("error",0);v.put("completed_at",System.currentTimeMillis());
+        ContentValues v=new ContentValues();v.put("state",SENT);v.put("cancel_requested",0);v.putNull("body");v.put("server_id",result.id);v.put("ordinal",result.ordinal);v.put("date",result.date);v.put("error",0);v.put("completed_at",System.currentTimeMillis());
         if(getWritableDatabase().update("outbox",v,"user_id=? AND client_id=?",new String[]{entry.user,entry.client})!=1)throw new IllegalStateException("outbox_missing");
     }
     public synchronized boolean failed(Entry entry,int status,boolean retryable){
+        Entry current=get(entry.user,entry.client);
+        // A cancellation recorded during an HTTP send takes precedence over its retry.
+        if(current!=null && current.cancellation && !entry.cancellation){ContentValues v=new ContentValues();v.put("state",QUEUED);v.put("attempts",0);v.put("next_at",0);getWritableDatabase().update("outbox",v,"user_id=? AND client_id=?",new String[]{entry.user,entry.client});return true;}
         int attempts=entry.attempts+1;boolean retry=retryable && attempts<8;
         long delay=Math.min(60000L,1000L<<Math.min(attempts-1,6))+java.util.concurrent.ThreadLocalRandom.current().nextInt(251);
         ContentValues v=new ContentValues();v.put("attempts",attempts);v.put("state",retry?QUEUED:FAILED);v.put("error",status);v.put("next_at",System.currentTimeMillis()+delay);
@@ -69,5 +75,11 @@ public final class OutboxStore extends SQLiteOpenHelper {
     /** Only an entry never claimed by a sender can be proven unsent locally. */
     public synchronized boolean cancel(String user,String client){ContentValues v=new ContentValues();v.put("state",CANCELLED);v.putNull("body");v.put("completed_at",System.currentTimeMillis());return getWritableDatabase().update("outbox",v,"user_id=? AND client_id=? AND state=? AND attempted=0",new String[]{user,client,Integer.toString(QUEUED)})==1;}
     public synchronized void prune(){prune(getWritableDatabase());}
+    public synchronized Entry requestCancellation(String user,String client){
+        Entry entry=get(user,client);if(entry==null)throw new IllegalStateException("outbox_missing");if(entry.state==CANCELLED)return entry;
+        ContentValues v=new ContentValues();v.put("cancel_requested",1);if(entry.state!=SENDING)v.put("state",QUEUED);v.put("attempts",0);v.put("next_at",0);v.putNull("completed_at");
+        getWritableDatabase().update("outbox",v,"user_id=? AND client_id=?",new String[]{user,client});return get(user,client);
+    }
+    public synchronized void cancelled(Entry entry){ContentValues v=new ContentValues();v.put("state",CANCELLED);v.put("cancel_requested",0);v.putNull("body");v.put("completed_at",System.currentTimeMillis());if(getWritableDatabase().update("outbox",v,"user_id=? AND client_id=?",new String[]{entry.user,entry.client})!=1)throw new IllegalStateException("outbox_missing");}
     private void prune(SQLiteDatabase db){long now=System.currentTimeMillis();db.delete("outbox","state=? AND completed_at<?",new String[]{Integer.toString(SENT),Long.toString(now-TimeUnit.DAYS.toMillis(7))});db.delete("outbox","state=? AND completed_at<?",new String[]{Integer.toString(CANCELLED),Long.toString(now-TimeUnit.DAYS.toMillis(1))});}
 }

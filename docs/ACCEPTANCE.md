@@ -1,6 +1,6 @@
 # Acceptance matrix
 
-Updated 2026-10-01. A route existing or a build compiling does **not** establish end-to-end completion.
+Updated 2026-10-02. A route existing or a build compiling does **not** establish end-to-end completion.
 
 | Requirement | Current evidence | Remaining work |
 |---|---|---|
@@ -14,7 +14,7 @@ Updated 2026-10-01. A route existing or a build compiling does **not** establish
 | Auth and multi-session | Backend invite/normalization/device-limit/reuse/recovery tests; Android Keystore, refresh and process-restart integration pass | Android account/session management UI and full multi-device flows |
 | Group messages | REST permissions/mutations and Android repository/Telegram dialog adapter tests; server ordinals and pagination verified | Android wiring of all features, legacy debug UI-cache upgrade and large-conversation tests |
 | E2EE private chat | Plaintext fails closed | Reviewed Signal library integration, prekeys, ratchets, verification, device changes, adversarial tests |
-| Sync | Backend cursor/reconnect tests; Android group-text outbox survives real disconnect/process restart, preserves order and deduplicates lost acknowledgements; exclusive send claims, safe internal unsent cancellation, populated schema upgrade and retention tested; foreground WebSocket persists incoming batches/cursor before ack and adapts an incoming message | Telegram cancellation wiring and uncertain-cancel reconciliation; all event mappings, crash/background recovery, queued media, full multi-device/UI tests |
+| Sync | Backend cursor/reconnect tests; Android group-text outbox survives real disconnect/process restart, preserves order and deduplicates lost acknowledgements; exclusive send claims, durable cancellation with server reconciliation, populated schema upgrades and retention tested; foreground WebSocket persists incoming batches/cursor before ack and adapts an incoming message; 47 named Android checks pass | Telegram request-token cancellation wiring; all event mappings, crash/background recovery, queued media, full multi-device/UI tests |
 | Media/voice | Authenticated upload/download and low-disk tests | Android media/voice UI, encryption and lifecycle tests |
 | Profile/presence/block | Backend endpoints and websocket activity timestamps | Complete privacy controls and Android integration |
 | Reactions/receipts | Mutations/read models and monotonic read-state integration tests pass | Android UI rendering |

@@ -28,6 +28,7 @@ import org.telegram.tgnet.TLRPC;
 import xyz.eclipseofficial.vyrn.compat.VyrnBridge;
 import xyz.eclipseofficial.vyrn.data.IdMap;
 import xyz.eclipseofficial.vyrn.data.OutboxStore;
+import xyz.eclipseofficial.vyrn.data.OutboxSender;
 import xyz.eclipseofficial.vyrn.data.RestRepository;
 import xyz.eclipseofficial.vyrn.data.TokenVault;
 import xyz.eclipseofficial.vyrn.domain.Models;
@@ -180,7 +181,7 @@ public final class LocalIntegrationRunner extends Instrumentation {
         }
         context.deleteDatabase("vyrn_outbox_9009.db");
         stage="outbox_claim_cancel_recovery";
-        String fixtureUser=ta.getString("user_id"),cancelledClient=UUID.randomUUID().toString(),claimedClient=UUID.randomUUID().toString();
+        String fixtureUser=ta.getString("user_id"),cancelledClient=UUID.randomUUID().toString(),claimedClient=UUID.randomUUID().toString(),cancelInFlight=UUID.randomUUID().toString();
         try(OutboxStore store=new OutboxStore(context,9009)){
             store.enqueue(fixtureUser,cancelledClient,groupId,"Never sent");
             check(!store.cancel(tb.getString("user_id"),cancelledClient),"cancel_account_isolation");
@@ -201,9 +202,21 @@ public final class LocalIntegrationRunner extends Instrumentation {
             store.getWritableDatabase().execSQL("UPDATE outbox SET completed_at=? WHERE user_id=? AND client_id=?",new Object[]{System.currentTimeMillis()-TimeUnit.DAYS.toMillis(8),fixtureUser,claimedClient});
             store.prune();check(store.get(fixtureUser,claimedClient)==null,"sent_retention");
             check(store.get(fixtureUser,cancelledClient)!=null,"recent_cancel_retained");
+            store.enqueue(fixtureUser,cancelInFlight,groupId,"Cancellation race");
+            OutboxStore.Entry sending=store.next(fixtureUser);
+            check(store.requestCancellation(fixtureUser,cancelInFlight).state==OutboxStore.SENDING && store.next(fixtureUser)==null,"cancel_preserves_exclusive_claim");
+            check(store.failed(sending,403,false),"cancel_supersedes_send_failure");
+        }
+        try(OutboxStore store=new OutboxStore(context,9009)){
+            store.recover();OutboxStore.Entry pendingCancel=store.next(fixtureUser);
+            check(pendingCancel.client.equals(cancelInFlight) && pendingCancel.cancellation,"cancel_intent_survives_reopen");
+            store.cancelled(pendingCancel);
+            boolean blocked=false;try{store.enqueue(fixtureUser,cancelInFlight,groupId,"Cancellation race");}catch(IllegalStateException expected){blocked=true;}
+            check(blocked,"cancelled_client_not_revived");
         }
         context.deleteDatabase("vyrn_outbox_9009.db");
         passed.put("exclusive_outbox_claim").put("unsent_cancel_safety").put("outbox_claim_recovery").put("outbox_retention");
+        passed.put("cancel_during_send_preserves_claim").put("cancel_supersedes_send_failure").put("cancel_intent_survives_reopen").put("cancelled_client_not_revived");
         stage="outbox_populated_upgrade";
         String legacyClient=UUID.randomUUID().toString();
         try(android.database.sqlite.SQLiteDatabase legacy=context.openOrCreateDatabase("vyrn_outbox_9009.db",Context.MODE_PRIVATE,null)){
@@ -215,7 +228,16 @@ public final class LocalIntegrationRunner extends Instrumentation {
             check(upgraded.get(fixtureUser,legacyClient).text.equals("Legacy pending"),"upgrade_preserves_pending");
             check(!upgraded.cancel(fixtureUser,legacyClient),"legacy_uncertainty_preserved");
             check(upgraded.next(fixtureUser).state==OutboxStore.SENDING,"upgraded_queue_claimable");
+            // Model a populated schema2 database independently of the schema1 migration.
+            upgraded.getWritableDatabase().execSQL("ALTER TABLE outbox DROP COLUMN cancel_requested");
+            upgraded.getWritableDatabase().setVersion(2);
         }
+        try(OutboxStore upgraded=new OutboxStore(context,9009)){
+            OutboxStore.Entry legacy=upgraded.get(fixtureUser,legacyClient);
+            check(legacy.state==OutboxStore.SENDING && !legacy.cancellation && legacy.text.equals("Legacy pending"),"schema2_upgrade_preserves_claim");
+            check(upgraded.requestCancellation(fixtureUser,legacyClient).cancellation,"schema2_cancel_intent_available");
+        }
+        passed.put("populated_schema2_cancel_upgrade");
         context.deleteDatabase("vyrn_outbox_9009.db");passed.put("populated_outbox_upgrade");
         String uncertainGroup=((JSONObject)a.request("POST","/v1/conversations",new JSONObject().put("kind","group").put("title","Lost acknowledgement").put("members",new JSONArray().put(tb.getString("user_id"))),true)).getString("id");
         long uncertainRandom=UUID.randomUUID().getMostSignificantBits();String uncertainClient=clientId(ta.getString("user_id"),uncertainRandom);
@@ -272,6 +294,8 @@ public final class LocalIntegrationRunner extends Instrumentation {
         check(!one.isDone() && !two.isDone(),"offline_no_false_ack");
         try(OutboxStore store=new OutboxStore(context,2)){
             OutboxStore.Entry pending=store.get(state.getString("user"),clientId(state.getString("user"),first));
+            long retryDeadline=System.currentTimeMillis()+20000;
+            while((pending==null || pending.state!=OutboxStore.QUEUED || pending.attempts==0) && System.currentTimeMillis()<retryDeadline){Thread.sleep(100);pending=store.get(state.getString("user"),clientId(state.getString("user"),first));}
             check(pending!=null && pending.state==OutboxStore.QUEUED && pending.attempts>0,"outbox_persisted_before_retry");
             OutboxStore.Entry later=store.get(state.getString("user"),clientId(state.getString("user"),second));
             check(later!=null && later.attempts==0,"outbox_conversation_order");
@@ -280,6 +304,25 @@ public final class LocalIntegrationRunner extends Instrumentation {
             check(conflict,"outbox_idempotency_conflict");
         }
         passed.put("offline_UI_queue").put("no_premature_ack").put("bounded_backoff_started").put("conversation_send_order").put("account_isolation").put("retry_payload_immutable");
+        stage="offline_durable_cancellation";
+        String cancelled=UUID.randomUUID().toString(),committed=clientId(state.getString("user"),state.getLong("uncertain_random"));
+        try(OutboxStore store=new OutboxStore(context,9008)){
+            store.enqueue(state.getString("user"),cancelled,state.getString("uncertain_group"),"Must never appear");
+            store.next(state.getString("user")); // Model an attempted send with no known acknowledgement.
+        }
+        try(OutboxSender sender=new OutboxSender(context,9008,repo(9001))){
+            CompletableFuture<Boolean> cancellation=sender.cancelDurably(state.getString("user"),cancelled);
+            Thread.sleep(2500);check(!cancellation.isDone(),"offline_cancel_no_false_confirmation");
+        }
+        try(OutboxStore store=new OutboxStore(context,9008)){
+            check(store.get(state.getString("user"),cancelled).cancellation,"cancel_intent_persisted");
+            store.enqueue(state.getString("user"),committed,state.getString("uncertain_group"),"Lost acknowledgement");
+            // The server-committed fixture represents a claimed send whose response was lost.
+            store.getWritableDatabase().execSQL("UPDATE outbox SET attempted=1,state=? WHERE user_id=? AND client_id=?",new Object[]{OutboxStore.SENDING,state.getString("user"),committed});
+            store.requestCancellation(state.getString("user"),committed);
+        }
+        state.put("cancelled_client",cancelled).put("committed_cancel_client",committed);write("vyrn-test-state.json",state);
+        passed.put("offline_cancel_no_false_confirmation").put("durable_cancel_intent");
     }
 
     private void restart() throws Exception {
@@ -288,6 +331,19 @@ public final class LocalIntegrationRunner extends Instrumentation {
         check(state.getInt("process_id")!=android.os.Process.myPid(),"new_process");
         RestRepository a=repo(9001), b=repo(9002);
         check(a.me().id.equals(state.getString("user")),"persisted_session");
+        stage="restart_durable_cancellation";
+        try(OutboxSender sender=new OutboxSender(context,9008,a)){
+            check(sender.cancelDurably(state.getString("user"),state.getString("cancelled_client")).get(45,TimeUnit.SECONDS),"cancel_confirmed_after_restart");
+            check(!sender.cancelDurably(state.getString("user"),state.getString("committed_cancel_client")).get(45,TimeUnit.SECONDS),"committed_send_not_falsely_cancelled");
+        }
+        try(OutboxStore store=new OutboxStore(context,9008)){
+            check(store.get(state.getString("user"),state.getString("cancelled_client")).state==OutboxStore.CANCELLED,"confirmed_cancel_saved");
+            OutboxStore.Entry committed=store.get(state.getString("user"),state.getString("committed_cancel_client"));
+            check(committed.state==OutboxStore.SENT && committed.server.equals(state.getString("uncertain_server")) && committed.text==null,"committed_cancel_reconciled");
+        }
+        boolean fenced=false;try{a.send(state.getString("uncertain_group"),state.getString("cancelled_client"),"Must never appear");}catch(RestRepository.ApiException expected){fenced=expected.status==409;}
+        check(fenced,"cancel_prevents_delayed_retry");
+        passed.put("cancel_recovery_after_process_death").put("committed_cancel_reconciliation").put("cancelled_send_retry_fenced");
         stage="restart_outbox_reconnect";
         TLRPC.TL_updateShortSentMessage first=(TLRPC.TL_updateShortSentMessage)queueThroughUI(state,state.getLong("outbox_first"),"Offline one").get(45,TimeUnit.SECONDS);
         TLRPC.TL_updateShortSentMessage second=(TLRPC.TL_updateShortSentMessage)queueThroughUI(state,state.getLong("outbox_second"),"Offline two").get(45,TimeUnit.SECONDS);

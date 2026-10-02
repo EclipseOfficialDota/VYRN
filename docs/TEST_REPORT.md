@@ -67,6 +67,14 @@ Date: 2026-10-01. This records performed checks, not planned tests.
 - Twenty concurrent send/cancel races each yielded either no message with a committed cancellation fence, or one message with its exact ID returned by cancellation. All existing auth, media, permissions, sync and migration tests also pass; Go package tests and vet pass.
 - Android request-token wiring and durable cancellation-intent reconciliation are still outstanding. Cancellation fences have no expiry so old offline replays stay rejected; operational storage limits remain to be added.
 
+## Durable Android cancellation checkpoint on 2026-10-02
+
+- 47 named checks pass across the actual first/offline/restart emulator processes. The scoped HTTPS APK persists cancellation intent while ADB forwarding is removed, survives process death, confirms cancellation after reconnection and rejects a delayed send retry with HTTP409.
+- A server-committed send with a lost local acknowledgement reconciles to its original message ID and is not falsely reported cancelled. Confirmed cancellation and committed acknowledgements remove the retained payload.
+- Store checks cover cancellation during an exclusive send claim, cancellation superseding a failed send, intent persistence across database reopen, refusal to revive cancelled IDs and populated schema2-to3 migration. Existing schema1 upgrade, ordering, retry, TLS, WebSocket and auth checks also pass.
+- The offline retry assertion now waits within a bounded deadline for the durable retry state, instead of assuming a fixed six-second network failure. The committed fixture explicitly records its attempted claim.
+- Telegram request-token cancellation wiring and the interactive cancel-message flow remain unverified. These checks exercise the store/sender and real server endpoint.
+
 ## External checks
 
 - Dedicated SSH key authentication to port 3939 was rejected. No server commands ran.
