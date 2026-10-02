@@ -2,6 +2,13 @@
 
 Updated: 2026-10-03. This records performed checks, not planned tests.
 
+## Native session management checkpoint — 2026-10-03
+
+- Android dispatch maps original account.getAuthorizations and account.resetAuthorization to the authenticated VYRN session API. The original SessionsActivity receives actual device names, creation/activity timestamps and the server's current-session flag. Unknown OS, application-version and IP/location data remain empty. The displayed30-day lifetime matches the fixed server refresh lifetime; changing it is not implemented.
+- Stable native hashes are scoped to the originating user. Dispatch captures native self identity, validates it against the authenticated vault under the shared account lock and rechecks identity before callback delivery. Unknown hashes, identity mismatches and terminating the current session through the other-device endpoint fail closed.
+- Nine new emulator checks pass: two real sessions, metadata/current flag, repeated stable hashes, current/unknown-session rejection, mismatched account rejection, actual second-device revocation, access/refresh rejection on the revoked device and preservation of the current session. The suite passes185 checks:121 first,16 offline,48 restart.
+- Normal ARM64/ARMv7/Universal debug builds and APK policy/signature verification pass. The reproducible session-sheet overlay hides call/private-E2EE capability switches while those features remain unavailable. Full screen-driven acceptance, late UI callback/account-switch races, all-other-device revocation, lifetime changes, logout and recovery remain unfinished. Backend code is unchanged.
+
 ## Existing native-cache normalization checkpoint — 2026-10-03
 
 - All176 API35 Android checks pass:112 first,16 offline,48 restart. artifacts/android-integration.json records the tested APK hash.

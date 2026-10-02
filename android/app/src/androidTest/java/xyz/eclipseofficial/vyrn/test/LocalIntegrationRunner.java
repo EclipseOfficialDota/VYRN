@@ -25,6 +25,7 @@ import org.json.JSONArray;
 import org.json.JSONObject;
 import org.telegram.messenger.BuildConfig;
 import org.telegram.tgnet.tl.TL_update;
+import org.telegram.tgnet.tl.TL_account;
 import org.telegram.messenger.Utilities;
 import org.telegram.messenger.AndroidUtilities;
 import org.telegram.messenger.MessageObject;
@@ -323,6 +324,7 @@ public final class LocalIntegrationRunner extends Instrumentation {
         ConnectionsManager.onLogout(2);waitForIdleSync();
         check(UserConfig.getInstance(2).getClientUserId()==uiUser.id && bridge.repository.vault.isUser(ta.getString("user_id")),"Telegram_native_logout_isolated");passed.put("Telegram_native_logout_isolated");
         check(bridge.repository.vault.isUser(ta.getString("user_id")) && !bridge.repository.vault.isUser(tb.getString("user_id")),"nonblocking_identity_snapshot");passed.put("nonblocking_identity_snapshot");
+        verifyNativeSessions(a,b,fixture);
         String createdGroup=createGroupThroughTelegram(a,b,tb.getString("user_id"));
         verifyNativeTextEdit(a,createdGroup,ta.getString("user_id"));
         verifyNativeDeletion(a,b,createdGroup,ta.getString("user_id"));
@@ -385,7 +387,34 @@ public final class LocalIntegrationRunner extends Instrumentation {
         try(IdMap ids=new IdMap(context,2)){for(TLRPC.Message message:((TLRPC.messages_Messages)result.get(30,TimeUnit.SECONDS)).messages)if(ids.remote("message",message.id).equals(server))return new MessageObject(2,message,false,false);}
         throw new AssertionError();
     }
-    private TLRPC.TL_error editFailure(TLRPC.TL_messages_editMessage request) throws Exception {
+    private TLObject nativeResponse(TLObject request) throws Exception {
+        CompletableFuture<TLObject> result=new CompletableFuture<>();ConnectionsManager.getInstance(2).sendRequest(request,(value,error)->{if(error!=null)result.completeExceptionally(new AssertionError());else result.complete(value);});return result.get(30,TimeUnit.SECONDS);
+    }
+    private void verifyNativeSessions(RestRepository a,RestRepository b,JSONObject fixture) throws Exception {
+        stage="native_sessions";RestRepository other=repo(9020);other.vault.clear();
+        JSONObject login=new JSONObject().put("email",fixture.getString("email").replace("@","a@")).put("password",fixture.getString("password")).put("device_id",other.vault.device()).put("device_name","دستگاه دوم VYRN");
+        other.vault.save((JSONObject)other.request("POST","/v1/auth/login",login,false));
+        TL_account.authorizations listed=(TL_account.authorizations)nativeResponse(new TL_account.getAuthorizations());
+        check(listed.authorizations.size()==2 && listed.authorization_ttl_days==30,"native_sessions_list");
+        TLRPC.TL_authorization current=null,second=null;
+        for(TLRPC.TL_authorization item:listed.authorizations){if(item.current)current=item;else second=item;}
+        check(current!=null && (current.flags&1)!=0 && second!=null && second.device_model.equals("دستگاه دوم VYRN") && second.date_created>0 && second.date_active>0 && second.ip.isEmpty(),"native_sessions_metadata");
+        TL_account.authorizations repeated=(TL_account.authorizations)nativeResponse(new TL_account.getAuthorizations());
+        final long secondHash=second.hash;check(repeated.authorizations.stream().anyMatch(item->!item.current && item.hash==secondHash),"native_session_hash_stable");
+        TL_account.resetAuthorization own=new TL_account.resetAuthorization();own.hash=current.hash;
+        check(editFailure(own)!=null && a.me()!=null,"native_current_session_revoke_denied");
+        TL_account.resetAuthorization unknown=new TL_account.resetAuthorization();unknown.hash=Long.MAX_VALUE;
+        check(editFailure(unknown)!=null && other.me()!=null,"native_unknown_session_revoke_denied");
+        VyrnBridge bridge=VyrnBridge.forAccount(2);JSONObject saved=bridge.repository.vault.load();
+        try{bridge.repository.vault.save(b.vault.load());TL_account.resetAuthorization switched=new TL_account.resetAuthorization();switched.hash=secondHash;check(editFailure(switched)!=null && other.me()!=null,"native_session_account_binding");}finally{bridge.repository.vault.save(saved);}
+        TL_account.resetAuthorization revoke=new TL_account.resetAuthorization();revoke.hash=secondHash;
+        check(nativeResponse(revoke) instanceof TLRPC.TL_boolTrue,"native_other_session_revoked");
+        boolean rejected=false;try{other.me();}catch(RestRepository.ApiException expected){rejected=expected.status==401;}
+        check(rejected && a.me()!=null,"native_revoked_device_cannot_refresh");
+        listed=(TL_account.authorizations)nativeResponse(new TL_account.getAuthorizations());check(listed.authorizations.size()==1 && listed.authorizations.get(0).current,"native_sessions_after_revoke");other.vault.clear();
+        passed.put("native_sessions_list").put("native_sessions_metadata").put("native_session_hash_stable").put("native_current_session_revoke_denied").put("native_unknown_session_revoke_denied").put("native_session_account_binding").put("native_other_session_revoked").put("native_revoked_device_cannot_refresh").put("native_sessions_after_revoke");
+    }
+    private TLRPC.TL_error editFailure(TLObject request) throws Exception {
         CompletableFuture<TLRPC.TL_error> result=new CompletableFuture<>();ConnectionsManager.getInstance(2).sendRequest(request,(value,error)->result.complete(error));return result.get(30,TimeUnit.SECONDS);
     }
     private void verifyNativeTextEdit(RestRepository repository,String group,String user) throws Exception {

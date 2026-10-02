@@ -46,6 +46,15 @@ Edit 'TMessagesProj/src/main/java/org/telegram/ui/LaunchActivity.java' {
  $t=(& git -c "safe.directory=$($upstream.Replace('\','/'))" -C $upstream show "${pin}:TMessagesProj/src/main/java/org/telegram/ui/LaunchActivity.java") -join "`n"
  $t -replace '(?s)private BaseFragment getClientNotActivatedFragment\(\) \{.*?\n    \}', 'private BaseFragment getClientNotActivatedFragment() { return new xyz.eclipseofficial.vyrn.compat.VyrnLoginActivity(); }'
 }
+Edit 'TMessagesProj/src/main/java/org/telegram/ui/SessionBottomSheet.java' {
+ param($t)
+ $t=(& git -c "safe.directory=$($upstream.Replace('\','/'))" -C $upstream show "${pin}:TMessagesProj/src/main/java/org/telegram/ui/SessionBottomSheet.java") -join "`n"
+ foreach($marker in @('return session.api_id != 22;','return session.api_id != 2040 && session.api_id != 2496;')){
+  if(!$t.Contains($marker)){throw 'Pinned session capability marker missing'}
+  $t=$t.Replace($marker,'return false; // Calls and private E2EE session settings are not available yet.')
+ }
+ $t
+}
 Edit 'TMessagesProj/src/main/java/org/telegram/tgnet/ConnectionsManager.java' {
  param($t)
  $t=(& git -c "safe.directory=$($upstream.Replace('\','/'))" -C $upstream show "${pin}:TMessagesProj/src/main/java/org/telegram/tgnet/ConnectionsManager.java") -join "`n"

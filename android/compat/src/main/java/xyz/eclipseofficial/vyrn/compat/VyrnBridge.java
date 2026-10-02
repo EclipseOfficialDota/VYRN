@@ -26,6 +26,7 @@ import org.telegram.tgnet.RequestDelegateTimestamp;
 import org.telegram.tgnet.TLObject;
 import org.telegram.tgnet.TLRPC;
 import org.telegram.tgnet.tl.TL_update;
+import org.telegram.tgnet.tl.TL_account;
 import xyz.eclipseofficial.vyrn.data.IdMap;
 import xyz.eclipseofficial.vyrn.data.RestRepository;
 import xyz.eclipseofficial.vyrn.data.TokenVault;
@@ -80,6 +81,7 @@ public final class VyrnBridge {
         final int account,token;final boolean send;final RequestDelegate callback;final RequestDelegateTimestamp timestamp;
         int guid;boolean cancellationRequested,cancellationStarted,resultReady,finished,ready;
         Boolean cancellationResult;TLObject result;Throwable failure;VyrnBridge bridge;String user,client;
+        long sessionOrigin;
         final ArrayList<Runnable> cancelledCallbacks=new ArrayList<>();
         PendingRequest(int account,int token,boolean send,RequestDelegate callback,RequestDelegateTimestamp timestamp){this.account=account;this.token=token;this.send=send;this.callback=callback;this.timestamp=timestamp;}
         synchronized void complete(TLObject result,Throwable failure){
@@ -108,6 +110,7 @@ public final class VyrnBridge {
                 finished=true;if(token!=0)REQUESTS.remove(requestKey(account,token),this);
             }
             if(cancelled!=null){for(Runnable task:cancelled)task.run();return;}
+            if(sessionOrigin!=0 && (bridge==null || !bridge.repository.vault.isUser(user) || UserConfig.getInstance(account).getClientUserId()!=sessionOrigin)){response=null;error=new SecurityException("account_changed");}
             TLRPC.TL_error problem=problem(error);if(callback!=null)callback.run(response,problem);if(timestamp!=null)timestamp.run(response,problem,System.currentTimeMillis());
         }
     }
@@ -291,6 +294,19 @@ public final class VyrnBridge {
     public static boolean dispatch(int account,TLObject request,RequestDelegate callback,RequestDelegateTimestamp timestamp,int token){
         PendingRequest pending=new PendingRequest(account,token,request instanceof TLRPC.TL_messages_sendMessage,callback,timestamp);
         if(token!=0 && REQUESTS.putIfAbsent(requestKey(account,token),pending)!=null)throw new IllegalStateException("duplicate_request_token");
+        if(request instanceof TL_account.getAuthorizations || request instanceof TL_account.resetAuthorization){
+            pending.sessionOrigin=UserConfig.getInstance(account).getClientUserId();
+            final long hash=request instanceof TL_account.resetAuthorization?((TL_account.resetAuthorization)request).hash:0;
+            final boolean revoke=request instanceof TL_account.resetAuthorization;
+            execute(()->{try{
+                VyrnBridge bridge=forAccount(account);pending.bridge=bridge;
+                synchronized(bridge.repository.vault.guard()){
+                    String user=bridge.repository.vault.load().getString("user_id");pending.user=user;
+                    if(pending.sessionOrigin==0 || UserConfig.getInstance(account).getClientUserId()!=pending.sessionOrigin || bridge.ids.local("user",user)!=pending.sessionOrigin)throw new SecurityException("account_changed");
+                    pending.complete(bridge.sessions(user,revoke,hash),null);
+                }
+            }catch(Exception failure){pending.complete(null,failure);}});return true;
+        }
         if(request instanceof TLRPC.TL_messages_sendMessage){
             SEND.execute(()->{try{VyrnBridge bridge=forAccount(account);TLRPC.TL_messages_sendMessage in=(TLRPC.TL_messages_sendMessage)request;
                 if(in.peer.chat_id==0)throw new UnsupportedOperationException("e2ee_not_ready");
@@ -309,6 +325,26 @@ public final class VyrnBridge {
         execute(()->{try{pending.complete(forAccount(account).handle(request),null);}catch(Exception failure){pending.complete(null,failure);}});return true;
     }
     public static void cancelRequest(int account,int token,Runnable onCancelled){PendingRequest pending=REQUESTS.get(requestKey(account,token));if(pending!=null)pending.cancel(onCancelled);}
+    private TLObject sessions(String user,boolean revoke,long hash) throws Exception {
+        String kind="session:"+user;
+        if(revoke){
+            String id=ids.remote(kind,hash);
+            if(id.equals(repository.vault.load().getString("session_id")))throw new UnsupportedOperationException("current_session_requires_logout");
+            repository.requestForUser(user,"DELETE","/v1/sessions/"+id,null,true);
+            return new TLRPC.TL_boolTrue();
+        }
+        org.json.JSONArray rows=(org.json.JSONArray)repository.requestForUser(user,"GET","/v1/sessions",null,true);
+        TL_account.authorizations result=new TL_account.authorizations();result.authorization_ttl_days=30;
+        for(int i=0;i<rows.length();i++){
+            JSONObject row=rows.getJSONObject(i);TLRPC.TL_authorization value=new TLRPC.TL_authorization();
+            value.current=row.getBoolean("current");value.encrypted_requests_disabled=true;value.call_requests_disabled=true;value.flags=(value.current?1:0)|8|16;
+            value.hash=ids.local(kind,row.getString("id"));value.device_model=row.getString("device_name");
+            value.platform="";value.system_version="";value.app_name="VYRN";value.app_version="";value.ip="";value.country="";value.region="";
+            value.date_created=Math.toIntExact(java.time.Instant.parse(row.getString("created_at")).getEpochSecond());
+            value.date_active=Math.toIntExact(java.time.Instant.parse(row.getString("last_seen")).getEpochSecond());result.authorizations.add(value);
+        }
+        return result;
+    }
     public static void bindRequestToGuid(int account,int token,int guid){PendingRequest pending=REQUESTS.get(requestKey(account,token));if(pending!=null && guid!=0)synchronized(pending){pending.guid=guid;}}
     public static void cancelRequestsForGuid(int account,int guid){if(guid==0)return;for(PendingRequest pending:REQUESTS.values()){boolean matches;synchronized(pending){matches=pending.account==account && pending.guid==guid;}if(matches)pending.cancel(null);}}
     private static TLRPC.TL_error problem(Throwable failure){
