@@ -7,6 +7,8 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.List;
+import java.util.function.Consumer;
 import org.json.JSONObject;
 import xyz.eclipseofficial.vyrn.domain.Models;
 
@@ -17,7 +19,15 @@ public final class OutboxSender implements AutoCloseable {
     private final ScheduledExecutorService worker=Executors.newSingleThreadScheduledExecutor();
     private final ConcurrentHashMap<String,CompletableFuture<Models.Message>> waiting=new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String,CompletableFuture<Boolean>> cancellations=new ConcurrentHashMap<>();
-    public OutboxSender(Context context,int account,RestRepository repository){this.repository=repository;store=new OutboxStore(context,account);store.recover();worker.scheduleWithFixedDelay(this::drain,1,1,TimeUnit.SECONDS);worker.scheduleWithFixedDelay(store::prune,1,1,TimeUnit.HOURS);}
+    private volatile Consumer<List<OutboxStore.UiResolution>> uiListener;
+    public OutboxSender(Context context,int account,RestRepository repository){this.repository=repository;store=new OutboxStore(context,account);store.recover();worker.scheduleWithFixedDelay(this::drain,1,1,TimeUnit.SECONDS);worker.scheduleWithFixedDelay(this::publishUi,1,1,TimeUnit.SECONDS);worker.scheduleWithFixedDelay(store::prune,1,1,TimeUnit.HOURS);}
+    public void setUiListener(Consumer<List<OutboxStore.UiResolution>> listener){uiListener=listener;}
+    private void publishUi(){try{Consumer<List<OutboxStore.UiResolution>> listener=uiListener;if(listener==null)return;String user=repository.vault.load().optString("user_id");List<OutboxStore.UiResolution> ready=store.resolvedUi(user);if(!ready.isEmpty())listener.accept(ready);}catch(Exception unavailable){/* Keep the journal for the next attempt. */}}
+    public void cancelFromUi(String user,String client,String conversation,String text,int localId,long dialogId,long randomId) throws Exception {
+        if(!user.equals(repository.vault.load().optString("user_id")))throw new SecurityException("account_changed");
+        store.queueUiCancellation(user,client,conversation,text,localId,dialogId,randomId);worker.execute(this::drain);worker.execute(this::publishUi);
+    }
+    public void acknowledgeUi(OutboxStore.UiResolution resolution){store.acknowledgeUi(resolution);}
     private String key(String user,String client){return user+":"+client;}
     private Models.Message result(OutboxStore.Entry e){return new Models.Message(e.server,e.user,"",e.date,e.ordinal,false,false);}
     public CompletableFuture<Models.Message> send(String user,String conversation,String client,String text) throws Exception {

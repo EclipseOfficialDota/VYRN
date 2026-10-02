@@ -10,6 +10,7 @@ import java.io.File;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.util.List;
+import java.util.ArrayList;
 import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -24,6 +25,12 @@ import org.json.JSONArray;
 import org.json.JSONObject;
 import org.telegram.messenger.BuildConfig;
 import org.telegram.messenger.Utilities;
+import org.telegram.messenger.AndroidUtilities;
+import org.telegram.messenger.MessageObject;
+import org.telegram.messenger.MessagesStorage;
+import org.telegram.messenger.MessagesController;
+import org.telegram.messenger.SendMessagesHelper;
+import org.telegram.messenger.UserConfig;
 import org.telegram.tgnet.ConnectionsManager;
 import org.telegram.tgnet.TLObject;
 import org.telegram.tgnet.TLRPC;
@@ -297,7 +304,14 @@ public final class LocalIntegrationRunner extends Instrumentation {
         String uncertainServer=a.send(uncertainGroup,uncertainClient,"Lost acknowledgement");
         passed.put("bounded_outbox_retry_policy");
         String tokenGroup=((JSONObject)a.request("POST","/v1/conversations",new JSONObject().put("kind","group").put("title","Token cancellation").put("members",new JSONArray().put(tb.getString("user_id"))),true)).getString("id");
-        write("vyrn-test-state.json",new JSONObject().put("token_group",tokenGroup).put("uncertain_group",uncertainGroup).put("uncertain_random",uncertainRandom).put("uncertain_server",uncertainServer).put("group",groupId).put("message",messageId).put("oldest",oldest).put("oldest_ordinal",upper).put("user",ta.getString("user_id")).put("process_id",android.os.Process.myPid()));
+        long uiCommittedRandom=UUID.randomUUID().getMostSignificantBits();String uiCommittedServer=a.send(tokenGroup,clientId(ta.getString("user_id"),uiCommittedRandom),"Committed UI cancellation");
+        CompletableFuture<Boolean> configured=new CompletableFuture<>();TLRPC.User uiUser=bridge.mapUser(a.me());
+        AndroidUtilities.runOnUIThread(()->{UserConfig.getInstance(2).setCurrentUser(uiUser);UserConfig.getInstance(2).saveConfig(true);MessagesController.getInstance(2).putUser(uiUser,false);configured.complete(true);});configured.get(10,TimeUnit.SECONDS);
+        check(UserConfig.getInstance(2).getPreferences().contains("user") && UserConfig.getInstance(2).getPreferences().edit().commit(),"Telegram_fixture_identity_durable");
+        ConnectionsManager.onLogout(2);waitForIdleSync();
+        check(UserConfig.getInstance(2).getClientUserId()==uiUser.id && bridge.repository.vault.isUser(ta.getString("user_id")),"Telegram_native_logout_isolated");passed.put("Telegram_native_logout_isolated");
+        check(bridge.repository.vault.isUser(ta.getString("user_id")) && !bridge.repository.vault.isUser(tb.getString("user_id")),"nonblocking_identity_snapshot");passed.put("nonblocking_identity_snapshot");
+        write("vyrn-test-state.json",new JSONObject().put("ui_committed_random",uiCommittedRandom).put("ui_committed_server",uiCommittedServer).put("token_group",tokenGroup).put("uncertain_group",uncertainGroup).put("uncertain_random",uncertainRandom).put("uncertain_server",uncertainServer).put("group",groupId).put("message",messageId).put("oldest",oldest).put("oldest_ordinal",upper).put("user",ta.getString("user_id")).put("process_id",android.os.Process.myPid()));
         Files.delete(file("vyrn-test-fixture.json").toPath());
 
         // Run the isolated trust-store probe last. Some Android TLS providers retain
@@ -341,6 +355,14 @@ public final class LocalIntegrationRunner extends Instrumentation {
         try(IdMap map=new IdMap(context,2)){peer.chat_id=map.local("conversation",state.getString("group"));}
         request.peer=peer;request.message=text;request.random_id=randomId;
         TokenSend send=new TokenSend();send.token=ConnectionsManager.getInstance(2).sendRequest(request,(value,error)->{if(error!=null)send.response.completeExceptionally(new AssertionError());else send.response.complete(value);});return send;
+    }
+    private MessageObject pendingUi(JSONObject state,int localId,long randomId,String text) throws Exception {
+        long chatId;try(IdMap map=new IdMap(context,2)){chatId=map.local("conversation",state.getString("token_group"));}
+        TLRPC.TL_message message=new TLRPC.TL_message();message.id=localId;message.random_id=randomId;message.dialog_id=-chatId;message.date=(int)(System.currentTimeMillis()/1000);message.out=true;message.message=text;message.send_state=MessageObject.MESSAGE_SEND_STATE_SENDING;
+        TLRPC.TL_peerChat peer=new TLRPC.TL_peerChat();peer.chat_id=chatId;message.peer_id=peer;TLRPC.TL_peerUser sender=new TLRPC.TL_peerUser();sender.user_id=UserConfig.getInstance(2).getClientUserId();message.from_id=sender;message.flags|=256;message.media=new TLRPC.TL_messageMediaEmpty();
+        ArrayList<TLRPC.Message> messages=new ArrayList<>();messages.add(message);MessagesStorage storage=MessagesStorage.getInstance(2);storage.putMessages(messages,true,true,false,0,0,0);
+        CompletableFuture<Boolean> saved=new CompletableFuture<>();storage.getStorageQueue().postRunnable(()->saved.complete(true));saved.get(10,TimeUnit.SECONDS);
+        check(storage.getMessage(-chatId,localId)!=null,"pending_UI_cache_written");return new MessageObject(2,message,false,false);
     }
     private void offline() throws Exception {
         stage="offline_UI_outbox";
@@ -407,6 +429,21 @@ public final class LocalIntegrationRunner extends Instrumentation {
         }
         state.put("token_cancel_client",tokenClient).put("guid_cancel_client",guidClient);write("vyrn-test-state.json",state);
         passed.put("Telegram_request_token_cancellation").put("request_token_account_isolation").put("cancel_callback_waits_for_confirmation").put("Telegram_GUID_cancellation");
+        stage="offline_SendMessagesHelper_cancellation";
+        long uiRandom=UUID.randomUUID().getMostSignificantBits();String uiClient=clientId(state.getString("user"),uiRandom),uiCommittedClient=clientId(state.getString("user"),state.getLong("ui_committed_random"));
+        MessageObject uiPending=pendingUi(state,-91001,uiRandom,"Pending UI cancellation"),uiCommitted=pendingUi(state,-91002,state.getLong("ui_committed_random"),"Committed UI cancellation");
+        try(OutboxStore store=new OutboxStore(context,2)){
+            store.enqueue(state.getString("user"),uiClient,state.getString("token_group"),"Pending UI cancellation");store.enqueue(state.getString("user"),uiCommittedClient,state.getString("token_group"),"Committed UI cancellation");
+            store.getWritableDatabase().execSQL("UPDATE outbox SET attempted=1 WHERE user_id=? AND client_id IN (?,?)",new Object[]{state.getString("user"),uiClient,uiCommittedClient});
+        }
+        CompletableFuture<Boolean> requested=new CompletableFuture<>();AndroidUtilities.runOnUIThread(()->{SendMessagesHelper.getInstance(2).cancelSendingMessage(uiPending);SendMessagesHelper.getInstance(2).cancelSendingMessage(uiCommitted);requested.complete(true);});requested.get(10,TimeUnit.SECONDS);
+        try(OutboxStore store=new OutboxStore(context,2)){
+            long deadline=System.currentTimeMillis()+45000;while(store.pendingUi(state.getString("user"))<2 && System.currentTimeMillis()<deadline)Thread.sleep(100);
+            check(store.pendingUi(state.getString("user"))==2 && store.resolvedUi(state.getString("user")).isEmpty(),"UI_cancellation_waits_for_server_proof");
+        }
+        check(MessagesStorage.getInstance(2).getMessage(uiPending.getDialogId(),-91001)!=null && MessagesStorage.getInstance(2).getMessage(uiCommitted.getDialogId(),-91002)!=null,"offline_UI_not_optimistically_removed");
+        state.put("ui_dialog",uiPending.getDialogId()).put("ui_cancel_client",uiClient);write("vyrn-test-state.json",state);
+        passed.put("SendMessagesHelper_cancel_interception").put("offline_UI_retained_until_proof");
     }
 
     private void restart() throws Exception {
@@ -449,6 +486,18 @@ public final class LocalIntegrationRunner extends Instrumentation {
             check(store.get(state.getString("user"),state.getString("token_cancel_client")).state==OutboxStore.CANCELLED && store.get(state.getString("user"),state.getString("guid_cancel_client")).state==OutboxStore.CANCELLED,"token_cancellations_survive_process_death");
         }
         passed.put("committed_token_cancel_ack").put("token_cancel_process_restart");
+        stage="Telegram_UI_cancellation_restart";
+        try(IdMap map=new IdMap(context,2)){check(UserConfig.getInstance(2).getClientUserId()==map.local("user",state.getString("user")),"Telegram_identity_restored");}passed.put("Telegram_identity_restored");
+        try(OutboxStore store=new OutboxStore(context,2)){
+            long deadline=System.currentTimeMillis()+45000;while(store.pendingUi(state.getString("user"))!=0 && System.currentTimeMillis()<deadline)Thread.sleep(100);
+            check(store.pendingUi(state.getString("user"))==0,"UI_cleanup_durably_acknowledged");
+            OutboxStore.Entry committed=store.get(state.getString("user"),clientId(state.getString("user"),state.getLong("ui_committed_random")));
+            check(committed.state==OutboxStore.SENT && committed.server.equals(state.getString("ui_committed_server")),"UI_committed_send_preserved");
+            MessagesStorage storage=MessagesStorage.getInstance(2);check(storage.getMessage(state.getLong("ui_dialog"),-91001)==null && storage.getMessage(state.getLong("ui_dialog"),-91002)==null,"negative_UI_rows_resolved");
+            TLRPC.Message cached=storage.getMessage(state.getLong("ui_dialog"),committed.ordinal);check(cached!=null && cached.message.equals("Committed UI cancellation"),"committed_UI_message_cached");
+        }
+        check(b.messages(state.getString("token_group"),null,100).size()==1,"UI_cancel_no_server_message_created");
+        passed.put("UI_cancel_cleanup_after_process_death").put("committed_UI_restored_after_process_death").put("UI_journal_ack_after_cache_proof");
         List<Models.Message> uncertainHistory=b.messages(state.getString("uncertain_group"),null,100);
         check(uncertainHistory.size()==1 && uncertainHistory.get(0).id.equals(state.getString("uncertain_server")) && uncertainHistory.get(0).ordinal==recovered.id,"lost_ack_no_duplicate");
         passed.put("lost_acknowledgement_recovery");

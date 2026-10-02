@@ -55,7 +55,34 @@ Edit 'TMessagesProj/src/main/java/org/telegram/tgnet/ConnectionsManager.java' {
  $t=$t -replace '(?s)public void cancelRequest\(int token, boolean notifyServer, Runnable onCancelled\) \{.*?\n    \}', 'public void cancelRequest(int token, boolean notifyServer, Runnable onCancelled) { Utilities.stageQueue.postRunnable(() -> xyz.eclipseofficial.vyrn.compat.VyrnBridge.cancelRequest(currentAccount, token, onCancelled)); }'
  $t=$t.Replace('native_cancelRequestsForGuid(currentAccount, guid);','xyz.eclipseofficial.vyrn.compat.VyrnBridge.cancelRequestsForGuid(currentAccount, guid);')
  $t=$t.Replace('native_bindRequestToGuid(currentAccount, requestToken, guid);','Utilities.stageQueue.postRunnable(() -> xyz.eclipseofficial.vyrn.compat.VyrnBridge.bindRequestToGuid(currentAccount, requestToken, guid));')
+ $logout='public static void onLogout(final int currentAccount) {'
+ if(!$t.Contains($logout)){throw 'Pinned native logout marker missing'}
+ $t=$t -replace '(?s)public static void onLogout\(final int currentAccount\) \{.*?\n    \}', 'public static void onLogout(final int currentAccount) { /* VYRN authentication is independent of Telegram native auth keys. */ }'
  $t
+}
+Edit 'TMessagesProj/src/main/java/org/telegram/messenger/SendMessagesHelper.java' {
+ param($t)
+ $t=(& git -c "safe.directory=$($upstream.Replace('\','/'))" -C $upstream show "${pin}:TMessagesProj/src/main/java/org/telegram/messenger/SendMessagesHelper.java") -join "`n"
+ $marker='public void cancelSendingMessage(ArrayList<MessageObject> objects) {'
+ if(!$t.Contains($marker)){throw 'Pinned message cancellation marker missing'}
+ $t=$t.Replace($marker,$marker+"`n        if (xyz.eclipseofficial.vyrn.compat.VyrnBridge.cancelSendingMessages(currentAccount, objects)) return;")
+ $proof=@'
+    public void vyrnResolveCancellation(int oldId, long dialogId, TLRPC.Message committed) {
+        removeFromSendingMessages(oldId, false);
+        processSentMessage(oldId);
+        if (committed == null) {
+            ArrayList<Integer> localIds = new ArrayList<>(); localIds.add(oldId);
+            getMessagesController().deleteMessages(localIds, null, null, dialogId, 0, false, 0, true);
+        } else {
+            ArrayList<MessageObject> messages = new ArrayList<>(); messages.add(new MessageObject(currentAccount, committed, false, false));
+            getMessagesController().updateInterfaceWithMessages(dialogId, messages, 0);
+            getNotificationCenter().postNotificationName(NotificationCenter.messageReceivedByServer, oldId, committed.id, committed, dialogId, 0L, 0, false);
+            getNotificationCenter().postNotificationName(NotificationCenter.messageReceivedByServer2, oldId, committed.id, committed, dialogId, 0L, 0, false);
+        }
+    }
+
+'@
+ $t.Replace('    public boolean retrySendMessage(MessageObject messageObject, boolean unsent, long payStars) {',$proof+'    public boolean retrySendMessage(MessageObject messageObject, boolean unsent, long payStars) {')
 }
 Edit 'TMessagesProj/jni/tgnet/Connection.cpp' {
  param($t)

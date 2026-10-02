@@ -11,9 +11,14 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicBoolean;
 import org.json.JSONObject;
 import org.telegram.messenger.ApplicationLoader;
 import org.telegram.messenger.MessagesController;
+import org.telegram.messenger.MessagesStorage;
+import org.telegram.messenger.MessageObject;
+import org.telegram.messenger.SendMessagesHelper;
+import org.telegram.messenger.AndroidUtilities;
 import org.telegram.messenger.UserConfig;
 import org.telegram.messenger.Utilities;
 import org.telegram.tgnet.RequestDelegate;
@@ -25,6 +30,7 @@ import xyz.eclipseofficial.vyrn.data.IdMap;
 import xyz.eclipseofficial.vyrn.data.RestRepository;
 import xyz.eclipseofficial.vyrn.data.TokenVault;
 import xyz.eclipseofficial.vyrn.data.OutboxSender;
+import xyz.eclipseofficial.vyrn.data.OutboxStore;
 import xyz.eclipseofficial.vyrn.data.RealtimeSync;
 import xyz.eclipseofficial.vyrn.domain.Models;
 
@@ -75,8 +81,62 @@ public final class VyrnBridge {
     private final OutboxSender outbox;
     private final RealtimeSync realtime;
     private final int account;
+    private final AtomicBoolean uiReconciling=new AtomicBoolean();
     private final Map<Long,String> privateConversations=new HashMap<>();
-    private VyrnBridge(int account){this.account=account;repository=new RestRepository(new TokenVault(ApplicationLoader.applicationContext,account));ids=new IdMap(ApplicationLoader.applicationContext,account);outbox=new OutboxSender(ApplicationLoader.applicationContext,account,repository);realtime=new RealtimeSync(ApplicationLoader.applicationContext,account,repository,this::applyEvent);}
+    private VyrnBridge(int account){this.account=account;repository=new RestRepository(new TokenVault(ApplicationLoader.applicationContext,account));ids=new IdMap(ApplicationLoader.applicationContext,account);outbox=new OutboxSender(ApplicationLoader.applicationContext,account,repository);realtime=new RealtimeSync(ApplicationLoader.applicationContext,account,repository,this::applyEvent);outbox.setUiListener(this::resolveUi);}
+    /** Group text cancellation owns local removal; other message kinds retain their existing flow. */
+    public static boolean cancelSendingMessages(int account,ArrayList<MessageObject> objects){
+        ArrayList<MessageObject> other=new ArrayList<>();boolean handled=false;
+        for(MessageObject object:objects){
+            if(object==null || object.messageOwner==null || object.getId()>=0 || object.getDialogId()>=0 || object.messageOwner.random_id==0 || object.type!=MessageObject.TYPE_TEXT || object.scheduled || object.isQuickReply() || MessageObject.isWelcomeMessage(object.messageOwner)){other.add(object);continue;}
+            handled=true;final int localId=object.getId(),token=object.messageOwner.reqId;final long dialog=object.getDialogId(),random=object.messageOwner.random_id;final String text=object.messageOwner.message;
+            execute(()->{try{VyrnBridge bridge=forAccount(account);String user=bridge.repository.vault.load().getString("user_id");String client=UUID.nameUUIDFromBytes((user+":"+random).getBytes(StandardCharsets.UTF_8)).toString();
+                bridge.outbox.cancelFromUi(user,client,bridge.ids.remote("conversation",-dialog),text,localId,dialog,random);
+                cancelRequest(account,token,null);
+            }catch(Exception unavailable){/* Preserve the visible message unless cancellation is proved. */}});
+        }
+        if(handled && !other.isEmpty())SendMessagesHelper.getInstance(account).cancelSendingMessage(other);
+        return handled;
+    }
+    private void resolveUi(List<OutboxStore.UiResolution> resolutions){
+        if(!uiReconciling.compareAndSet(false,true))return;
+        execute(()->{try{for(OutboxStore.UiResolution resolution:resolutions)try{resolveUiOne(resolution);}catch(Exception unavailable){/* Retry the durable journal; never erase on a failed cache operation. */}}finally{uiReconciling.set(false);}});
+    }
+    private void resolveUiOne(OutboxStore.UiResolution resolution) throws Exception {
+        if(!resolution.user.equals(repository.vault.load().optString("user_id")))return;
+        final long selfId=ids.local("user",resolution.user);
+        final TLRPC.Message committed;
+        if(resolution.state==OutboxStore.SENT){
+            Models.Message remote=repository.messageForUser(resolution.user,resolution.server);
+            TLRPC.TL_peerChat peer=new TLRPC.TL_peerChat();peer.chat_id=-resolution.dialogId;
+            committed=message(remote,peer);committed.dialog_id=resolution.dialogId;committed.random_id=resolution.randomId;committed.out=true;committed.send_state=MessageObject.MESSAGE_SEND_STATE_SENT;
+        }else committed=null;
+        MessagesStorage storage=MessagesStorage.getInstance(account);CountDownLatch written=new CountDownLatch(1);boolean[] safe={false};
+        storage.getStorageQueue().postRunnable(()->{try{
+            if(!repository.vault.isUser(resolution.user) || UserConfig.getInstance(account).getClientUserId()!=selfId)return;
+            org.telegram.SQLite.SQLiteCursor cursor=storage.getDatabase().queryFinalized("SELECT r.random_id FROM messages_v2 m LEFT JOIN randoms_v2 r ON r.mid=m.mid AND r.uid=m.uid WHERE m.mid="+resolution.localId+" AND m.uid="+resolution.dialogId);
+            try{if(cursor.next() && (cursor.isNull(0) || cursor.longValue(0)!=resolution.randomId))return;}finally{cursor.dispose();}
+            ArrayList<Integer> localIds=new ArrayList<>();localIds.add(resolution.localId);
+            if(committed==null){storage.markMessagesAsDeleted(resolution.dialogId,localIds,false,false,0,0);storage.updateDialogsWithDeletedMessages(resolution.dialogId,0,localIds,null);}
+            else{storage.updateMessageStateAndId(resolution.randomId,resolution.dialogId,resolution.localId,committed.id,committed.date,false,0,0);ArrayList<TLRPC.Message> messages=new ArrayList<>();messages.add(committed);storage.putMessages(messages,true,false,false,0,0,0);}
+            safe[0]=true;
+        }catch(Exception unavailable){/* No acknowledgement until reads prove the mutation. */}finally{written.countDown();}});
+        if(!written.await(20,TimeUnit.SECONDS) || !safe[0])return;
+        CountDownLatch displayed=new CountDownLatch(1);boolean[] active={false};
+        AndroidUtilities.runOnUIThread(()->{try{
+            if(!repository.vault.isUser(resolution.user) || UserConfig.getInstance(account).getClientUserId()!=selfId)return;
+            SendMessagesHelper.getInstance(account).vyrnResolveCancellation(resolution.localId,resolution.dialogId,committed);active[0]=true;
+        }finally{displayed.countDown();}});
+        if(!displayed.await(20,TimeUnit.SECONDS) || !active[0])return;
+        CountDownLatch verified=new CountDownLatch(1);boolean[] complete={false};
+        storage.getStorageQueue().postRunnable(()->{try{
+            if(!repository.vault.isUser(resolution.user) || UserConfig.getInstance(account).getClientUserId()!=selfId)return;
+            org.telegram.SQLite.SQLiteCursor cursor=storage.getDatabase().queryFinalized("SELECT count(*) FROM messages_v2 WHERE mid="+resolution.localId+" AND uid="+resolution.dialogId);
+            try{complete[0]=cursor.next() && cursor.intValue(0)==0;}finally{cursor.dispose();}
+            if(complete[0] && committed!=null){cursor=storage.getDatabase().queryFinalized("SELECT count(*) FROM messages_v2 WHERE mid="+committed.id+" AND uid="+resolution.dialogId+" AND send_state=0");try{complete[0]=cursor.next() && cursor.intValue(0)==1;}finally{cursor.dispose();}}
+        }catch(Exception unavailable){complete[0]=false;}finally{verified.countDown();}});
+        if(verified.await(20,TimeUnit.SECONDS) && complete[0])outbox.acknowledgeUi(resolution);
+    }
     public static synchronized VyrnBridge forAccount(int account){VyrnBridge bridge=INSTANCES.get(account);if(bridge==null){bridge=new VyrnBridge(account);INSTANCES.put(account,bridge);}return bridge;}
     public static void execute(Runnable task){IO.execute(task);}
     public static boolean dispatch(int account,TLObject request,RequestDelegate callback,RequestDelegateTimestamp timestamp){

@@ -59,3 +59,8 @@
 - Persist originating user/client and original negative message/dialog/random IDs atomically with cancellation intent. Treat missing local send history conservatively and obtain server proof rather than claiming it was never sent.
 - Retain terminal outbox entries until the exact UI identity is acknowledged after durable cache cleanup. Preserve committed sends and reject attempts to replace a journal entry with different UI IDs.
 - Schema4 introduces this journal and preserves populated older queues. Its adapter and Telegram cache integration remain to be implemented and tested.
+
+## 2026-10-02 — confirmed Telegram cache reconciliation
+- Intercept pending group-text cancellation in SendMessagesHelper, retain negative local rows until cancellation proof, and replay terminal journal records after process death. Restore committed sends using their original server IDs.
+- Verify native cache changes before acknowledging the durable journal. Preserve originating-user, active native-account and random-ID checks without acquiring the network token lock on UI/storage queues.
+- Ignore Telegram native onLogout: absence of an upstream Telegram auth key cannot revoke an independent VYRN session. VYRN authentication owns session validity.

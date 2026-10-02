@@ -90,6 +90,13 @@ Date: 2026-10-01. This records performed checks, not planned tests.
 - Already committed sends remain SENT. Missing local delivery history always requires server cancellation proof, including repeated cancellation calls; an existing cancellation intent cannot be downgraded to a locally proven cancellation merely because its HTTP attempt has not started yet.
 - The journal is a foundation for the adapter. It is not yet connected to SendMessagesHelper's removal or the Telegram cache worker, so complete interactive cancellation and durable cache cleanup remain open.
 
+## Telegram cache/UI cancellation checkpoint on 2026-10-02
+
+- All71 named checks pass across the real first/offline/restart emulator processes over scoped HTTPS. The test calls the original SendMessagesHelper entry point with cached pending group-text messages; it does not drive a screen tap.
+- Pending UI rows remain visible while offline. After process death and reconnection, confirmed cancellation removes its negative native row; a previously committed send replaces its pending row with the original positive server ID and body. The journal is acknowledged only after verifying the native cache mutation.
+- A failed restart exposed Telegram's native missing-auth-key logout clearing VYRN's independent user. The reproducible ConnectionsManager overlay ignores native onLogout; explicit callback isolation and native identity restoration pass without weakening account or random-ID guards.
+- Complete screen-driven cancellation, account-switch races and reconciliation of a committed message subsequently deleted on the server remain unverified.
+
 ## External checks
 
 - Dedicated SSH key authentication to port 3939 was rejected. No server commands ran.
