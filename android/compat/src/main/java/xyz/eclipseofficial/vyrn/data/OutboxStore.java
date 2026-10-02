@@ -9,6 +9,8 @@ import android.database.sqlite.SQLiteOpenHelper;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.concurrent.TimeUnit;
+import java.util.ArrayList;
+import java.util.List;
 import android.util.Base64;
 import xyz.eclipseofficial.vyrn.domain.Models;
 
@@ -20,13 +22,16 @@ public final class OutboxStore extends SQLiteOpenHelper {
         public int state, attempts, ordinal, date, error;
         public boolean cancellation;
     }
-    public OutboxStore(Context context,int account){super(context,"vyrn_outbox_"+account+".db",null,3);}
+    public static final class UiResolution {public String user,client;public int localId,state,ordinal,date;public long dialogId,randomId;public String server;}
+    public OutboxStore(Context context,int account){super(context,"vyrn_outbox_"+account+".db",null,4);}
+    private void createUiJournal(SQLiteDatabase db){db.execSQL("CREATE TABLE ui_cancellations(user_id TEXT NOT NULL,client_id TEXT NOT NULL,local_id INTEGER NOT NULL,dialog_id INTEGER NOT NULL,random_id INTEGER NOT NULL,PRIMARY KEY(user_id,client_id))");}
     @Override public void onCreate(SQLiteDatabase db){
         db.execSQL("CREATE TABLE outbox(queue_id INTEGER PRIMARY KEY AUTOINCREMENT,user_id TEXT NOT NULL,client_id TEXT NOT NULL,conversation_id TEXT NOT NULL,body TEXT,fingerprint TEXT NOT NULL,state INTEGER NOT NULL DEFAULT 0,attempts INTEGER NOT NULL DEFAULT 0,attempted INTEGER NOT NULL DEFAULT 0,next_at INTEGER NOT NULL DEFAULT 0,server_id TEXT,ordinal INTEGER,date INTEGER,error INTEGER NOT NULL DEFAULT 0,created_at INTEGER NOT NULL,completed_at INTEGER,UNIQUE(user_id,client_id))");
         db.execSQL("CREATE INDEX outbox_ready ON outbox(user_id,state,next_at,created_at)");
         db.execSQL("ALTER TABLE outbox ADD COLUMN cancel_requested INTEGER NOT NULL DEFAULT 0");
+        createUiJournal(db);
     }
-    @Override public void onUpgrade(SQLiteDatabase db,int oldVersion,int newVersion){if(oldVersion<2){db.execSQL("ALTER TABLE outbox ADD COLUMN completed_at INTEGER");db.execSQL("ALTER TABLE outbox ADD COLUMN attempted INTEGER NOT NULL DEFAULT 1");db.execSQL("UPDATE outbox SET completed_at=created_at WHERE state=1");}if(oldVersion<3)db.execSQL("ALTER TABLE outbox ADD COLUMN cancel_requested INTEGER NOT NULL DEFAULT 0");}
+    @Override public void onUpgrade(SQLiteDatabase db,int oldVersion,int newVersion){if(oldVersion<2){db.execSQL("ALTER TABLE outbox ADD COLUMN completed_at INTEGER");db.execSQL("ALTER TABLE outbox ADD COLUMN attempted INTEGER NOT NULL DEFAULT 1");db.execSQL("UPDATE outbox SET completed_at=created_at WHERE state=1");}if(oldVersion<3)db.execSQL("ALTER TABLE outbox ADD COLUMN cancel_requested INTEGER NOT NULL DEFAULT 0");if(oldVersion<4)createUiJournal(db);}
     private Entry entry(Cursor c){Entry e=new Entry();e.user=c.getString(0);e.client=c.getString(1);e.conversation=c.getString(2);e.text=c.getString(3);e.state=c.getInt(4);e.attempts=c.getInt(5);e.server=c.getString(6);e.ordinal=c.getInt(7);e.date=c.getInt(8);e.error=c.getInt(9);e.cancellation=c.getInt(10)!=0;return e;}
     private static final String COLUMNS="user_id,client_id,conversation_id,body,state,attempts,server_id,ordinal,date,error,cancel_requested";
     public synchronized Entry get(String user,String client){try(Cursor c=getReadableDatabase().rawQuery("SELECT "+COLUMNS+" FROM outbox WHERE user_id=? AND client_id=?",new String[]{user,client})){return c.moveToFirst()?entry(c):null;}}
@@ -73,7 +78,7 @@ public final class OutboxStore extends SQLiteOpenHelper {
     }
     public synchronized void release(Entry entry){ContentValues v=new ContentValues();v.put("state",QUEUED);getWritableDatabase().update("outbox",v,"user_id=? AND client_id=? AND state=?",new String[]{entry.user,entry.client,Integer.toString(SENDING)});}
     /** Only an entry never claimed by a sender can be proven unsent locally. */
-    public synchronized boolean cancel(String user,String client){ContentValues v=new ContentValues();v.put("state",CANCELLED);v.putNull("body");v.put("completed_at",System.currentTimeMillis());return getWritableDatabase().update("outbox",v,"user_id=? AND client_id=? AND state=? AND attempted=0",new String[]{user,client,Integer.toString(QUEUED)})==1;}
+    public synchronized boolean cancel(String user,String client){ContentValues v=new ContentValues();v.put("state",CANCELLED);v.putNull("body");v.put("completed_at",System.currentTimeMillis());return getWritableDatabase().update("outbox",v,"user_id=? AND client_id=? AND state=? AND attempted=0 AND cancel_requested=0",new String[]{user,client,Integer.toString(QUEUED)})==1;}
     public synchronized void prune(){prune(getWritableDatabase());}
     public synchronized Entry requestCancellation(String user,String client){
         Entry entry=get(user,client);if(entry==null)throw new IllegalStateException("outbox_missing");if(entry.state==CANCELLED)return entry;
@@ -81,5 +86,32 @@ public final class OutboxStore extends SQLiteOpenHelper {
         getWritableDatabase().update("outbox",v,"user_id=? AND client_id=?",new String[]{user,client});return get(user,client);
     }
     public synchronized void cancelled(Entry entry){ContentValues v=new ContentValues();v.put("state",CANCELLED);v.put("cancel_requested",0);v.putNull("body");v.put("completed_at",System.currentTimeMillis());if(getWritableDatabase().update("outbox",v,"user_id=? AND client_id=?",new String[]{entry.user,entry.client})!=1)throw new IllegalStateException("outbox_missing");}
-    private void prune(SQLiteDatabase db){long now=System.currentTimeMillis();db.delete("outbox","state=? AND completed_at<?",new String[]{Integer.toString(SENT),Long.toString(now-TimeUnit.DAYS.toMillis(7))});db.delete("outbox","state=? AND completed_at<?",new String[]{Integer.toString(CANCELLED),Long.toString(now-TimeUnit.DAYS.toMillis(1))});}
+    /** Atomically retain the original UI identity and cancellation decision before any local removal. */
+    public synchronized void queueUiCancellation(String user,String client,String conversation,String text,int localId,long dialogId,long randomId) throws Exception {
+        if(localId>=0 || dialogId>=0 || randomId==0 || !client.equals(java.util.UUID.nameUUIDFromBytes((user+":"+randomId).getBytes(StandardCharsets.UTF_8)).toString()))throw new IllegalArgumentException("invalid_ui_identity");
+        SQLiteDatabase db=getWritableDatabase();db.beginTransaction();
+        try {
+            try(Cursor c=db.rawQuery("SELECT local_id,dialog_id,random_id FROM ui_cancellations WHERE user_id=? AND client_id=?",new String[]{user,client})){
+                if(c.moveToFirst()){if(c.getInt(0)!=localId || c.getLong(1)!=dialogId || c.getLong(2)!=randomId)throw new IllegalStateException("ui_identity_conflict");}
+                else{ContentValues notice=new ContentValues();notice.put("user_id",user);notice.put("client_id",client);notice.put("local_id",localId);notice.put("dialog_id",dialogId);notice.put("random_id",randomId);db.insertOrThrow("ui_cancellations",null,notice);}
+            }
+            Entry existing=get(user,client);
+            if(existing==null){enqueue(user,client,conversation,text);requestCancellation(user,client);}
+            else{
+                if(!existing.conversation.equals(conversation))throw new IllegalStateException("idempotency_conflict");
+                if(existing.state!=SENT && existing.state!=CANCELLED && !cancel(user,client))requestCancellation(user,client);
+            }
+            db.setTransactionSuccessful();
+        }finally{db.endTransaction();}
+    }
+    public synchronized List<UiResolution> resolvedUi(String user){
+        ArrayList<UiResolution> results=new ArrayList<>();
+        try(Cursor c=getReadableDatabase().rawQuery("SELECT n.user_id,n.client_id,n.local_id,n.dialog_id,n.random_id,q.state,q.server_id,q.ordinal,q.date FROM ui_cancellations n JOIN outbox q ON q.user_id=n.user_id AND q.client_id=n.client_id WHERE n.user_id=? AND q.state IN (1,4) ORDER BY q.queue_id LIMIT 100",new String[]{user})){
+            while(c.moveToNext()){UiResolution r=new UiResolution();r.user=c.getString(0);r.client=c.getString(1);r.localId=c.getInt(2);r.dialogId=c.getLong(3);r.randomId=c.getLong(4);r.state=c.getInt(5);r.server=c.getString(6);r.ordinal=c.getInt(7);r.date=c.getInt(8);results.add(r);}
+        }return results;
+    }
+    public synchronized int pendingUi(String user){return (int)DatabaseUtils.longForQuery(getReadableDatabase(),"SELECT count(*) FROM ui_cancellations WHERE user_id=?",new String[]{user});}
+    /** Call only after the matching Telegram cache mutation has durably completed. */
+    public synchronized void acknowledgeUi(UiResolution resolution){getWritableDatabase().delete("ui_cancellations","user_id=? AND client_id=? AND local_id=? AND dialog_id=? AND random_id=?",new String[]{resolution.user,resolution.client,Integer.toString(resolution.localId),Long.toString(resolution.dialogId),Long.toString(resolution.randomId)});}
+    private void prune(SQLiteDatabase db){long now=System.currentTimeMillis();String noUi=" AND NOT EXISTS(SELECT 1 FROM ui_cancellations n WHERE n.user_id=outbox.user_id AND n.client_id=outbox.client_id)";db.delete("outbox","state=? AND completed_at<?"+noUi,new String[]{Integer.toString(SENT),Long.toString(now-TimeUnit.DAYS.toMillis(7))});db.delete("outbox","state=? AND completed_at<?"+noUi,new String[]{Integer.toString(CANCELLED),Long.toString(now-TimeUnit.DAYS.toMillis(1))});}
 }

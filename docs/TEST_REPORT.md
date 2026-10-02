@@ -83,6 +83,13 @@ Date: 2026-10-01. This records performed checks, not planned tests.
 - The pinned preparation script regenerates ConnectionsManager from the exact upstream commit before applying all hooks, retaining reproducibility across repeated builds. A cancelled row discovered after send-future registration now cancels that future instead of leaving it unresolved.
 - These are transport integration tests. Original SendMessagesHelper still performs optimistic local deletion during cancelSendingMessage; deferring that removal until proof, durable UI cleanup and the complete interactive cancel-message flow remain required.
 
+## Durable UI-cleanup journal checkpoint on 2026-10-02
+
+- 63 named Android checks pass across first/offline/restart. The additional store tests exercise populated schema3-to4 upgrade, a UI cancellation journal reopened after an interrupted claim, account isolation, immutable local/dialog/random IDs and transactional rollback on invalid payload.
+- Cancellation intent and the original negative UI message identity commit together. Terminal send records remain protected from retention pruning until the matching UI-cleanup record is explicitly acknowledged; a mismatched acknowledgement cannot clear it.
+- Already committed sends remain SENT. Missing local delivery history always requires server cancellation proof, including repeated cancellation calls; an existing cancellation intent cannot be downgraded to a locally proven cancellation merely because its HTTP attempt has not started yet.
+- The journal is a foundation for the adapter. It is not yet connected to SendMessagesHelper's removal or the Telegram cache worker, so complete interactive cancellation and durable cache cleanup remain open.
+
 ## External checks
 
 - Dedicated SSH key authentication to port 3939 was rejected. No server commands ran.

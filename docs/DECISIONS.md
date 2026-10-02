@@ -54,3 +54,8 @@
 - Keep the originating user immutable in request metadata. Persist cancellation intent without waiting for the token-vault network lock; reconciliation still sends only under the matching active account.
 - Post completion handling onto Telegram's stage queue so future callbacks do not acquire other request locks inline during cancellation.
 - Interactive SendMessagesHelper cancellation remains open: its original optimistic local removal must be reconciled with confirmed cancellation and UI cleanup must survive process death.
+
+## 2026-10-02 — UI cancellation journal
+- Persist originating user/client and original negative message/dialog/random IDs atomically with cancellation intent. Treat missing local send history conservatively and obtain server proof rather than claiming it was never sent.
+- Retain terminal outbox entries until the exact UI identity is acknowledged after durable cache cleanup. Preserve committed sends and reject attempts to replace a journal entry with different UI IDs.
+- Schema4 introduces this journal and preserves populated older queues. Its adapter and Telegram cache integration remain to be implemented and tested.

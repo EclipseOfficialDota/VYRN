@@ -232,15 +232,51 @@ public final class LocalIntegrationRunner extends Instrumentation {
             check(upgraded.next(fixtureUser).state==OutboxStore.SENDING,"upgraded_queue_claimable");
             // Model a populated schema2 database independently of the schema1 migration.
             upgraded.getWritableDatabase().execSQL("ALTER TABLE outbox DROP COLUMN cancel_requested");
+            upgraded.getWritableDatabase().execSQL("DROP TABLE ui_cancellations");
             upgraded.getWritableDatabase().setVersion(2);
         }
         try(OutboxStore upgraded=new OutboxStore(context,9009)){
             OutboxStore.Entry legacy=upgraded.get(fixtureUser,legacyClient);
             check(legacy.state==OutboxStore.SENDING && !legacy.cancellation && legacy.text.equals("Legacy pending"),"schema2_upgrade_preserves_claim");
             check(upgraded.requestCancellation(fixtureUser,legacyClient).cancellation,"schema2_cancel_intent_available");
+            upgraded.getWritableDatabase().execSQL("DROP TABLE ui_cancellations");upgraded.getWritableDatabase().setVersion(3);
         }
         passed.put("populated_schema2_cancel_upgrade");
+        try(OutboxStore upgraded=new OutboxStore(context,9009)){check(upgraded.get(fixtureUser,legacyClient).cancellation && upgraded.pendingUi(fixtureUser)==0,"schema3_ui_journal_upgrade");}
+        passed.put("populated_schema3_UI_journal_upgrade");
         context.deleteDatabase("vyrn_outbox_9009.db");passed.put("populated_outbox_upgrade");
+        stage="durable_UI_cancellation_journal";
+        long uiRandom=84531;String uiClient=clientId(fixtureUser,uiRandom);
+        try(OutboxStore store=new OutboxStore(context,9009)){
+            store.enqueue(fixtureUser,uiClient,groupId,"Pending UI fixture");store.next(fixtureUser);
+            store.queueUiCancellation(fixtureUser,uiClient,groupId,"Pending UI fixture",-7001,-123,uiRandom);
+            check(store.pendingUi(fixtureUser)==1 && store.resolvedUi(fixtureUser).isEmpty(),"uncertain_UI_not_removable");
+        }
+        try(OutboxStore store=new OutboxStore(context,9009)){
+            store.recover();OutboxStore.Entry cancellation=store.next(fixtureUser);check(cancellation.cancellation,"UI_intent_recovered");store.cancelled(cancellation);
+            OutboxStore.UiResolution resolution=store.resolvedUi(fixtureUser).get(0);
+            check(resolution.localId==-7001 && resolution.dialogId==-123 && resolution.randomId==uiRandom && resolution.state==OutboxStore.CANCELLED,"UI_identity_survives_reopen");
+            check(store.resolvedUi(tb.getString("user_id")).isEmpty(),"UI_journal_account_isolation");
+            store.getWritableDatabase().execSQL("UPDATE outbox SET completed_at=? WHERE client_id=?",new Object[]{System.currentTimeMillis()-TimeUnit.DAYS.toMillis(2),uiClient});store.prune();
+            check(store.get(fixtureUser,uiClient)!=null,"UI_cleanup_prevents_early_pruning");
+            resolution.localId=-7002;store.acknowledgeUi(resolution);check(store.pendingUi(fixtureUser)==1,"UI_ack_identity_guard");resolution.localId=-7001;
+            store.acknowledgeUi(resolution);store.prune();check(store.pendingUi(fixtureUser)==0 && store.get(fixtureUser,uiClient)==null,"UI_ack_allows_pruning");
+            long committedRandom=84532;String committedClient=clientId(fixtureUser,committedRandom);
+            store.enqueue(fixtureUser,committedClient,groupId,"Committed UI fixture");store.accepted(store.next(fixtureUser),new Models.Message(UUID.randomUUID().toString(),fixtureUser,"",1,1,false,false));
+            store.queueUiCancellation(fixtureUser,committedClient,groupId,"Committed UI fixture",-7003,-123,committedRandom);
+            check(store.resolvedUi(fixtureUser).get(0).state==OutboxStore.SENT,"committed_UI_preserved");
+            long absentRandom=84533;String absentClient=clientId(fixtureUser,absentRandom);
+            store.queueUiCancellation(fixtureUser,absentClient,groupId,"Unknown delivery history",-7004,-123,absentRandom);
+            store.queueUiCancellation(fixtureUser,absentClient,groupId,"Unknown delivery history",-7004,-123,absentRandom);
+            check(store.get(fixtureUser,absentClient).cancellation && store.get(fixtureUser,absentClient).state!=OutboxStore.CANCELLED,"absent_history_requires_server_proof");
+            check(!store.cancel(fixtureUser,absentClient),"pending_server_proof_not_downgraded");
+            boolean rollback=false;long invalidRandom=84534;try{store.queueUiCancellation(fixtureUser,clientId(fixtureUser,invalidRandom),groupId,"x".repeat(16385),-7005,-123,invalidRandom);}catch(IllegalArgumentException expected){rollback=true;}
+            check(rollback && store.pendingUi(fixtureUser)==2 && store.get(fixtureUser,clientId(fixtureUser,invalidRandom))==null,"UI_journal_transaction_rollback");
+            boolean conflict=false;try{store.queueUiCancellation(fixtureUser,committedClient,groupId,"Committed UI fixture",-7006,-123,committedRandom);}catch(IllegalStateException expected){conflict=true;}
+            check(conflict && store.resolvedUi(fixtureUser).get(0).localId==-7003,"UI_identity_immutable");
+        }
+        context.deleteDatabase("vyrn_outbox_9009.db");
+        passed.put("UI_cancel_journal_persistence").put("UI_cancel_account_isolation").put("UI_cleanup_ack_retention").put("committed_UI_preserved").put("unknown_UI_history_requires_proof").put("UI_cancel_atomic_rollback").put("UI_cancel_identity_immutable");
         stage="cancel_before_send_preparation";
         CompletableFuture<Boolean> preSendCancelled=new CompletableFuture<>(),readCancelled=new CompletableFuture<>();
         CompletableFuture<TLObject> preSendResponse=new CompletableFuture<>(),readResponse=new CompletableFuture<>();
