@@ -403,7 +403,22 @@ public final class LocalIntegrationRunner extends Instrumentation {
         RestRepository extra=repo(9013);extra.vault.clear();String added=register(extra,read("vyrn-test-fixture.json"),"member-events").getString("user_id");
         long before=bridge.syncCursor();owner.request("POST","/v1/conversations/"+group+"/members",new JSONObject().put("user_id",added).put("role","member"),true);verifyMembershipCache(owner,group,local,before);
         before=bridge.syncCursor();owner.request("DELETE","/v1/conversations/"+group+"/members/"+added,null,true);verifyMembershipCache(owner,group,local,before);
+        verifyNativeMemberOperations(owner,extra,group,local,added);
         extra.vault.clear();passed.put("group_role_demotion_realtime").put("group_role_promotion_realtime").put("group_member_add_realtime").put("group_member_remove_realtime").put("group_member_cache_roles_dates");
+    }
+    private void verifyNativeMemberOperations(RestRepository owner,RestRepository extra,String group,long local,String added) throws Exception {
+        stage="MessagesController_member_operations";VyrnBridge bridge=VyrnBridge.forAccount(2);TLRPC.User user=bridge.mapUser(extra.me());
+        CompletableFuture<Boolean> invited=new CompletableFuture<>();long before=bridge.syncCursor();
+        AndroidUtilities.runOnUIThread(()->{MessagesController controller=MessagesController.getInstance(2);controller.putUser(user,false);controller.addUserToChat(local,user,0,null,null,()->invited.complete(true));});invited.get(30,TimeUnit.SECONDS);verifyMembershipCache(owner,group,local,before);
+        for(boolean admin:new boolean[]{true,false,true}){
+            CompletableFuture<Boolean> changed=new CompletableFuture<>();before=bridge.syncCursor();TLRPC.TL_chatAdminRights rights=new TLRPC.TL_chatAdminRights();rights.change_info=admin;
+            AndroidUtilities.runOnUIThread(()->MessagesController.getInstance(2).setUserAdminRole(local,user,rights,"",false,null,false,false,null,()->changed.complete(true),error->{changed.completeExceptionally(new AssertionError());return false;}));changed.get(30,TimeUnit.SECONDS);verifyMembershipCache(owner,group,local,before);
+        }
+        CompletableFuture<Boolean> repeated=new CompletableFuture<>();AndroidUtilities.runOnUIThread(()->MessagesController.getInstance(2).addUserToChat(local,user,0,null,null,()->repeated.complete(true)));repeated.get(30,TimeUnit.SECONDS);
+        check(owner.conversationDetails(group).members.stream().anyMatch(member->member.user.id.equals(added)&&member.role.equals("admin")),"native_reinvite_preserves_admin");
+        TLRPC.TL_messages_editChatAdmin forbidden=new TLRPC.TL_messages_editChatAdmin();forbidden.chat_id=local;TLRPC.TL_inputUser self=new TLRPC.TL_inputUser();self.user_id=UserConfig.getInstance(2).getClientUserId();forbidden.user_id=self;forbidden.is_admin=false;CompletableFuture<Integer> denied=new CompletableFuture<>();ConnectionsManager.getInstance(2).sendRequest(forbidden,(value,error)->denied.complete(error==null?0:error.code));check(denied.get(30,TimeUnit.SECONDS)==403,"native_owner_role_protected");
+        before=bridge.syncCursor();TLRPC.TL_messages_deleteChatUser remove=new TLRPC.TL_messages_deleteChatUser();remove.chat_id=local;TLRPC.TL_inputUser target=new TLRPC.TL_inputUser();target.user_id=user.id;remove.user_id=target;CompletableFuture<Boolean> removed=new CompletableFuture<>();ConnectionsManager.getInstance(2).sendRequest(remove,(value,error)->{if(error!=null)removed.completeExceptionally(new AssertionError());else{MessagesController.getInstance(2).processUpdates((TLRPC.Updates)value,false);removed.complete(true);}});removed.get(30,TimeUnit.SECONDS);verifyMembershipCache(owner,group,local,before);
+        passed.put("MessagesController_member_add").put("MessagesController_admin_promotion").put("MessagesController_admin_demotion").put("native_reinvite_preserves_admin").put("native_owner_role_protected").put("native_member_removal_without_revoke");
     }
     private void verifyMembershipCache(RestRepository owner,String group,long local,long before) throws Exception {
         VyrnBridge bridge=VyrnBridge.forAccount(2);JSONObject batch=(JSONObject)owner.request("GET","/v1/sync?cursor="+before,null,true);long target=0;JSONArray events=batch.getJSONArray("events");

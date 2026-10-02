@@ -242,6 +242,16 @@ public final class VyrnBridge {
     public int syncPending() throws Exception {String user=repository.vault.load().optString("user_id");return user.isEmpty()?0:realtime.pending(user);}
     public int syncDead() throws Exception {String user=repository.vault.load().optString("user_id");return user.isEmpty()?0:realtime.dead(user);}
     private synchronized TLObject handle(TLObject request) throws Exception {
+        if(request instanceof TLRPC.TL_messages_addChatUser){
+            TLRPC.TL_messages_addChatUser in=(TLRPC.TL_messages_addChatUser)request;if(in.fwd_limit!=0)throw new UnsupportedOperationException();String id=ids.remote("conversation",in.chat_id);repository.inviteMember(id,inputUser(in.user_id));
+            TLRPC.TL_messages_invitedUsers result=new TLRPC.TL_messages_invitedUsers();result.updates=membershipUpdates(id);return result;
+        }
+        if(request instanceof TLRPC.TL_messages_editChatAdmin){
+            TLRPC.TL_messages_editChatAdmin in=(TLRPC.TL_messages_editChatAdmin)request;repository.setMemberRole(ids.remote("conversation",in.chat_id),inputUser(in.user_id),in.is_admin);return new TLRPC.TL_boolTrue();
+        }
+        if(request instanceof TLRPC.TL_messages_deleteChatUser){
+            TLRPC.TL_messages_deleteChatUser in=(TLRPC.TL_messages_deleteChatUser)request;String user=inputUser(in.user_id);if(in.revoke_history||user.equals(repository.vault.load().getString("user_id")))throw new UnsupportedOperationException();String id=ids.remote("conversation",in.chat_id);repository.removeMember(id,user);return membershipUpdates(id);
+        }
         if(request instanceof TLRPC.TL_messages_setHistoryTTL){
             TLRPC.TL_messages_setHistoryTTL in=(TLRPC.TL_messages_setHistoryTTL)request;String id=conversation(in.peer);repository.setHistoryTTL(id,in.period);
             Models.ConversationDetails details=repository.conversationDetails(id);TLRPC.TL_updates result=new TLRPC.TL_updates();result.date=(int)(System.currentTimeMillis()/1000);
@@ -280,5 +290,13 @@ public final class VyrnBridge {
         if(request instanceof TLRPC.TL_updates_getState){TLRPC.TL_updates_state state=new TLRPC.TL_updates_state();state.date=(int)(System.currentTimeMillis()/1000);return state;}
         if(request instanceof TLRPC.TL_contacts_getContacts){TLRPC.TL_contacts_contacts contacts=new TLRPC.TL_contacts_contacts();return contacts;}
         throw new UnsupportedOperationException();
+    }
+    private String inputUser(TLRPC.InputUser user) throws Exception {
+        if(user instanceof TLRPC.TL_inputUserSelf)return repository.vault.load().getString("user_id");
+        if(!(user instanceof TLRPC.TL_inputUser))throw new IllegalArgumentException("invalid_group_member");return ids.remote("user",user.user_id);
+    }
+    private TLRPC.TL_updates membershipUpdates(String id) throws Exception {
+        Models.ConversationDetails details=repository.conversationDetails(id);TLRPC.TL_updates result=new TLRPC.TL_updates();result.date=(int)(System.currentTimeMillis()/1000);TLRPC.Chat group=chat(details.conversation);group.date=details.createdDate;result.chats.add(group);
+        for(Models.Member member:details.members)result.users.add(mapUser(member.user));TL_update.TL_updateChatParticipants changed=new TL_update.TL_updateChatParticipants();changed.participants=participants(details);result.updates.add(changed);return result;
     }
 }

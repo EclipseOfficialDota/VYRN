@@ -109,3 +109,8 @@
 - Native Telegram promotion can add a user before editing their admin role. Add invitations must not reuse an upsert that changes an existing role to member.
 - The member endpoint accepts preserve_existing=true. Authorization and the conversation row lock apply before the existing-member no-op; explicit role updates retain existing behavior. This prevents a concurrent invitation from undoing promotion.
 - Fifteen API tests and go vet pass, including five actual concurrent invite/promotion pairs, owner preservation, member denial and admin invitation of a new member. Native mutation wiring and running Core replacement remain pending.
+
+## 2026-10-02 — native member-management requests
+- Map addChatUser to preserve-existing invitations and invitedUsers updates, editChatAdmin to explicit role changes and Bool, and non-revoking deleteChatUser to removal plus authoritative participants. Resolve InputUserSelf explicitly; reject unmapped input-user variants.
+- Keep unsupported nonzero forwarding, history revocation and current-account removal unavailable before server mutation. The pinned deleteParticipantFromChat always requests revoke_history; its removal flow remains unfinished. The official API defines that flag as removing the specified user's history in this chat: https://core.telegram.org/method/messages.deleteChatUser .
+- Rebuild local Core with the previously tested invitation flag before native tests. All109 checks pass for native add/admin role operations, preserved roles, owner denial, non-revoking transport removal and prior offline/restart regressions. All three normal ARM Debug APKs built and passed signature/package/API/ABI/manifest verification.

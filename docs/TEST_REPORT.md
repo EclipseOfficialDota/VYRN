@@ -159,6 +159,13 @@ Date: 2026-10-01. This records performed checks, not planned tests.
 - preserve_existing is evaluated under the same conversation row lock used by role updates. Existing explicit role changes retain their behavior.
 - No Android code changed at this checkpoint. Its latest evidence remains103 named emulator checks and three verified normal ARM Debug APKs from8d02008. The running local Core has not yet been replaced; native management controller wiring remains unfinished.
 
+## Native member management checkpoint — 2026-10-02
+
+- All109 named Android checks pass across first/offline/restart on API35. Original MessagesController.addUserToChat and setUserAdminRole add a real member and promote/demote/re-promote it; native callbacks, actual server roles and receiving serialized cache agree.
+- Repeated native invitation preserves admin status; transport-level owner demotion returns403. deleteChatUser with revoke_history=false removes the other member and returns standard participant updates. Original removal controller requests revoke_history=true and remains unavailable; no unsupported flag is silently discarded.
+- Nonzero forwarded-history count, current-account removal, history revocation, interactive screens/admin-rights rendering and complete two-device acceptance remain unfinished.
+- The running local WSL Core was replaced with the previously tested invitation-preserving binary after exact executable/PID validation. Backend source unchanged; fifteen API tests and go vet were verified at the preceding checkpoint. All three normal ARM Debug APKs built successfully; signature, package, API, ABI and manifest policy verification pass.
+
 ## External checks
 
 - Dedicated SSH key authentication to port 3939 was rejected. No server commands ran.
