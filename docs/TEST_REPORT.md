@@ -131,6 +131,14 @@ Date: 2026-10-01. This records performed checks, not planned tests.
 - All three ARM Debug APKs rebuilt successfully for the rename checkpoint; the verifier passed signatures, package, API levels, ABI contents and manifest policy. Physical-device installation remains untested.
 - This covers controller-based rename and local persistence. Screen interactions, permission controls, invited-device realtime metadata, other group mutations and complete UI acceptance remain unfinished.
 
+## Native history TTL checkpoint — 2026-10-02
+
+- All94 named Android checks pass across first/offline/restart on the API35 emulator. Original MessagesController.setDialogHistoryTTL exercises enable, disable and re-enable; standard native update flags and the serialized full-group cache agree with server settings.
+- The Persian group title stays unchanged, new messages use the new3600-second expiry and settings/full-group cache survive process restart.
+- Initial run stopped at the existing membership timestamp assertion. Emulator/backend clocks differed by two seconds. The revised assertion compares every native participant date directly to the authoritative member snapshot, without relaxing the date comparison.
+- TTL cache checks wait for the UI handler to schedule storage writes. Pinned-source preparation removes optimistic local TTL mutations before server acceptance.
+- Backend code is unchanged; fourteen API tests and go vet were verified at the preceding partial-settings checkpoint. All three ARM Debug APKs rebuilt; signature, package, API, ABI and manifest verification pass. Native denial feedback, invited-device realtime, countdown visuals, interactive screen acceptance and physical devices remain unverified.
+
 ## External checks
 
 - Dedicated SSH key authentication to port 3939 was rejected. No server commands ran.

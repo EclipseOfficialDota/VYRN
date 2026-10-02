@@ -60,6 +60,24 @@ Edit 'TMessagesProj/src/main/java/org/telegram/tgnet/ConnectionsManager.java' {
  $t=$t -replace '(?s)public static void onLogout\(final int currentAccount\) \{.*?\n    \}', 'public static void onLogout(final int currentAccount) { /* VYRN authentication is independent of Telegram native auth keys. */ }'
  $t
 }
+Edit 'TMessagesProj/src/main/java/org/telegram/messenger/MessagesController.java' {
+ param($t)
+ $t=(& git -c "safe.directory=$($upstream.Replace('\','/'))" -C $upstream show "${pin}:TMessagesProj/src/main/java/org/telegram/messenger/MessagesController.java") -join "`n"
+ $marker='public void setDialogHistoryTTL(long did, int ttl) {'
+ if(!$t.Contains($marker)){throw 'Pinned history TTL marker missing'}
+ # Commit native cache/UI changes only after the server accepts the setting.
+ $replacement=@'
+public void setDialogHistoryTTL(long did, int ttl) {
+        TLRPC.TL_messages_setHistoryTTL req = new TLRPC.TL_messages_setHistoryTTL();
+        req.peer = getInputPeer(did);
+        req.period = ttl;
+        getConnectionsManager().sendRequest(req, (response, error) -> {
+            if (response != null) processUpdates((TLRPC.Updates) response, false);
+        });
+    }
+'@
+ $t -replace '(?s)public void setDialogHistoryTTL\(long did, int ttl\) \{.*?\n    \}', $replacement
+}
 Edit 'TMessagesProj/src/main/java/org/telegram/messenger/SendMessagesHelper.java' {
  param($t)
  $t=(& git -c "safe.directory=$($upstream.Replace('\','/'))" -C $upstream show "${pin}:TMessagesProj/src/main/java/org/telegram/messenger/SendMessagesHelper.java") -join "`n"

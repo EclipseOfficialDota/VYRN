@@ -50,6 +50,7 @@ public final class RestRepository implements Models.Repository {
     }
     public Models.User me() throws Exception {return user((JSONObject)request("GET","/v1/me",null,true));}
     public void renameGroup(String id,String title) throws Exception {request("PATCH","/v1/conversations/"+id,new JSONObject().put("title",title),true);}
+    public void setHistoryTTL(String id,int seconds) throws Exception {request("PATCH","/v1/conversations/"+id,new JSONObject().put("disappearing_seconds",seconds),true);}
     public Models.ConversationDetails conversationDetails(String id) throws Exception {
         JSONObject data=(JSONObject)request("GET","/v1/conversations/"+id,null,true);JSONArray raw=data.getJSONArray("members");List<Models.Member> members=new ArrayList<>();
         for(int i=0;i<raw.length();i++){JSONObject member=raw.getJSONObject(i);members.add(new Models.Member(user(member),member.getString("role"),(int)Instant.parse(member.getString("joined_at")).getEpochSecond()));}

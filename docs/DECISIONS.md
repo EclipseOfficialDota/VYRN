@@ -88,3 +88,8 @@
 - Change only supplied conversation settings under the existing row lock, return effective values into recipient events and preserve omitted fields. A title-only rename must not reset auto-delete or overwrite a concurrent TTL change.
 - Route native editChatTitle through the repository and return a standard updateChat metadata notification alongside the authoritative chat. The original MessagesController processes cache/UI refreshes.
 - Verify queued native cache writes on the storage queue before asserting rename persistence; network callbacks alone do not prove cache completion.
+
+## 2026-10-02 — native history TTL updates
+- Route messages.setHistoryTTL through a TTL-only repository PATCH, preserving the group title. Return the effective authoritative period through the standard peer-history-TTL update, including zero to disable.
+- Remove Telegram's optimistic setDialogHistoryTTL cache mutation in the pinned-source preparation step. Only accepted server updates may alter cached full-group settings; rejected requests must not create a local success state.
+- Emulator checks exercise the original controller, enable/disable/re-enable, serialized full-group cache, new-message expiry and process restart. All94 checks pass across first/offline/restart. Compare participant dates to the server snapshot rather than the device clock; wait for the UI handler to schedule cache writes before storage verification.

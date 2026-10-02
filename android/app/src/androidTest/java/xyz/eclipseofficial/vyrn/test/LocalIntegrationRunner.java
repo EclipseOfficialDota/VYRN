@@ -380,14 +380,27 @@ public final class LocalIntegrationRunner extends Instrumentation {
             TLRPC.TL_messages_dialogs dialogs=(TLRPC.TL_messages_dialogs)snapshot.get(30,TimeUnit.SECONDS);TLRPC.Dialog ttlDialog=null;for(TLRPC.Dialog dialog:dialogs.dialogs)if(dialog.id==-local)ttlDialog=dialog;
             check(ttlDialog!=null && ttlDialog.ttl_period==86400 && (ttlDialog.flags&32)!=0,"created_group_dialog_TTL");passed.put("first_message_uses_creation_TTL").put("created_group_dialog_TTL");
             a.request("POST","/v1/conversations/"+group+"/members",new JSONObject().put("user_id",memberId).put("role","admin"),true);
-            verifyFullGroup(local);
+            verifyFullGroup(local,a.conversationDetails(group));
             CompletableFuture<Boolean> renamed=new CompletableFuture<>();AndroidUtilities.runOnUIThread(()->MessagesController.getInstance(2).changeChatTitle(local,"نام جدید گروه",()->renamed.complete(true)));renamed.get(30,TimeUnit.SECONDS);
             TLRPC.Chat renamedCache=cachedGroup(local);check(renamedCache!=null && renamedCache.title.equals("نام جدید گروه"),"native_group_rename_cache");
             Models.ConversationDetails changed=b.conversationDetails(group);check(changed.conversation.title.equals("نام جدید گروه") && changed.conversation.disappearingSeconds==86400,"group_rename_preserves_TTL");passed.put("MessagesController_group_rename").put("group_rename_preserves_TTL");
+            changeGroupTTL(local,3600);changeGroupTTL(local,0);changeGroupTTL(local,3600);
+            changed=b.conversationDetails(group);check(changed.conversation.title.equals("نام جدید گروه") && changed.conversation.disappearingSeconds==3600,"group_TTL_preserves_title");
+            String expiring=a.send(group,UUID.randomUUID().toString(),"پیام با زمان جدید");JSONObject timed=(JSONObject)a.request("GET","/v1/messages/"+expiring,null,true);
+            check(java.time.Duration.between(java.time.Instant.parse(timed.getString("created_at")),java.time.Instant.parse(timed.getString("expires_at"))).getSeconds()==3600,"new_message_uses_changed_TTL");passed.put("MessagesController_group_TTL").put("group_TTL_disable").put("group_TTL_preserves_title").put("new_message_uses_changed_TTL");
             passed.put("MessagesController_group_creation").put("created_group_native_cache").put("created_group_member_delivery");return group;
         } finally {AndroidUtilities.runOnUIThread(()->{center.removeObserver(observer,NotificationCenter.chatDidCreated);center.removeObserver(observer,NotificationCenter.chatDidFailCreate);});}
     }
 
+    private void changeGroupTTL(long local,int seconds) throws Exception {
+        stage="MessagesController_group_TTL";CompletableFuture<Boolean> applied=new CompletableFuture<>();NotificationCenter center=NotificationCenter.getInstance(2);
+        NotificationCenter.NotificationCenterDelegate observer=(id,account,args)->{TLRPC.ChatFull full=(TLRPC.ChatFull)args[0];if(full.id==local && full.ttl_period==seconds && ((full.flags&16384)!=0)==(seconds>0))applied.complete(true);};
+        try {
+            AndroidUtilities.runOnUIThread(()->{center.addObserver(observer,NotificationCenter.chatInfoDidLoad);MessagesController.getInstance(2).setDialogHistoryTTL(-local,seconds);});applied.get(30,TimeUnit.SECONDS);
+            CompletableFuture<Boolean> scheduled=new CompletableFuture<>();AndroidUtilities.runOnUIThread(()->scheduled.complete(true));scheduled.get(10,TimeUnit.SECONDS);
+            TLRPC.ChatFull cached=cachedFullGroup(local);check(cached!=null && cached.ttl_period==seconds && ((cached.flags&16384)!=0)==(seconds>0),"native_TTL_cache");
+        } finally {AndroidUtilities.runOnUIThread(()->center.removeObserver(observer,NotificationCenter.chatInfoDidLoad));}
+    }
     private TLRPC.Chat cachedGroup(long local) throws Exception {
         CompletableFuture<TLRPC.Chat> cached=new CompletableFuture<>();MessagesStorage storage=MessagesStorage.getInstance(2);
         storage.getStorageQueue().postRunnable(()->{try{cached.complete(storage.getChat(local));}catch(Throwable error){cached.completeExceptionally(error);}});return cached.get(10,TimeUnit.SECONDS);
@@ -396,13 +409,13 @@ public final class LocalIntegrationRunner extends Instrumentation {
         CompletableFuture<TLRPC.ChatFull> cached=new CompletableFuture<>();MessagesStorage storage=MessagesStorage.getInstance(2);
         storage.getStorageQueue().postRunnable(()->{try{cached.complete(storage.loadChatInfoInQueue(local,false,false,false,0));}catch(Throwable error){cached.completeExceptionally(error);}});return cached.get(10,TimeUnit.SECONDS);
     }
-    private void verifyFullGroup(long local) throws Exception {
+    private void verifyFullGroup(long local,Models.ConversationDetails expected) throws Exception {
         stage="native_full_group_information";CompletableFuture<TLRPC.ChatFull> loaded=new CompletableFuture<>();NotificationCenter center=NotificationCenter.getInstance(2);
         NotificationCenter.NotificationCenterDelegate observer=(id,account,args)->{TLRPC.ChatFull full=(TLRPC.ChatFull)args[0];if(full.id==local)loaded.complete(full);};
         try {
             AndroidUtilities.runOnUIThread(()->{center.addObserver(observer,NotificationCenter.chatInfoDidLoad);MessagesController.getInstance(2).loadFullChat(local,0,true);});
             TLRPC.ChatFull full=loaded.get(30,TimeUnit.SECONDS);check(full.ttl_period==86400 && (full.flags&16384)!=0 && full.participants.participants.size()==2,"native_full_group_TTL_members");
-            int owners=0,admins=0;for(TLRPC.ChatParticipant member:full.participants.participants){if(member instanceof TLRPC.TL_chatParticipantCreator)owners++;if(member instanceof TLRPC.TL_chatParticipantAdmin){admins++;check(member.date>0 && member.date<=System.currentTimeMillis()/1000,"native_member_join_timestamp");}}
+            int owners=0,admins=0;try(IdMap map=new IdMap(context,2)){for(TLRPC.ChatParticipant member:full.participants.participants){if(member instanceof TLRPC.TL_chatParticipantCreator)owners++;if(member instanceof TLRPC.TL_chatParticipantAdmin)admins++;String remote=map.remote("user",member.user_id);check(expected.members.stream().anyMatch(source->source.user.id.equals(remote) && source.joinedDate==member.date),"native_member_join_timestamp");}}
             check(owners==1 && admins==1,"native_full_group_roles");TLRPC.ChatFull cached=cachedFullGroup(local);check(cached!=null && cached.ttl_period==86400 && cached.participants.participants.size()==2,"native_full_group_persisted");
             passed.put("MessagesController_full_group_load").put("native_full_group_roles_dates").put("native_full_group_persisted");
         } finally {AndroidUtilities.runOnUIThread(()->center.removeObserver(observer,NotificationCenter.chatInfoDidLoad));}
@@ -550,8 +563,8 @@ public final class LocalIntegrationRunner extends Instrumentation {
         }
         passed.put("committed_token_cancel_ack").put("token_cancel_process_restart");
         try(IdMap map=new IdMap(context,2)){long local=map.local("conversation",state.getString("native_created_group"));TLRPC.Chat cached=MessagesStorage.getInstance(2).getChat(local);check(cached!=null && cached.title.equals("نام جدید گروه"),"created_group_survives_restart");}passed.put("created_group_survives_restart");passed.put("renamed_group_survives_restart");
-        boolean ttlRestored=false;for(Models.Conversation group:a.conversations())if(group.id.equals(state.getString("native_created_group")))ttlRestored=group.disappearingSeconds==86400;check(ttlRestored,"created_group_TTL_survives_restart");passed.put("created_group_TTL_survives_restart");
-        try(IdMap map=new IdMap(context,2)){TLRPC.ChatFull cached=cachedFullGroup(map.local("conversation",state.getString("native_created_group")));check(cached!=null && cached.ttl_period==86400 && cached.participants.participants.stream().anyMatch(p->p instanceof TLRPC.TL_chatParticipantAdmin),"full_group_survives_restart");}passed.put("full_group_survives_restart");
+        boolean ttlRestored=false;for(Models.Conversation group:a.conversations())if(group.id.equals(state.getString("native_created_group")))ttlRestored=group.disappearingSeconds==3600;check(ttlRestored,"created_group_TTL_survives_restart");passed.put("created_group_TTL_survives_restart");passed.put("changed_group_TTL_survives_restart");
+        try(IdMap map=new IdMap(context,2)){TLRPC.ChatFull cached=cachedFullGroup(map.local("conversation",state.getString("native_created_group")));check(cached!=null && cached.ttl_period==3600 && cached.participants.participants.stream().anyMatch(p->p instanceof TLRPC.TL_chatParticipantAdmin),"full_group_survives_restart");}passed.put("full_group_survives_restart");
         stage="Telegram_UI_cancellation_restart";
         try(IdMap map=new IdMap(context,2)){check(UserConfig.getInstance(2).getClientUserId()==map.local("user",state.getString("user")),"Telegram_identity_restored");}passed.put("Telegram_identity_restored");
         try(OutboxStore store=new OutboxStore(context,2)){
