@@ -74,6 +74,18 @@ Edit 'TMessagesProj/src/main/java/org/telegram/messenger/MessagesController.java
  foreach($guard in @($ui,$edited)){if(!$t.Contains($guard)){throw 'Pinned native UI application marker missing'}}
  $t=$t.Replace($ui,$ui+"`n        if (!xyz.eclipseofficial.vyrn.compat.VyrnBridge.retainLiveMessages(currentAccount, messages)) return false;")
  $t=$t.Replace($edited,$edited+"`n                    if (!xyz.eclipseofficial.vyrn.compat.VyrnBridge.retainLiveMessages(currentAccount, arrayList) || arrayList.isEmpty()) continue;")
+ foreach($bounds in @(@('public void processLoadedDialogs(', '    private void applyDialogNotificationsSettings('), @('public void processDialogsUpdate(', '    private int messagesMaxDate('))){
+  $begin=$t.IndexOf($bounds[0]);$finish=$t.IndexOf($bounds[1],$begin)
+  if($begin -lt 0 -or $finish -lt 0){throw 'Pinned native dialog application section missing'}
+  $section=$t.Substring($begin,$finish-$begin)
+  $dialogMessages='                    ArrayList<MessageObject> newMsgs = new_dialogMessage.get(value.id);'
+  if(!$section.Contains($dialogMessages)){throw 'Pinned native dialog message marker missing'}
+  $section=$section.Replace($dialogMessages,$dialogMessages+"`n                    ArrayList<MessageObject> guardedMsgs = newMsgs == null ? new ArrayList<>() : newMsgs;`n                    if (!xyz.eclipseofficial.vyrn.compat.VyrnBridge.repairDialogTop(currentAccount, value, guardedMsgs, dialogMessage.get(value.id))) continue;`n                    if (!guardedMsgs.isEmpty()) newMsgs = guardedMsgs;")
+  $section=$section.Replace('boolean oldMsgsDeleted = false;','boolean oldMsgsDeleted = xyz.eclipseofficial.vyrn.compat.VyrnBridge.isDeletedDialogTop(currentAccount, currentDialog);')
+  $section=$section.Replace('if (value.top_message >= currentDialog.top_message ||','if (oldMsgsDeleted || value.top_message >= currentDialog.top_message ||')
+  $section=$section.Replace('if (oldMsgs == null || currentDialog.top_message > 0) {','if (oldMsgsDeleted || oldMsgs == null || currentDialog.top_message > 0) {')
+  $t=$t.Substring(0,$begin)+$section+$t.Substring($finish)
+ }
  $marker='public void setDialogHistoryTTL(long did, int ttl) {'
  if(!$t.Contains($marker)){throw 'Pinned history TTL marker missing'}
  # Commit native cache/UI changes only after the server accepts the setting.

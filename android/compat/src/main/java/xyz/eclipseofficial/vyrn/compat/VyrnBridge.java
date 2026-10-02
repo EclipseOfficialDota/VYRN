@@ -199,6 +199,22 @@ public final class VyrnBridge {
         ArrayList<Integer> deleted=deletedMessagePositions(account,messages);if(deleted==null)return false;
         for(int i=deleted.size()-1;i>=0;i--)objects.remove((int)deleted.get(i));return true;
     }
+    public static boolean isDeletedDialogTop(int account,TLRPC.Dialog dialog){
+        if(dialog==null||dialog.id>=0||dialog.top_message<=0)return false;
+        Map<Long,java.util.Set<Integer>> snapshot=MessagesStorage.getInstance(account).getVyrnDeletedMessages();
+        java.util.Set<Integer> ids=snapshot==null?null:snapshot.get(dialog.id);return ids!=null&&ids.contains(dialog.top_message);
+    }
+    public static boolean repairDialogTop(int account,TLRPC.Dialog dialog,ArrayList<MessageObject> incoming,ArrayList<MessageObject> previous){
+        if(!retainLiveMessages(account,incoming))return false;
+        if(dialog.id>=0)return true;
+        Map<Long,java.util.Set<Integer>> snapshot=MessagesStorage.getInstance(account).getVyrnDeletedMessages();if(snapshot==null)return false;
+        java.util.Set<Integer> deleted=snapshot.get(dialog.id);if(deleted==null||!deleted.contains(dialog.top_message))return true;
+        MessageObject best=null;for(MessageObject object:incoming)if(best==null||object.messageOwner.date>best.messageOwner.date||object.messageOwner.date==best.messageOwner.date&&object.getId()>best.getId())best=object;
+        if(previous!=null)for(MessageObject object:previous){if(object==null)continue;if(deleted.contains(object.getId())){object.deleted=true;continue;}if(best==null||object.messageOwner.date>best.messageOwner.date||object.messageOwner.date==best.messageOwner.date&&object.getId()>best.getId())best=object;}
+        if(best!=null){MessageObject chosen=best;if(incoming.stream().noneMatch(object->object.getId()==chosen.getId()))incoming.add(chosen);dialog.top_message=best.getId();dialog.last_message_date=best.messageOwner.date;}
+        else{dialog.top_message=0;dialog.last_message_date=0;}
+        return true;
+    }
     private static ArrayList<Integer> deletedMessagePositions(int account,ArrayList<TLRPC.Message> messages){
         boolean group=false;for(TLRPC.Message message:messages)if(message!=null&&message.id>0&&message.peer_id!=null&&message.peer_id.chat_id>0){group=true;break;}
         if(!group)return new ArrayList<>();
@@ -227,6 +243,10 @@ public final class VyrnBridge {
             db.executeFast("CREATE TABLE IF NOT EXISTS vyrn_deleted_messages(uid INTEGER NOT NULL, mid INTEGER NOT NULL, PRIMARY KEY(uid,mid))").stepThis().dispose();
             db.executeFast("CREATE TRIGGER IF NOT EXISTS vyrn_delete_cached AFTER INSERT ON vyrn_deleted_messages BEGIN DELETE FROM messages_v2 WHERE uid=NEW.uid AND mid=NEW.mid; END").stepThis().dispose();
             for(String operation:new String[]{"INSERT","UPDATE"})db.executeFast("CREATE TRIGGER IF NOT EXISTS vyrn_block_"+operation+" BEFORE "+operation+" ON messages_v2 WHEN EXISTS(SELECT 1 FROM vyrn_deleted_messages WHERE uid=NEW.uid AND mid=NEW.mid) BEGIN SELECT RAISE(IGNORE); END").stepThis().dispose();
+            String live=" FROM messages_v2 m WHERE m.uid=dialogs.did AND NOT EXISTS(SELECT 1 FROM vyrn_deleted_messages f WHERE f.uid=m.uid AND f.mid=m.mid) ORDER BY m.date DESC,m.mid DESC LIMIT 1";
+            String repair="UPDATE dialogs SET last_mid=COALESCE((SELECT m.mid"+live+"),0),date=COALESCE((SELECT m.date"+live+"),0),last_mid_group=0 WHERE ";
+            for(String operation:new String[]{"INSERT","UPDATE"})db.executeFast("CREATE TRIGGER IF NOT EXISTS vyrn_dialog_"+operation+" AFTER "+operation+" ON dialogs WHEN EXISTS(SELECT 1 FROM vyrn_deleted_messages WHERE uid=NEW.did AND mid=NEW.last_mid) BEGIN "+repair+"did=NEW.did; END").stepThis().dispose();
+            db.executeFast("CREATE TRIGGER IF NOT EXISTS vyrn_delete_dialog AFTER INSERT ON vyrn_deleted_messages BEGIN "+repair+"did=NEW.uid AND last_mid=NEW.mid; END").stepThis().dispose();
             StringBuilder sql=new StringBuilder("INSERT OR REPLACE INTO vyrn_deleted_messages(uid,mid) VALUES ");
             for(int i=0;i<selected.size();i++){int id=selected.get(i);if(id<=0)throw new IllegalArgumentException("invalid_deleted_id");if(i>0)sql.append(',');sql.append('(').append(dialog).append(',').append(id).append(')');}
             if(selected.isEmpty())throw new IllegalArgumentException("empty_deleted_batch");

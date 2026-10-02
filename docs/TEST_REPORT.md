@@ -2,6 +2,16 @@
 
 Updated: 2026-10-03. This records performed checks, not planned tests.
 
+## Deleted dialog-top replay checkpoint — 2026-10-03
+
+- All170 API35 checks pass:112 first,15 offline,43 restart. Evidence: artifacts/android-integration.json with the tested APK hash.
+- Persistent native triggers repair dialogs.last_mid/date when a confirmed deletion removes the top, or when a stale INSERT/UPDATE writes that fenced top later. They choose the newest surviving cached message, excluding every recorded fence, or zero for an empty cache; last_mid_group is cleared for the replaced top.
+- Both original processLoadedDialogs and processDialogsUpdate filter their message arrays again at final UI application. A fenced incoming top is replaced by the newest surviving incoming/current message or zero. A fenced previous top cannot prevent the corrected lower/empty top from replacing it. Pending IDs remain eligible for the dialog preview.
+- Actual putDialogs tests verify persisted empty last_mid/date; both native UI processors reject the serialized prefetched top initially and after restart. A live remaining message is preserved in both native SQL metadata and the controller preview. Controlled UI holds also process a stale dialog response before real deletion, then require the released UI to omit the deleted top/body for both new/edit races.
+- Single-dialog fixtures use the upstream's actual single-dialog mode (count1/loadType3). Treating those fixtures as full pages activated extra native pagination and caused the initial request failure. The corrected full suite passes. The test reads the native dialog through its public accessor and inspects its internal message collection with reflection, without a test-only production hook or extra dependency.
+- Local instrumentation and normal ARM debug builds pass; all three normal APKs pass signature/package/API/ABI/manifest verification. Backend unchanged; preceding18 PostgreSQL tests/vet remain evidence.
+- Full rendered preview/badge acceptance, a surviving fallback absent from incoming/current UI state, large conversations and private/channel/scheduled/album behavior remain unfinished. Native migration/recovery and installation/repair for older caches before their next authoritative fence also remain unverified; this is not complete production upgrade acceptance.
+
 ## Nonblocking native deletion snapshots — 2026-10-03
 
 - All160 API35 Android checks pass:107 first,15 offline,38 restart. artifacts/android-integration.json records the tested APK hash.

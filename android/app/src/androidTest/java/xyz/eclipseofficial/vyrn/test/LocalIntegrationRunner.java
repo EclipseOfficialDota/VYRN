@@ -442,6 +442,7 @@ public final class LocalIntegrationRunner extends Instrumentation {
         check(!VyrnBridge.deleteMessages(2,dialog,mixed,true,0,0,false).get(30,TimeUnit.SECONDS)&&!a.message(own).deleted&&!a.message(foreign).deleted,"native_delete_conversation_bound");passed.put("native_delete_conversation_bound");
         ids=new ArrayList<>();ids.add(mine.getId());check(!VyrnBridge.deleteMessages(2,dialog,ids,false,0,0,false).get(30,TimeUnit.SECONDS)&&!a.message(own).deleted&&storage.getMessage(dialog,mine.getId())!=null,"delete_for_me_not_reinterpreted");passed.put("delete_for_me_not_reinterpreted");
         deleteThroughController(dialog,mine.getId());check(a.message(own).deleted&&!a.message(other).deleted,"MessagesController_authorized_delete");passed.put("MessagesController_authorized_delete").put("confirmed_delete_native_cache");
+        verifyLiveDialogFallback(dialog,mine.messageOwner,theirs.messageOwner);
         check(VyrnBridge.deleteMessages(2,dialog,ids,true,0,0,false).get(30,TimeUnit.SECONDS)&&a.message(own).revision==2,"native_delete_retry_idempotent");passed.put("native_delete_retry_idempotent");
         b.setMemberRole(group,user,true);deleteThroughController(dialog,theirs.getId());check(a.message(other).deleted,"native_admin_delete_other_sender");passed.put("native_admin_delete_other_sender");
         verifyDeletedCacheWriters(dialog,mine.messageOwner,"prefetched");
@@ -458,11 +459,13 @@ public final class LocalIntegrationRunner extends Instrumentation {
         try{
             held.get(10,TimeUnit.SECONDS);ArrayList<TLRPC.Update> updates=new ArrayList<>();if(edit){TL_update.TL_updateEditMessage update=new TL_update.TL_updateEditMessage();update.message=prefetched.messageOwner;updates.add(update);}else{TL_update.TL_updateNewMessage update=new TL_update.TL_updateNewMessage();update.message=prefetched.messageOwner;updates.add(update);}
             CompletableFuture<Boolean> applied=new CompletableFuture<>();Utilities.stageQueue.postRunnable(()->applied.complete(MessagesController.getInstance(2).processUpdateArray(updates,null,null,true,prefetched.messageOwner.date)));check(applied.get(10,TimeUnit.SECONDS)&&!(updates.get(0) instanceof TL_update.TL_updateDeleteMessages),"live_update_processed_before_deletion");
+            MessagesController.getInstance(2).processLoadedDialogs(staleDialogs(dialog,prefetched.messageOwner),null,null,0,0,1,3,false,false,false);awaitStage();
             repository.request("DELETE","/v1/messages/"+server,null,true);
             MessagesStorage storage=MessagesStorage.getInstance(2);boolean fenced=false;long deadline=System.currentTimeMillis()+10000;
             while(!fenced&&System.currentTimeMillis()<deadline){CompletableFuture<Boolean> stored=new CompletableFuture<>();storage.getStorageQueue().postRunnable(()->{try{org.telegram.SQLite.SQLiteCursor cursor=storage.getDatabase().queryFinalized("SELECT 1 FROM vyrn_deleted_messages WHERE uid=? AND mid=?",dialog,prefetched.getId());try{stored.complete(cursor.next());}finally{cursor.dispose();}}catch(Exception failure){stored.completeExceptionally(failure);}});fenced=stored.get(5,TimeUnit.SECONDS);if(!fenced)Thread.sleep(50);}
             check(fenced,"authoritative_fence_before_UI_release");release.countDown();deleted.get(15,TimeUnit.SECONDS);CompletableFuture<Boolean> displayed=new CompletableFuture<>();AndroidUtilities.runOnUIThread(()->displayed.complete(true));displayed.get(10,TimeUnit.SECONDS);awaitStorage(storage);
             String name=edit?"queued_edit_not_revived":"queued_new_not_revived";check(!appeared.get()&&storage.getMessage(dialog,prefetched.getId())==null,name);passed.put(name);
+            CompletableFuture<Boolean> top=new CompletableFuture<>();AndroidUtilities.runOnUIThread(()->{top.complete(nativeDialogOmits(dialog,prefetched.getId(),false));});String dialogCheck=edit?"queued_edit_dialog_not_revived":"queued_new_dialog_not_revived";check(top.get(10,TimeUnit.SECONDS),dialogCheck);passed.put(dialogCheck);
         }finally{release.countDown();AndroidUtilities.runOnUIThread(()->{center.removeObserver(observer,NotificationCenter.messagesDeleted);center.removeObserver(observer,NotificationCenter.didReceiveNewMessages);center.removeObserver(observer,NotificationCenter.replaceMessagesObjects);});}
     }
     private void verifyDeletedCacheWriters(long dialog,TLRPC.Message stale,String prefix) throws Exception {
@@ -476,6 +479,33 @@ public final class LocalIntegrationRunner extends Instrumentation {
         check(storage.getMessage(dialog,stale.id)==null,prefix+"_edit_cannot_revive");passed.put(prefix+"_edit_cannot_revive");
         verifyDeletedNativeUpdate(dialog,stale,prefix,false);verifyDeletedNativeUpdate(dialog,stale,prefix,true);
         verifyDeletedHistoryNotification(dialog,stale,prefix);
+        verifyDeletedDialogs(dialog,stale,prefix);
+    }
+    private TLRPC.TL_messages_dialogs staleDialogs(long dialog,TLRPC.Message stale){
+        TLRPC.TL_messages_dialogs result=new TLRPC.TL_messages_dialogs();result.messages.add(stale);TLRPC.TL_dialog item=new TLRPC.TL_dialog();item.id=dialog;item.peer=stale.peer_id;item.top_message=stale.id;item.last_message_date=stale.date;item.notify_settings=new TLRPC.TL_peerNotifySettings();result.dialogs.add(item);return result;
+    }
+    private void verifyLiveDialogFallback(long dialog,TLRPC.Message deleted,TLRPC.Message live) throws Exception {
+        MessagesStorage storage=MessagesStorage.getInstance(2);storage.putDialogs(staleDialogs(dialog,deleted),0);awaitStorage(storage);CompletableFuture<Boolean> stored=new CompletableFuture<>();
+        storage.getStorageQueue().postRunnable(()->{try{org.telegram.SQLite.SQLiteCursor cursor=storage.getDatabase().queryFinalized("SELECT last_mid,date FROM dialogs WHERE did=?",dialog);try{stored.complete(cursor.next()&&cursor.longValue(0)==live.id&&cursor.intValue(1)==live.date);}finally{cursor.dispose();}}catch(Exception failure){stored.completeExceptionally(failure);}});check(stored.get(10,TimeUnit.SECONDS),"dialog_cache_keeps_surviving_message");passed.put("dialog_cache_keeps_surviving_message");
+        MessagesController controller=MessagesController.getInstance(2);controller.processLoadedDialogs(staleDialogs(dialog,live),null,null,0,0,1,3,false,false,false);awaitStage();CompletableFuture<Boolean> ready=new CompletableFuture<>();AndroidUtilities.runOnUIThread(()->ready.complete(controller.getDialog(dialog)!=null&&controller.getDialog(dialog).top_message==live.id));check(ready.get(10,TimeUnit.SECONDS),"live_dialog_loaded");
+        controller.processLoadedDialogs(staleDialogs(dialog,deleted),null,null,0,0,1,3,false,false,false);awaitStage();CompletableFuture<Boolean> visible=new CompletableFuture<>();AndroidUtilities.runOnUIThread(()->visible.complete(nativeDialogOmits(dialog,deleted.id,false)&&controller.getDialog(dialog).top_message==live.id));check(visible.get(10,TimeUnit.SECONDS),"dialog_UI_keeps_surviving_message");passed.put("dialog_UI_keeps_surviving_message");
+    }
+    private boolean nativeDialogOmits(long dialog,int deleted,boolean empty){
+        MessagesController controller=MessagesController.getInstance(2);TLRPC.Dialog item=controller.getDialog(dialog);
+        try{Object table=MessagesController.class.getField("dialogMessage").get(controller);ArrayList<MessageObject> rows=(ArrayList<MessageObject>)table.getClass().getMethod("get",long.class).invoke(table,dialog);
+            return item!=null&&(empty?item.top_message==0:item.top_message!=deleted)&&(rows==null||rows.stream().noneMatch(object->object.getId()==deleted));
+        }catch(ReflectiveOperationException failure){throw new IllegalStateException(failure);}
+    }
+    private void awaitStage() throws Exception {
+        CompletableFuture<Boolean> done=new CompletableFuture<>();Utilities.stageQueue.postRunnable(()->done.complete(true));done.get(15,TimeUnit.SECONDS);
+    }
+    private void verifyDeletedDialogs(long dialog,TLRPC.Message stale,String prefix) throws Exception {
+        MessagesStorage storage=MessagesStorage.getInstance(2);storage.putDialogs(staleDialogs(dialog,stale),0);awaitStorage(storage);CompletableFuture<Boolean> stored=new CompletableFuture<>();
+        storage.getStorageQueue().postRunnable(()->{try{org.telegram.SQLite.SQLiteCursor cursor=storage.getDatabase().queryFinalized("SELECT last_mid,date FROM dialogs WHERE did=?",dialog);try{stored.complete(cursor.next()&&cursor.longValue(0)==0&&cursor.intValue(1)==0);}finally{cursor.dispose();}}catch(Exception error){stored.completeExceptionally(error);}});String cache=prefix+"_dialog_cache_rejects_deleted_top";check(stored.get(10,TimeUnit.SECONDS),cache);passed.put(cache);
+        for(boolean update:new boolean[]{false,true}){
+            MessagesController controller=MessagesController.getInstance(2);if(update)controller.processDialogsUpdate(staleDialogs(dialog,stale),null,false);else controller.processLoadedDialogs(staleDialogs(dialog,stale),null,null,0,0,1,3,false,false,false);awaitStage();
+            CompletableFuture<Boolean> visible=new CompletableFuture<>();AndroidUtilities.runOnUIThread(()->{visible.complete(nativeDialogOmits(dialog,stale.id,true));});String name=prefix+(update?"_dialog_update_rejects_deleted_top":"_dialog_load_rejects_deleted_top");check(visible.get(15,TimeUnit.SECONDS),name);passed.put(name);
+        }
     }
     private void verifyDeletedHistoryNotification(long dialog,TLRPC.Message stale,String prefix) throws Exception {
         org.telegram.tgnet.SerializedData encoded=new org.telegram.tgnet.SerializedData();stale.serializeToStream(encoded);org.telegram.tgnet.SerializedData decoded=new org.telegram.tgnet.SerializedData(encoded.toByteArray());TLRPC.Message pending=TLRPC.Message.TLdeserialize(decoded,decoded.readInt32(true),true);encoded.cleanup();decoded.cleanup();pending.id=-91030;pending.dialog_id=dialog;pending.send_state=MessageObject.MESSAGE_SEND_STATE_SENDING;
