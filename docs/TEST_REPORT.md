@@ -139,6 +139,13 @@ Date: 2026-10-01. This records performed checks, not planned tests.
 - TTL cache checks wait for the UI handler to schedule storage writes. Pinned-source preparation removes optimistic local TTL mutations before server acceptance.
 - Backend code is unchanged; fourteen API tests and go vet were verified at the preceding partial-settings checkpoint. All three ARM Debug APKs rebuilt; signature, package, API, ABI and manifest verification pass. Native denial feedback, invited-device realtime, countdown visuals, interactive screen acceptance and physical devices remain unverified.
 
+## Foreground group metadata checkpoint — 2026-10-02
+
+- All98 named Android checks pass across first/offline/restart. An authenticated other-member repository emits three actual settings mutations (rename/7200 seconds, zero to disable, restore name/3600). The receiving Android WebSocket cursor/inbox, serialized chat title and full-group TTL flags/cache agree after each mutation.
+- Standard native update processing preserves actual creation dates and waits for UI scheduling and native storage before acknowledging processing. This covers one emulator receiving another account's API changes; two physical Android devices and full interactive multi-device acceptance are not tested.
+- Earlier native creation/full-group/rename/TTL, cancellation and process-restart regressions pass. Backend unchanged; fourteen API tests and go vet verified at the preceding partial-settings checkpoint. All three ARM Debug APKs built successfully; signature, package, API, ABI and manifest verification pass.
+- Conversation creation/member events, stale updates after loss of membership, account switches during queued native updates and full UI crash recovery remain unfinished.
+
 ## External checks
 
 - Dedicated SSH key authentication to port 3939 was rejected. No server commands ran.

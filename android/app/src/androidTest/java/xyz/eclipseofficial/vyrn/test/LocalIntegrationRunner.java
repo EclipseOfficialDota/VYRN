@@ -388,10 +388,25 @@ public final class LocalIntegrationRunner extends Instrumentation {
             changed=b.conversationDetails(group);check(changed.conversation.title.equals("نام جدید گروه") && changed.conversation.disappearingSeconds==3600,"group_TTL_preserves_title");
             String expiring=a.send(group,UUID.randomUUID().toString(),"پیام با زمان جدید");JSONObject timed=(JSONObject)a.request("GET","/v1/messages/"+expiring,null,true);
             check(java.time.Duration.between(java.time.Instant.parse(timed.getString("created_at")),java.time.Instant.parse(timed.getString("expires_at"))).getSeconds()==3600,"new_message_uses_changed_TTL");passed.put("MessagesController_group_TTL").put("group_TTL_disable").put("group_TTL_preserves_title").put("new_message_uses_changed_TTL");
+            verifyRealtimeGroup(a,b,group,local,"نام از دستگاه دیگر",7200);
+            verifyRealtimeGroup(a,b,group,local,"نام از دستگاه دیگر",0);
+            verifyRealtimeGroup(a,b,group,local,"نام جدید گروه",3600);
+            passed.put("remote_group_rename_realtime").put("remote_group_TTL_realtime").put("remote_group_TTL_disable_realtime").put("remote_group_metadata_durable");
             passed.put("MessagesController_group_creation").put("created_group_native_cache").put("created_group_member_delivery");return group;
         } finally {AndroidUtilities.runOnUIThread(()->{center.removeObserver(observer,NotificationCenter.chatDidCreated);center.removeObserver(observer,NotificationCenter.chatDidFailCreate);});}
     }
 
+    private void verifyRealtimeGroup(RestRepository viewer,RestRepository writer,String group,long local,String title,int seconds) throws Exception {
+        stage="remote_group_metadata_realtime";VyrnBridge bridge=VyrnBridge.forAccount(2);long before=bridge.syncCursor();
+        writer.request("PATCH","/v1/conversations/"+group,new JSONObject().put("title",title).put("disappearing_seconds",seconds),true);
+        JSONObject batch=(JSONObject)viewer.request("GET","/v1/sync?cursor="+before,null,true);long target=0;JSONArray events=batch.getJSONArray("events");
+        for(int i=0;i<events.length();i++){JSONObject event=events.getJSONObject(i);if(event.getString("kind").equals("conversation.updated") && event.getJSONObject("body").optString("id").equals(group))target=event.getLong("sequence");}
+        check(target>before,"remote_group_event_emitted");long deadline=System.currentTimeMillis()+40000;
+        while(System.currentTimeMillis()<deadline && (bridge.syncCursor()<target || bridge.syncPending()!=0))Thread.sleep(100);
+        check(bridge.syncCursor()>=target && bridge.syncPending()==0 && bridge.syncDead()==0,"remote_group_inbox_processed");
+        TLRPC.Chat cached=cachedGroup(local);TLRPC.ChatFull full=cachedFullGroup(local);
+        check(cached!=null && cached.title.equals(title) && full!=null && full.ttl_period==seconds && ((full.flags&16384)!=0)==(seconds>0),"remote_group_native_cache");
+    }
     private void changeGroupTTL(long local,int seconds) throws Exception {
         stage="MessagesController_group_TTL";CompletableFuture<Boolean> applied=new CompletableFuture<>();NotificationCenter center=NotificationCenter.getInstance(2);
         NotificationCenter.NotificationCenterDelegate observer=(id,account,args)->{TLRPC.ChatFull full=(TLRPC.ChatFull)args[0];if(full.id==local && full.ttl_period==seconds && ((full.flags&16384)!=0)==(seconds>0))applied.complete(true);};

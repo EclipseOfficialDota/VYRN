@@ -93,3 +93,8 @@
 - Route messages.setHistoryTTL through a TTL-only repository PATCH, preserving the group title. Return the effective authoritative period through the standard peer-history-TTL update, including zero to disable.
 - Remove Telegram's optimistic setDialogHistoryTTL cache mutation in the pinned-source preparation step. Only accepted server updates may alter cached full-group settings; rejected requests must not create a local success state.
 - Emulator checks exercise the original controller, enable/disable/re-enable, serialized full-group cache, new-message expiry and process restart. All94 checks pass across first/offline/restart. Compare participant dates to the server snapshot rather than the device clock; wait for the UI handler to schedule cache writes before storage verification.
+
+## 2026-10-02 — foreground group metadata events
+- Resolve conversation.updated against the current authorized group snapshot rather than trusting stale event-body settings. Use standard native chat and history-TTL updates, preserving the actual creation date and serializable role/name fields.
+- Bind the snapshot read to the repository account lock and check repository/native identity before native application. Wait for the stage/UI/storage queues and verify the persisted chat title before marking the event processed.
+- The98-check emulator suite verifies other-member repository changes reaching the receiving Android cache over WebSocket, TTL zero flags and persistence through process restart. Two physical-device acceptance, removal authorization races and complete UI transaction recovery remain separate work.
