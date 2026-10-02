@@ -2,6 +2,15 @@
 
 Updated: 2026-10-03. This records performed checks, not planned tests.
 
+## Existing native-cache normalization checkpoint — 2026-10-03
+
+- All176 API35 Android checks pass:112 first,16 offline,48 restart. artifacts/android-integration.json records the tested APK hash.
+- App-private deletion table/triggers are installed during native database opening, after upstream table creation/migration and before publishing the deletion snapshot or loading cached content. Startup purges messages_v2 rows with existing fences and repairs their dialog tops. New deletion no longer performs schema installation; its batch insert and snapshot refresh retain the existing acknowledgment order.
+- The offline phase creates a genuinely populated legacy fixture in inactive native account3: persisted confirmed deletion fence, all six deletion triggers missing, a stale deleted message/dialog top and a separate live cached message. Actual native putDialogs/getMessage prove both rows exist before process death. The fixture contains normal sent text and does not activate that account or configure its authentication.
+- After real process restart, account3 remains unauthenticated. Native database opening removes the fenced row, restores the fence snapshot and preserves the live body without a new authenticated deletion event. A stale native writer remains blocked and its dialog top/date stay zero. Running the initializer twice again preserves those properties and the live row.
+- Local instrumentation and normal ARM debug builds pass; all three normal APKs pass signature/package/API/ABI/manifest verification. Backend unchanged; preceding18 PostgreSQL tests/vet remain evidence. GitHub connector lookup still finds no VYRN repository under EclipseOfficialDota; callable tools still lack repository creation.
+- This verifies missing-guard normalization for a populated cache with known persisted fences. It does not establish arbitrary upstream-version migration, malformed-database recovery, legacy fetch-order identifier migration, media-cache deletion or full rendered/multi-account/production acceptance.
+
 ## Deleted dialog-top replay checkpoint — 2026-10-03
 
 - All170 API35 checks pass:112 first,15 offline,43 restart. Evidence: artifacts/android-integration.json with the tested APK hash.

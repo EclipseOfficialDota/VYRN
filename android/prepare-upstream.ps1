@@ -180,7 +180,7 @@ Edit 'TMessagesProj/src/main/java/org/telegram/messenger/MessagesStorage.java' {
  $t=(& git -c "safe.directory=$($upstream.Replace('\','/'))" -C $upstream show "${pin}:TMessagesProj/src/main/java/org/telegram/messenger/MessagesStorage.java") -join "`n"
  foreach($marker in @('public void openDatabase(int openTries) {','            databaseCreated = true;','private void cleanupInternal(boolean deleteFiles) {')){if(!$t.Contains($marker)){throw 'Pinned native deletion snapshot lifecycle marker missing'}}
  $t=$t.Replace('public void openDatabase(int openTries) {',"public void openDatabase(int openTries) {`n        vyrnDeletedMessages = null;")
- $t=$t.Replace('            databaseCreated = true;',"            vyrnReloadDeletedMessages();`n            databaseCreated = true;")
+ $t=$t.Replace('            databaseCreated = true;',"            xyz.eclipseofficial.vyrn.compat.VyrnBridge.initializeDeletedCache(database);`n            vyrnReloadDeletedMessages();`n            databaseCreated = true;")
  $t=$t.Replace('private void cleanupInternal(boolean deleteFiles) {',"private void cleanupInternal(boolean deleteFiles) {`n        vyrnDeletedMessages = null;")
  $snapshot=@'
     private volatile java.util.Map<Long, java.util.Set<Integer>> vyrnDeletedMessages;

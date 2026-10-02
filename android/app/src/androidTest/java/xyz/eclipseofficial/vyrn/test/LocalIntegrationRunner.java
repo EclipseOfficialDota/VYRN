@@ -752,12 +752,40 @@ public final class LocalIntegrationRunner extends Instrumentation {
         check(MessagesStorage.getInstance(2).getMessage(uiPending.getDialogId(),-91001)!=null && MessagesStorage.getInstance(2).getMessage(uiCommitted.getDialogId(),-91002)!=null,"offline_UI_not_optimistically_removed");
         state.put("ui_dialog",uiPending.getDialogId()).put("ui_cancel_client",uiClient);write("vyrn-test-state.json",state);
         passed.put("SendMessagesHelper_cancel_interception").put("offline_UI_retained_until_proof");
+        seedLegacyDeletionCache();
+    }
+
+    private TLRPC.Message legacyPrefetched(JSONObject state) throws Exception {
+        org.telegram.tgnet.SerializedData data=new org.telegram.tgnet.SerializedData(android.util.Base64.decode(state.getString("prefetched"),android.util.Base64.NO_WRAP));
+        try{TLRPC.Message message=TLRPC.Message.TLdeserialize(data,data.readInt32(true),true);message.dialog_id=state.getLong("dialog");return message;}finally{data.cleanup();}
+    }
+    private void seedLegacyDeletionCache() throws Exception {
+        stage="seed_legacy_native_cache";check(UserConfig.getInstance(3).getClientUserId()==0,"legacy_fixture_inactive_account");MessagesStorage storage=MessagesStorage.getInstance(3);awaitStorage(storage);
+        JSONObject state=read("vyrn-delete-test.json"),edit=read("vyrn-edit-test.json");TLRPC.Message stale=legacyPrefetched(state),live=MessagesStorage.getInstance(2).getMessage(edit.getLong("dialog"),edit.getInt("ordinal"));check(live!=null,"legacy_live_fixture_available");
+        CompletableFuture<Boolean> prepared=new CompletableFuture<>();storage.getStorageQueue().postRunnable(()->{try{
+            org.telegram.SQLite.SQLiteDatabase db=storage.getDatabase();for(String name:new String[]{"vyrn_delete_cached","vyrn_block_INSERT","vyrn_block_UPDATE","vyrn_dialog_INSERT","vyrn_dialog_UPDATE","vyrn_delete_dialog"})db.executeFast("DROP TRIGGER IF EXISTS "+name).stepThis().dispose();
+            db.executeFast("INSERT OR REPLACE INTO vyrn_deleted_messages(uid,mid) VALUES("+stale.dialog_id+","+stale.id+")").stepThis().dispose();prepared.complete(true);
+        }catch(Exception failure){prepared.completeExceptionally(failure);}});prepared.get(10,TimeUnit.SECONDS);
+        storage.putDialogs(staleDialogs(stale.dialog_id,stale),0);storage.putDialogs(staleDialogs(edit.getLong("dialog"),live),0);awaitStorage(storage);
+        check(storage.getMessage(stale.dialog_id,stale.id)!=null&&storage.getMessage(edit.getLong("dialog"),live.id)!=null,"legacy_fixture_genuinely_populated");passed.put("legacy_fixture_genuinely_populated");
+        write("vyrn-legacy-cache.json",new JSONObject().put("live_dialog",edit.getLong("dialog")).put("live_id",live.id).put("live_text",live.message));
+    }
+    private void verifyLegacyDeletionCache() throws Exception {
+        stage="legacy_native_cache_reopen";check(UserConfig.getInstance(3).getClientUserId()==0,"legacy_reopen_no_authenticated_sync");JSONObject state=read("vyrn-delete-test.json"),fixture=read("vyrn-legacy-cache.json");TLRPC.Message stale=legacyPrefetched(state);MessagesStorage storage=MessagesStorage.getInstance(3);
+        check(storage.getMessage(stale.dialog_id,stale.id)==null,"legacy_reopen_removes_deleted_cache");passed.put("legacy_reopen_removes_deleted_cache");
+        TLRPC.Message live=storage.getMessage(fixture.getLong("live_dialog"),fixture.getInt("live_id"));check(live!=null&&live.message.equals(fixture.getString("live_text")),"legacy_reopen_preserves_live_cache");passed.put("legacy_reopen_preserves_live_cache");
+        check(storage.getVyrnDeletedMessages()!=null&&storage.getVyrnDeletedMessages().get(stale.dialog_id).contains(stale.id),"legacy_reopen_restores_fences");passed.put("legacy_reopen_restores_fences");
+        storage.putDialogs(staleDialogs(stale.dialog_id,stale),0);awaitStorage(storage);CompletableFuture<Boolean> guarded=new CompletableFuture<>();storage.getStorageQueue().postRunnable(()->{try{org.telegram.SQLite.SQLiteCursor cursor=storage.getDatabase().queryFinalized("SELECT last_mid,date FROM dialogs WHERE did=?",stale.dialog_id);try{guarded.complete(cursor.next()&&cursor.longValue(0)==0&&cursor.intValue(1)==0);}finally{cursor.dispose();}}catch(Exception failure){guarded.completeExceptionally(failure);}});
+        check(guarded.get(10,TimeUnit.SECONDS)&&storage.getMessage(stale.dialog_id,stale.id)==null,"legacy_reopen_blocks_stale_writer");passed.put("legacy_reopen_blocks_stale_writer");
+        CompletableFuture<Boolean> repeated=new CompletableFuture<>();storage.getStorageQueue().postRunnable(()->{try{VyrnBridge.initializeDeletedCache(storage.getDatabase());VyrnBridge.initializeDeletedCache(storage.getDatabase());storage.vyrnReloadDeletedMessages();repeated.complete(true);}catch(Exception failure){repeated.completeExceptionally(failure);}});repeated.get(10,TimeUnit.SECONDS);
+        check(storage.getMessage(stale.dialog_id,stale.id)==null&&storage.getMessage(fixture.getLong("live_dialog"),fixture.getInt("live_id"))!=null&&storage.getVyrnDeletedMessages().get(stale.dialog_id).contains(stale.id),"legacy_initializer_repeat_safe");passed.put("legacy_initializer_repeat_safe");
     }
 
     private void restart() throws Exception {
         stage="process_restart_session";
         JSONObject state=read("vyrn-test-state.json");
         check(state.getInt("process_id")!=android.os.Process.myPid(),"new_process");
+        verifyLegacyDeletionCache();
         RestRepository a=repo(9001), b=repo(9002);
         check(a.me().id.equals(state.getString("user")),"persisted_session");
         stage="restart_durable_cancellation";
