@@ -2,6 +2,16 @@
 
 Updated: 2026-10-02. This records performed checks, not planned tests.
 
+## Authorized native group deletion checkpoint — 2026-10-02
+
+- All18 PostgreSQL API tests and go vet pass. Atomic batch tests exercise mixed sender denial without partial changes, outsider/removed-member denial, cross-group and missing IDs, input bounds, owner/admin permissions and retries without extra revisions/events.
+- A real held conversation lock and pg_blocking_pids prove the HTTP deletion is waiting while admin demotion/removal commits. Deletion then returns403/404 and preserves the message, verifying the fresh post-lock membership read.
+- Live-history tests prove deleted rows do not consume a page's LIMIT, deleted UUID cursors preserve ordinal pagination, default history/targeted reads retain tombstones, outsiders are denied and expired content is excluded.
+- All143 API35 Android checks pass:100 first,14 offline,29 restart. Original MessagesController deletes only accepted messages from native cache; shared denial handling preserves both selected native rows. Account/group-bound atomic requests, unsupported delete-for-me preservation, idempotent retry, admin deletion of another sender, empty live history/dialog top and restart persistence pass. Evidence: artifacts/android-integration.json and its tested APK hash.
+- The first Android run failed native_deletion_survives_restart. Native history/dialogs included tombstones and replayed message-created/edit references could map current deleted state into blank live messages. Native feeds now request live-only pages and current deleted references produce delete updates. The complete suite passed after the repair.
+- Local x86_64 instrumentation and all three normal ARM Debug APK builds pass. ARM signatures/package/API/ABI/manifest verification passes; physical installation is untested. The running local WSL Core was replaced only after exact PID/executable validation; no VPS mutation occurred.
+- Full screen-driven deletion, prefetched live updates racing deletion, account switches, durable offline delete intent and delete-for-me/private/scheduled/channel modes remain unfinished. This checkpoint does not establish complete deletion/sync acceptance.
+
 ## Persisted native edit provenance checkpoint — 2026-10-02
 
 - All132 named API35 checks pass:90 first,14 offline,28 restart. artifacts/android-integration.json records the actual tested APK hash. The original SendMessagesHelper successfully edits a restored native cached message after process restart using its persisted exact revision.

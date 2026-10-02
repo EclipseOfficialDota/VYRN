@@ -53,6 +53,7 @@ public final class RestRepository implements Models.Repository {
     public void inviteMember(String id,String user) throws Exception {request("POST","/v1/conversations/"+id+"/members",new JSONObject().put("user_id",user).put("preserve_existing",true),true);}
     public void setMemberRole(String id,String user,boolean admin) throws Exception {request("POST","/v1/conversations/"+id+"/members",new JSONObject().put("user_id",user).put("role",admin?"admin":"member"),true);}
     public void removeMember(String id,String user) throws Exception {request("DELETE","/v1/conversations/"+id+"/members/"+user,null,true);}
+    public void deleteGroupMessages(String user,String group,List<String> messages) throws Exception {requestForUser(user,"DELETE","/v1/conversations/"+group+"/messages",new JSONObject().put("ids",new JSONArray(messages)),true);}
     public void setHistoryTTL(String id,int seconds) throws Exception {request("PATCH","/v1/conversations/"+id,new JSONObject().put("disappearing_seconds",seconds),true);}
     public Models.ConversationDetails conversationDetails(String id) throws Exception {
         JSONObject data=(JSONObject)request("GET","/v1/conversations/"+id,null,true);JSONArray raw=data.getJSONArray("members");List<Models.Member> members=new ArrayList<>();
@@ -76,7 +77,11 @@ public final class RestRepository implements Models.Repository {
         JSONArray data=(JSONArray)request("GET","/v1/conversations",null,true);List<Models.Conversation> result=new ArrayList<>();for(int i=0;i<data.length();i++){JSONObject c=data.getJSONObject(i);result.add(new Models.Conversation(c.getString("id"),c.getString("kind"),c.getString("title"),c.getString("role"),c.getInt("member_count"),c.getInt("disappearing_seconds")));}return result;
     }
     public List<Models.Message> messages(String conversation,String before,int limit) throws Exception{
-        String path="/v1/conversations/"+conversation+"/messages?limit="+Math.max(1,Math.min(limit,100));if(before!=null)path+="&before="+before;
+        return messages(conversation,before,limit,false);
+    }
+    public List<Models.Message> liveMessages(String conversation,String before,int limit) throws Exception{return messages(conversation,before,limit,true);}
+    private List<Models.Message> messages(String conversation,String before,int limit,boolean liveOnly) throws Exception{
+        String path="/v1/conversations/"+conversation+"/messages?limit="+Math.max(1,Math.min(limit,100))+"&live_only="+liveOnly;if(before!=null)path+="&before="+before;
         JSONArray data=(JSONArray)request("GET",path,null,true);List<Models.Message> result=new ArrayList<>();for(int i=0;i<data.length();i++)result.add(message(data.getJSONObject(i)));return result;
     }
     private Models.Message message(JSONObject m) throws Exception {

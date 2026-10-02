@@ -178,6 +178,29 @@ public final class VyrnBridge {
     }
     public static synchronized VyrnBridge forAccount(int account){VyrnBridge bridge=INSTANCES.get(account);if(bridge==null){bridge=new VyrnBridge(account);INSTANCES.put(account,bridge);}return bridge;}
     public static void execute(Runnable task){IO.execute(task);}
+    /** Preserve selected native rows until the entire server deletion has been authorized and committed. */
+    public static java.util.concurrent.CompletableFuture<Boolean> deleteMessages(int account,long dialog,ArrayList<Integer> messages,boolean forAll,int mode,int topic,boolean unsupported){
+        java.util.concurrent.CompletableFuture<Boolean> result=new java.util.concurrent.CompletableFuture<>();
+        ArrayList<Integer> selected=messages==null?new ArrayList<>():new ArrayList<>(new java.util.LinkedHashSet<>(messages));long self=UserConfig.getInstance(account).getClientUserId();
+        execute(()->{String user=null;Throwable failure=null;try{
+            if(!forAll||mode!=0||topic!=0||unsupported||dialog>=0||self==0||selected.isEmpty()||selected.size()>100||selected.stream().anyMatch(id->id==null||id<=0))throw new UnsupportedOperationException();
+            VyrnBridge bridge=forAccount(account);user=bridge.ids.remote("user",self);ArrayList<String> ids=new ArrayList<>();for(int id:selected)ids.add(bridge.ids.remote("message",id));
+            synchronized(bridge.repository.vault.guard()){
+                if(!bridge.repository.vault.isUser(user)||UserConfig.getInstance(account).getClientUserId()!=self)throw new SecurityException("account_changed");
+                bridge.repository.deleteGroupMessages(user,bridge.ids.remote("conversation",-dialog),ids);
+            }
+        }catch(Throwable error){failure=error;}
+        String origin=user;Throwable error=failure;AndroidUtilities.runOnUIThread(()->{
+            try{if(error==null){VyrnBridge bridge=forAccount(account);if(!bridge.repository.vault.isUser(origin)||UserConfig.getInstance(account).getClientUserId()!=self){result.complete(false);return;}
+                MessagesController.getInstance(account).deleteMessages(selected,null,null,dialog,0,true,0,true);result.complete(true);
+            }else{boolean rtl=org.telegram.messenger.LocaleController.isRTL;String text;
+                if(error instanceof UnsupportedOperationException)text=rtl?"این نوع حذف هنوز در دسترس نیست.":"This deletion option is not available yet.";
+                else if(error instanceof RestRepository.ApiException&&((RestRepository.ApiException)error).status==403)text=rtl?"مجوز حذف همهٔ پیام‌های انتخاب‌شده را ندارید. هیچ پیامی حذف نشد.":"You cannot delete all selected messages. No messages were deleted.";
+                else text=rtl?"حذف تأیید نشد. اتصال را بررسی کنید و دوباره تلاش کنید.":"Deletion was not confirmed. Check the connection and retry.";
+                android.widget.Toast.makeText(ApplicationLoader.applicationContext,text,android.widget.Toast.LENGTH_LONG).show();result.complete(false);
+            }}catch(Throwable unavailable){result.completeExceptionally(unavailable);}
+        });});return result;
+    }
     public static boolean dispatch(int account,TLObject request,RequestDelegate callback,RequestDelegateTimestamp timestamp){
         return dispatch(account,request,callback,timestamp,0);
     }
@@ -226,6 +249,7 @@ public final class VyrnBridge {
         String id=privateConversations.get(peer.user_id);if(id==null){dialogs();id=privateConversations.get(peer.user_id);}if(id==null)throw new UnsupportedOperationException();return id;
     }
     private TLRPC.Message message(Models.Message m,TLRPC.Peer peer){
+        if(m.deleted)throw new IllegalStateException("tombstone_is_not_a_live_message");
         ids.observe(m);
         TLRPC.TL_message out=new TLRPC.TL_message();String snapshot=editSnapshot(m);if(snapshot!=null){out.params=new HashMap<>();out.params.put(EDIT_SNAPSHOT,snapshot);}out.id=ids.message(m.id,m.ordinal);out.peer_id=peer;TLRPC.TL_peerUser sender=new TLRPC.TL_peerUser();sender.user_id=ids.local("user",m.sender);out.from_id=sender;out.flags|=256;out.date=m.date;out.message=m.deleted?"":m.encrypted?(org.telegram.messenger.LocaleController.isRTL?"این پیام در این دستگاه قابل نمایش نیست.":"This message cannot be displayed on this device."):m.text;out.out=sender.user_id==UserConfig.getInstance(account).getClientUserId();out.media=new TLRPC.TL_messageMediaEmpty();out.edit_date=m.editedDate;if(m.editedDate>0)out.flags|=TLRPC.MESSAGE_FLAG_EDITED;return out;
     }
@@ -234,7 +258,7 @@ public final class VyrnBridge {
         for(Models.Conversation c:repository.conversations()){
             List<Models.User> members=repository.members(c.id);TLRPC.Peer peer=peer(c,members);for(Models.User u:members)result.users.add(mapUser(u));if(c.kind.equals("group"))result.chats.add(chat(c));
             TLRPC.TL_dialog dialog=new TLRPC.TL_dialog();dialog.peer=peer;dialog.id=peer.chat_id!=0?-peer.chat_id:peer.user_id;dialog.notify_settings=new TLRPC.TL_peerNotifySettings();dialog.ttl_period=c.disappearingSeconds;if(c.disappearingSeconds>0)dialog.flags|=32;
-            List<Models.Message> messages=repository.messages(c.id,null,1);if(!messages.isEmpty()){TLRPC.Message message=message(messages.get(0),peer);result.messages.add(message);dialog.top_message=message.id;dialog.last_message_date=message.date;}result.dialogs.add(dialog);
+            List<Models.Message> messages=repository.liveMessages(c.id,null,1);if(!messages.isEmpty()){TLRPC.Message message=message(messages.get(0),peer);result.messages.add(message);dialog.top_message=message.id;dialog.last_message_date=message.date;}result.dialogs.add(dialog);
         }return result;
     }
     private Models.Conversation conversationModel(String id) throws Exception{return repository.conversationDetails(id).conversation;}
@@ -246,7 +270,8 @@ public final class VyrnBridge {
         Models.Conversation model=conversationModel(conversation);List<Models.User> members=repository.members(conversation);TLRPC.Peer destination=peer(model,members);
         ArrayList<TLRPC.User> users=new ArrayList<>();for(Models.User user:members)users.add(mapUser(user));ArrayList<TLRPC.Chat> chats=new ArrayList<>();if(model.kind.equals("group"))chats.add(chat(model));
         ArrayList<TLRPC.Update> updates=new ArrayList<>();
-        if(kind.equals("message.deleted")||kind.equals("message.expired")){
+        if(value.deleted||kind.equals("message.deleted")||kind.equals("message.expired")){
+            ids.observe(value);
             TL_update.TL_updateDeleteMessages update=new TL_update.TL_updateDeleteMessages();update.messages.add(ids.message(value.id,value.ordinal));update.pts=value.ordinal;update.pts_count=1;updates.add(update);
         }else{
             TLRPC.Message mapped=message(value,destination);
@@ -341,7 +366,7 @@ public final class VyrnBridge {
         if(request instanceof TLRPC.TL_messages_getHistory){
             TLRPC.TL_messages_getHistory in=(TLRPC.TL_messages_getHistory)request;String conversation=conversation(in.peer);String before=in.offset_id>0?ids.remote("message",in.offset_id):null;
             TLRPC.Peer peer;if(in.peer.chat_id!=0){TLRPC.TL_peerChat p=new TLRPC.TL_peerChat();p.chat_id=in.peer.chat_id;peer=p;}else{TLRPC.TL_peerUser p=new TLRPC.TL_peerUser();p.user_id=in.peer.user_id;peer=p;}
-            TLRPC.TL_messages_messages result=new TLRPC.TL_messages_messages();for(Models.User user:repository.members(conversation))result.users.add(mapUser(user));for(Models.Message m:repository.messages(conversation,before,in.limit))result.messages.add(message(m,peer));return result;
+            TLRPC.TL_messages_messages result=new TLRPC.TL_messages_messages();for(Models.User user:repository.members(conversation))result.users.add(mapUser(user));for(Models.Message m:repository.liveMessages(conversation,before,in.limit))result.messages.add(message(m,peer));return result;
         }
         if(request instanceof TLRPC.TL_messages_setTyping){TLRPC.TL_messages_setTyping in=(TLRPC.TL_messages_setTyping)request;repository.request("POST","/v1/conversations/"+conversation(in.peer)+"/typing",new JSONObject(),true);return new TLRPC.TL_boolTrue();}
         if(request instanceof TLRPC.TL_updates_getState){TLRPC.TL_updates_state state=new TLRPC.TL_updates_state();state.date=(int)(System.currentTimeMillis()/1000);return state;}

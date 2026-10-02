@@ -107,6 +107,7 @@ func (s *Server) Handler() http.Handler {
 	secure("GET /v1/messages/{id}", s.getMessage)
 	secure("PATCH /v1/messages/{id}", s.editMessage)
 	secure("DELETE /v1/messages/{id}", s.deleteMessage)
+	secure("DELETE /v1/conversations/{id}/messages", s.deleteGroupMessages)
 	secure("PUT /v1/messages/{id}/reactions", s.react)
 	secure("DELETE /v1/messages/{id}/reactions", s.unreact)
 	secure("PUT /v1/messages/{id}/receipt", s.receipt)

@@ -133,3 +133,10 @@
 - Old blobs without the field remain readable and explicitly clear any stale provenance when decoded into an existing object. Unknown, malformed or content-mismatched snapshots require refresh; no database migration or fabricated revision is needed.
 - The native custom-parameter copier does not transfer a snapshot from an older message to a replacement; incoming authoritative snapshots retain their own version.
 - Native edit storage and replaceMessageIfExists merge old local UI attributes while preserving the incoming provenance, or remove it when the incoming version is unknown. Never copy an old basis alongside newly received content. The132-check emulator suite verifies latest persisted revision and a successful original-helper edit after process restart.
+
+## 2026-10-02 — authorized atomic group deletion
+- Delete1–100 distinct message UUIDs in one conversation/message-lock transaction. Check all group/sender permissions before changing any row; tombstones, content/media clearing, revision increments and recipient events commit together. Authorized retries are no-ops for already deleted/expired messages.
+- Acquire the group lock before reading membership in a fresh statement. A request waiting behind demotion/removal must use the newly committed role, not a pre-lock join snapshot. Real PostgreSQL lock-wait tests cover both cases.
+- Intercept the original MessagesController remote deletion before optimistic native removal. Bind requests to the originating account/group; apply the original cache-only removal only after the entire server request succeeds. Permission errors preserve every selected native row.
+- Native history/dialog feeds use server-side live_only filtering before LIMIT, preserving stable ordinal cursors across deleted rows. Resolve replayed message events against current deletion state; a tombstone can never map to a live blank message.
+- Delete-for-me, private/scheduled/channel deletion, legacy pending-task replay, durable offline deletion intent and full screen/account-switch acceptance remain unfinished. Unsupported modes fail before local deletion; never reinterpret delete-for-me as delete-for-everyone.

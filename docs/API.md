@@ -21,8 +21,9 @@ All production endpoints require HTTPS. JSON uses UTF-8. Authentication is `Auth
 | PATCH `/v1/conversations/{id}` | title and/or disappearing_seconds; omitted fields are preserved atomically; an empty patch is invalid; zero explicitly disables auto-delete |
 | GET/POST `/v1/conversations/{id}/members` | list or add/change member role; owner/admin permissions enforced; optional preserve_existing=true makes an authorized invitation leave an existing role unchanged atomically, while new members are inserted normally |
 | DELETE `/v1/conversations/{id}/members/{user}` | remove member/leave group |
-| GET `/v1/conversations/{id}/messages` | limit 1–100, before message UUID, optional plaintext group search q |
+| GET `/v1/conversations/{id}/messages` | limit 1–100, before message UUID, optional plaintext group search q; live_only=true excludes deleted/expired messages before pagination; default preserves tombstones |
 | POST `/v1/conversations/{id}/messages` | client_id, payload, encrypted, optional media_id/reply_to/forwarded_from |
+| DELETE `/v1/conversations/{id}/messages` | atomic group deletion of1–100 distinct message UUIDs in JSON ids; member deletes own messages, owner/admin may delete other senders; returns204 after commit |
 | GET `/v1/messages/{id}` | current authorized message state, including deletion/expiry tombstones |
 | PATCH `/v1/messages/{id}` | payload, encrypted, expected revision; stale edit returns 409 |
 | DELETE `/v1/messages/{id}` | replace message with a tombstone |
@@ -47,6 +48,10 @@ Send cancellation is bound to the authenticated sender and the original conversa
 WebSocket first returns `{"type":"ready",...}`. Each `events` frame has ordered events and `cursor`. Commit events locally, then send `{"type":"ack","cursor":N}`. Heartbeat is 20 seconds; an unacknowledged batch disconnects after 45 seconds. Reconnect with bounded exponential backoff and the last committed cursor. A revoked/expired session closes the stream; refresh authentication and reconnect. Android foreground consumption now journals raw batches and cursor before acknowledgement and adapts message events. Background execution, crash recovery at every boundary and complete mapping of conversation/member/typing/reaction/receipt events remain acceptance work.
 
 Uploads: file/video/image 250 MiB, avatar 10 MiB, voice 100 MiB, user quota 2 GiB. Low disk returns 507 while text sends stay available. An unbound upload is owner-only; other members can download only after attachment to a live authorized message.
+
+## Group batch deletion
+
+Group batch deletion accepts `{"ids":["message-uuid", "another-uuid"]}`. Every ID must belong to the authorized group; a missing or cross-group ID returns404 and an unauthorized sender returns403 without changing any selected message. Existing deletion/expiry tombstones are accepted as no-ops after authorization. Successful retries neither increase revisions nor emit duplicate deletion events. The conversation lock serializes membership changes; message locks use UUID order. Payload clearing, media-reference removal, revision increments and recipient events commit together. Android currently supports delete-for-everyone for normal group messages; delete-for-me, private/scheduled/channel deletion and durable offline deletion intent remain unfinished and are rejected before local cache removal.
 
 ## Administrator API
 

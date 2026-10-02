@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"net/http"
+	"sort"
 	"strconv"
 	"time"
 	"unicode/utf8"
@@ -234,6 +235,12 @@ func (s *Server) getMessage(w http.ResponseWriter, r *http.Request) {
 func (s *Server) readMessages(w http.ResponseWriter, r *http.Request, conversation, single string) {
 	before := r.URL.Query().Get("before")
 	search := r.URL.Query().Get("q")
+	liveParam := r.URL.Query().Get("live_only")
+	if liveParam != "" && liveParam != "true" && liveParam != "false" {
+		fail(w, 400, "invalid_request")
+		return
+	}
+	liveOnly := single == "" && liveParam == "true"
 	if !validID(conversation) || (before != "" && !validID(before)) || utf8.RuneCountInString(search) > 100 {
 		fail(w, 400, "invalid_request")
 		return
@@ -266,7 +273,8 @@ func (s *Server) readMessages(w http.ResponseWriter, r *http.Request, conversati
         AND EXISTS(SELECT 1 FROM members WHERE conversation_id=msg.conversation_id AND user_id=$5)
         AND ($2::uuid IS NULL OR ordinal<(SELECT ordinal FROM messages WHERE id=$2 AND conversation_id=$1))
         AND ($6::uuid IS NULL OR msg.id=$6)
-        AND ($3='' OR (NOT encrypted AND deleted_at IS NULL AND position(lower($3) in lower(payload->>'text'))>0)) ORDER BY ordinal DESC LIMIT $4`, conversation, cursor, search, limit, current(r).UserID, messageID)
+        AND (NOT $7::boolean OR (deleted_at IS NULL AND (expires_at IS NULL OR expires_at>now())))
+        AND ($3='' OR (NOT encrypted AND deleted_at IS NULL AND position(lower($3) in lower(payload->>'text'))>0)) ORDER BY ordinal DESC LIMIT $4`, conversation, cursor, search, limit, current(r).UserID, messageID, liveOnly)
 	if err != nil {
 		s.internal(w)
 		return
@@ -332,6 +340,117 @@ func (s *Server) editMessage(w http.ResponseWriter, r *http.Request) {
 		return true
 	})
 }
+func (s *Server) deleteGroupMessages(w http.ResponseWriter, r *http.Request) {
+	conversation := r.PathValue("id")
+	var in struct {
+		IDs []string `json:"ids"`
+	}
+	if !validID(conversation) {
+		fail(w, 404, "not_found")
+		return
+	}
+	if !decode(w, r, &in) {
+		return
+	}
+	if len(in.IDs) == 0 || len(in.IDs) > 100 {
+		fail(w, 400, "invalid_messages")
+		return
+	}
+	sort.Strings(in.IDs)
+	for i, id := range in.IDs {
+		if !validID(id) || i > 0 && id == in.IDs[i-1] {
+			fail(w, 400, "invalid_messages")
+			return
+		}
+	}
+	ctx := r.Context()
+	tx, err := s.db.Begin(ctx)
+	if err != nil {
+		s.internal(w)
+		return
+	}
+	defer tx.Rollback(ctx)
+	var locked string
+	err = tx.QueryRow(ctx, `SELECT id::text FROM conversations WHERE id=$1 AND kind='group' FOR UPDATE`, conversation).Scan(&locked)
+	if err == pgx.ErrNoRows {
+		fail(w, 404, "not_found")
+		return
+	}
+	if err != nil {
+		s.internal(w)
+		return
+	}
+	// Read membership in a fresh statement after the lock, including changes committed while waiting.
+	var role string
+	err = tx.QueryRow(ctx, `SELECT role FROM members WHERE conversation_id=$1 AND user_id=$2`, conversation, current(r).UserID).Scan(&role)
+	if err == pgx.ErrNoRows {
+		fail(w, 404, "not_found")
+		return
+	}
+	if err != nil {
+		s.internal(w)
+		return
+	}
+	rows, err := tx.Query(ctx, `SELECT id::text,sender_id::text,deleted_at IS NOT NULL OR (expires_at IS NOT NULL AND expires_at<=now()) FROM messages WHERE conversation_id=$1 AND id=ANY($2::uuid[]) ORDER BY id FOR UPDATE`, conversation, in.IDs)
+	if err != nil {
+		s.internal(w)
+		return
+	}
+	live := make([]string, 0, len(in.IDs))
+	count := 0
+	forbidden := false
+	for rows.Next() {
+		var id, sender string
+		var deleted bool
+		if err = rows.Scan(&id, &sender, &deleted); err != nil {
+			rows.Close()
+			s.internal(w)
+			return
+		}
+		count++
+		forbidden = forbidden || sender != current(r).UserID && role == "member"
+		if !deleted {
+			live = append(live, id)
+		}
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		s.internal(w)
+		return
+	}
+	if count != len(in.IDs) {
+		fail(w, 404, "not_found")
+		return
+	}
+	if forbidden {
+		fail(w, 403, "forbidden")
+		return
+	}
+	if len(live) > 0 {
+		if _, err = tx.Exec(ctx, `UPDATE messages SET payload='{}',media_id=NULL,deleted_at=now(),revision=revision+1,pinned=false WHERE id=ANY($1::uuid[])`, live); err != nil {
+			s.internal(w)
+			return
+		}
+		users, err := recipients(ctx, tx, conversation)
+		if err != nil {
+			s.internal(w)
+			return
+		}
+		for _, id := range live {
+			if emit(ctx, tx, users, "message.deleted", map[string]string{"conversation_id": conversation, "message_id": id, "user_id": current(r).UserID}) != nil {
+				s.internal(w)
+				return
+			}
+		}
+	}
+	if err = tx.Commit(ctx); err != nil {
+		s.internal(w)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
 func (s *Server) deleteMessage(w http.ResponseWriter, r *http.Request) {
 	s.mutateMessage(w, r, "message.deleted", func(tx pgx.Tx, id, conversation, sender, role string, enc bool) bool {
 		if sender != current(r).UserID && role == "member" {
