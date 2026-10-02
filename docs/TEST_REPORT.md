@@ -1,6 +1,15 @@
 # Verification report
 
-Date: 2026-10-01. This records performed checks, not planned tests.
+Updated: 2026-10-02. This records performed checks, not planned tests.
+
+## Native plain-text edit checkpoint — 2026-10-02
+
+- All126 named API35 Android checks pass:86 first,14 offline,26 restart. Evidence: artifacts/android-integration.json with the tested APK SHA-256. The original SendMessagesHelper dispatched an edit using a real foreground fragment; actual server revision/text/date and serialized native cache agree.
+- A second-device-style edit away from and back to equal text advances the server revision. The originally captured composer basis still returns409 revision_conflict despite a newer mapped history observation. No newer revision is substituted during save.
+- Cached messages without immutable provenance require reload. Requests bound to another account/destination fail without mutation; deleting the message during editing prevents resurrection. Edited native text/date survives process death.
+- Local x86_64 debug/instrumentation builds pass. All three normal ARM Debug APKs built and passed signature/package/API/ABI/manifest verification. Physical installation is untested. Backend source unchanged; fifteen API tests and go vet remain verified at the earlier checkpoint.
+- Initial test failures exposed a missing compile-time FragmentActivity boundary and a test reading the blocking getMessage API on its own storage queue. Fixed the instrumentation to resolve the real fragment at runtime and call getMessage from the instrumentation thread. The complete suite passed after both repairs.
+- Full screen-driven composer/reload and conflict-alert acceptance, rich/media edits and concurrent account switches remain unfinished.
 
 ## Passed
 

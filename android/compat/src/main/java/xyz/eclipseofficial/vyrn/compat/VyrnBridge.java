@@ -39,6 +39,32 @@ public final class VyrnBridge {
     private static final ExecutorService IO=Executors.newFixedThreadPool(2);
     private static final ExecutorService SEND=Executors.newSingleThreadExecutor();
     private static final Map<Integer,VyrnBridge> INSTANCES=new HashMap<>();
+    private static final Map<MessageObject,EditRequest> EDITS=new java.util.WeakHashMap<>();
+    /** Local provenance only; inherited TL serialization deliberately omits it. */
+    private static final class ObservedMessage extends TLRPC.TL_message {
+        final String serverId,conversation,sender;final int revision,ordinal;
+        ObservedMessage(Models.Message value){serverId=value.id;conversation=value.conversation;sender=value.sender;revision=value.deleted||value.encrypted?0:value.revision;ordinal=value.ordinal;}
+    }
+    private static final class EditRequest extends TLRPC.TL_messages_editMessage {
+        final int account,revision,originalId;final long dialog;final String user,conversation,serverId;
+        EditRequest(int account,int revision,int id,long dialog,String user,String conversation,String serverId){this.account=account;this.revision=revision;this.originalId=id;this.dialog=dialog;this.user=user;this.conversation=conversation;this.serverId=serverId;}
+    }
+    public static synchronized void captureEdit(int account,MessageObject object){
+        if(object==null)return;EDITS.remove(object);
+        if(!(object.messageOwner instanceof ObservedMessage)||object.getDialogId()>=0)return;
+        ObservedMessage value=(ObservedMessage)object.messageOwner;VyrnBridge bridge=forAccount(account);
+        if(value.revision<=0||value.ordinal!=object.getId()||!bridge.repository.vault.isUser(value.sender)||UserConfig.getInstance(account).getClientUserId()!=bridge.ids.local("user",value.sender))return;
+        EDITS.put(object,new EditRequest(account,value.revision,object.getId(),object.getDialogId(),value.sender,value.conversation,value.serverId));
+    }
+    public static synchronized TLRPC.TL_messages_editMessage editRequest(int account,MessageObject object){
+        EditRequest basis=EDITS.get(object);
+        if(basis==null||basis.account!=account||basis.originalId!=object.getId()||basis.dialog!=object.getDialogId())return new EditRequest(account,0,object.getId(),object.getDialogId(),null,null,null);
+        return new EditRequest(account,basis.revision,basis.originalId,basis.dialog,basis.user,basis.conversation,basis.serverId);
+    }
+    public static void processEditUpdates(int account,TLRPC.TL_messages_editMessage request,TLRPC.Updates updates){
+        if(!(request instanceof EditRequest))return;EditRequest basis=(EditRequest)request;
+        Utilities.stageQueue.postRunnable(()->{VyrnBridge bridge=forAccount(account);if(bridge.repository.vault.isUser(basis.user)&&UserConfig.getInstance(account).getClientUserId()==bridge.ids.local("user",basis.user))MessagesController.getInstance(account).processUpdateArray(updates.updates,updates.users,updates.chats,true,updates.date);});
+    }
     private static final ConcurrentHashMap<Long,PendingRequest> REQUESTS=new ConcurrentHashMap<>();
     private static long requestKey(int account,int token){return ((long)account<<32)|(token&0xffffffffL);}
     private static final class PendingRequest {
@@ -171,7 +197,14 @@ public final class VyrnBridge {
     public static void cancelRequestsForGuid(int account,int guid){if(guid==0)return;for(PendingRequest pending:REQUESTS.values()){boolean matches;synchronized(pending){matches=pending.account==account && pending.guid==guid;}if(matches)pending.cancel(null);}}
     private static TLRPC.TL_error problem(Throwable failure){
         TLRPC.TL_error error=null;if(failure!=null){error=new TLRPC.TL_error();error.code=failure instanceof RestRepository.ApiException?((RestRepository.ApiException)failure).status:503;error.text=failure instanceof UnsupportedOperationException?"VYRN_FEATURE_UNAVAILABLE":"VYRN_REQUEST_FAILED";}
+        if(failure instanceof RestRepository.ApiException&&((RestRepository.ApiException)failure).code.equals("revision_conflict"))error.text="VYRN_EDIT_CONFLICT";
+        if(failure instanceof IllegalStateException&&"edit_snapshot_required".equals(failure.getMessage())){error.code=409;error.text="VYRN_EDIT_RELOAD_REQUIRED";}
         return error;
+    }
+    public static void showEditError(int account,TLRPC.TL_error error,org.telegram.ui.ActionBar.BaseFragment fragment,TLRPC.TL_messages_editMessage request){
+        boolean rtl=org.telegram.messenger.LocaleController.isRTL;
+        if("VYRN_EDIT_CONFLICT".equals(error.text)||"VYRN_EDIT_RELOAD_REQUIRED".equals(error.text))org.telegram.ui.Components.AlertsCreator.showSimpleAlert(fragment,rtl?"پیام تغییر کرده یا نسخهٔ آن مشخص نیست. پیام را دوباره بارگیری کنید و ویرایش را تکرار کنید.":"The message changed or its version is unknown. Reload the message and edit again.");
+        else org.telegram.ui.Components.AlertsCreator.processError(account,error,fragment,request);
     }
     public TLRPC.User mapUser(Models.User value){TLRPC.TL_user u=new TLRPC.TL_user();u.id=ids.local("user",value.id);u.flags=2|4|32|64;u.first_name=value.name;u.last_name="";u.phone="";u.self=u.id==UserConfig.getInstance(account).getClientUserId();u.photo=new TLRPC.TL_userProfilePhotoEmpty();u.status=new TLRPC.TL_userStatusOffline();return u;}
     private TLRPC.Peer peer(Models.Conversation conversation,List<Models.User> members) throws Exception{
@@ -185,7 +218,7 @@ public final class VyrnBridge {
     }
     private TLRPC.Message message(Models.Message m,TLRPC.Peer peer){
         ids.observe(m);
-        TLRPC.TL_message out=new TLRPC.TL_message();out.id=ids.message(m.id,m.ordinal);out.peer_id=peer;TLRPC.TL_peerUser sender=new TLRPC.TL_peerUser();sender.user_id=ids.local("user",m.sender);out.from_id=sender;out.flags|=256;out.date=m.date;out.message=m.deleted?"":m.encrypted?(org.telegram.messenger.LocaleController.isRTL?"این پیام در این دستگاه قابل نمایش نیست.":"This message cannot be displayed on this device."):m.text;out.out=sender.user_id==UserConfig.getInstance(account).getClientUserId();out.media=new TLRPC.TL_messageMediaEmpty();out.edit_date=m.editedDate;if(m.editedDate>0)out.flags|=TLRPC.MESSAGE_FLAG_EDITED;return out;
+        TLRPC.TL_message out=new ObservedMessage(m);out.id=ids.message(m.id,m.ordinal);out.peer_id=peer;TLRPC.TL_peerUser sender=new TLRPC.TL_peerUser();sender.user_id=ids.local("user",m.sender);out.from_id=sender;out.flags|=256;out.date=m.date;out.message=m.deleted?"":m.encrypted?(org.telegram.messenger.LocaleController.isRTL?"این پیام در این دستگاه قابل نمایش نیست.":"This message cannot be displayed on this device."):m.text;out.out=sender.user_id==UserConfig.getInstance(account).getClientUserId();out.media=new TLRPC.TL_messageMediaEmpty();out.edit_date=m.editedDate;if(m.editedDate>0)out.flags|=TLRPC.MESSAGE_FLAG_EDITED;return out;
     }
     private TLRPC.TL_messages_dialogs dialogs() throws Exception {
         TLRPC.TL_messages_dialogs result=new TLRPC.TL_messages_dialogs();
@@ -243,6 +276,20 @@ public final class VyrnBridge {
     public int syncPending() throws Exception {String user=repository.vault.load().optString("user_id");return user.isEmpty()?0:realtime.pending(user);}
     public int syncDead() throws Exception {String user=repository.vault.load().optString("user_id");return user.isEmpty()?0:realtime.dead(user);}
     private synchronized TLObject handle(TLObject request) throws Exception {
+        if(request instanceof TLRPC.TL_messages_editMessage){
+            if(!(request instanceof EditRequest))throw new UnsupportedOperationException();EditRequest in=(EditRequest)request;
+            if(in.revision<=0)throw new IllegalStateException("edit_snapshot_required");
+            if(in.account!=account||in.id!=in.originalId||in.peer==null||in.peer.chat_id<=0||-in.peer.chat_id!=in.dialog||!in.conversation.equals(ids.remote("conversation",in.peer.chat_id))||!in.serverId.equals(ids.remote("message",in.id)))throw new SecurityException("edit_identity_changed");
+            if((in.flags&2048)==0||(in.flags&~(2048|8|2))!=0||in.media!=null||in.reply_markup!=null||in.rich_message!=null||in.entities!=null&&!in.entities.isEmpty())throw new UnsupportedOperationException();
+            synchronized(repository.vault.guard()){
+                if(!repository.vault.isUser(in.user)||UserConfig.getInstance(account).getClientUserId()!=ids.local("user",in.user))throw new SecurityException("account_changed");
+                Models.Message edited=repository.editText(in.user,in.serverId,in.revision,in.message);
+                TLRPC.TL_updates result=new TLRPC.TL_updates();result.date=edited.editedDate;
+                if(edited.deleted){TL_update.TL_updateDeleteMessages deleted=new TL_update.TL_updateDeleteMessages();deleted.messages.add(ids.message(edited.id,edited.ordinal));result.updates.add(deleted);}
+                else{TLRPC.TL_peerChat peer=new TLRPC.TL_peerChat();peer.chat_id=in.peer.chat_id;TL_update.TL_updateEditMessage update=new TL_update.TL_updateEditMessage();update.message=message(edited,peer);result.updates.add(update);}
+                Models.ConversationDetails details=repository.conversationDetails(in.conversation);TLRPC.Chat group=chat(details.conversation);group.date=details.createdDate;result.chats.add(group);for(Models.Member member:details.members)result.users.add(mapUser(member.user));return result;
+            }
+        }
         if(request instanceof TLRPC.TL_messages_addChatUser){
             TLRPC.TL_messages_addChatUser in=(TLRPC.TL_messages_addChatUser)request;if(in.fwd_limit!=0)throw new UnsupportedOperationException();String id=ids.remote("conversation",in.chat_id);repository.inviteMember(id,inputUser(in.user_id));
             TLRPC.TL_messages_invitedUsers result=new TLRPC.TL_messages_invitedUsers();result.updates=membershipUpdates(id);return result;

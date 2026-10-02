@@ -322,6 +322,7 @@ public final class LocalIntegrationRunner extends Instrumentation {
         check(UserConfig.getInstance(2).getClientUserId()==uiUser.id && bridge.repository.vault.isUser(ta.getString("user_id")),"Telegram_native_logout_isolated");passed.put("Telegram_native_logout_isolated");
         check(bridge.repository.vault.isUser(ta.getString("user_id")) && !bridge.repository.vault.isUser(tb.getString("user_id")),"nonblocking_identity_snapshot");passed.put("nonblocking_identity_snapshot");
         String createdGroup=createGroupThroughTelegram(a,b,tb.getString("user_id"));
+        verifyNativeTextEdit(a,createdGroup,ta.getString("user_id"));
         write("vyrn-test-state.json",new JSONObject().put("native_created_group",createdGroup).put("ui_deleted_random",uiDeletedRandom).put("ui_deleted_server",uiDeletedServer).put("ui_deleted_ordinal",uiDeletedOrdinal).put("ui_committed_random",uiCommittedRandom).put("ui_committed_server",uiCommittedServer).put("token_group",tokenGroup).put("uncertain_group",uncertainGroup).put("uncertain_random",uncertainRandom).put("uncertain_server",uncertainServer).put("group",groupId).put("message",messageId).put("oldest",oldest).put("oldest_ordinal",upper).put("user",ta.getString("user_id")).put("process_id",android.os.Process.myPid()));
         Files.delete(file("vyrn-test-fixture.json").toPath());
 
@@ -374,6 +375,38 @@ public final class LocalIntegrationRunner extends Instrumentation {
         CompletableFuture<TLObject> response=new CompletableFuture<>();
         VyrnBridge.dispatch(2,request,(value,error)->{if(error!=null)response.completeExceptionally(new AssertionError());else response.complete(value);},null);
         return response;
+    }
+    private MessageObject observedText(String group,String server) throws Exception {
+        TLRPC.TL_messages_getHistory history=new TLRPC.TL_messages_getHistory();TLRPC.TL_inputPeerChat peer=new TLRPC.TL_inputPeerChat();try(IdMap ids=new IdMap(context,2)){peer.chat_id=ids.local("conversation",group);}history.peer=peer;history.limit=100;
+        CompletableFuture<TLObject> result=new CompletableFuture<>();ConnectionsManager.getInstance(2).sendRequest(history,(value,error)->{if(error==null)result.complete(value);else result.completeExceptionally(new AssertionError());});
+        try(IdMap ids=new IdMap(context,2)){for(TLRPC.Message message:((TLRPC.messages_Messages)result.get(30,TimeUnit.SECONDS)).messages)if(ids.remote("message",message.id).equals(server))return new MessageObject(2,message,false,false);}
+        throw new AssertionError();
+    }
+    private TLRPC.TL_error editFailure(TLRPC.TL_messages_editMessage request) throws Exception {
+        CompletableFuture<TLRPC.TL_error> result=new CompletableFuture<>();ConnectionsManager.getInstance(2).sendRequest(request,(value,error)->result.complete(error));return result.get(30,TimeUnit.SECONDS);
+    }
+    private void verifyNativeTextEdit(RestRepository repository,String group,String user) throws Exception {
+        stage="native_text_edit";String server=repository.send(group,UUID.randomUUID().toString(),"ویرایش اولیه");MessageObject viewed=observedText(group,server);VyrnBridge.captureEdit(2,viewed);
+        CompletableFuture<Integer> queued=new CompletableFuture<>();AndroidUtilities.runOnUIThread(()->{try{org.telegram.ui.ActionBar.BaseFragment fragment=(org.telegram.ui.ActionBar.BaseFragment)Class.forName("org.telegram.ui.LaunchActivity").getMethod("getSafeLastFragment").invoke(null);queued.complete(SendMessagesHelper.getInstance(2).editMessage(viewed,"ویرایش اصلی",false,fragment,null,0,0));}catch(Exception failure){queued.completeExceptionally(failure);}});
+        check(queued.get(15,TimeUnit.SECONDS)!=0,"original_text_edit_helper_dispatched");
+        long deadline=System.currentTimeMillis()+30000;Models.Message edited=repository.message(server);while(edited.revision==1&&System.currentTimeMillis()<deadline){Thread.sleep(100);edited=repository.message(server);}
+        check(edited.revision==2&&edited.text.equals("ویرایش اصلی")&&edited.editedDate>0,"native_text_edit_committed");
+        TLRPC.Message cached=null;while(System.currentTimeMillis()<deadline){cached=MessagesStorage.getInstance(2).getMessage(viewed.getDialogId(),viewed.getId());if(cached!=null&&cached.message.equals(edited.text))break;Thread.sleep(100);}
+        check(cached!=null&&cached.message.equals(edited.text)&&cached.edit_date==edited.editedDate,"native_text_edit_cached");passed.put("original_text_edit_helper_dispatched").put("native_text_edit_committed").put("native_text_edit_cached");
+        MessageObject stale=observedText(group,server);VyrnBridge.captureEdit(2,stale);
+        repository.editText(user,server,2,"temporary other device");repository.editText(user,server,3,edited.text);
+        observedText(group,server); // A newer equal-text observation must not replace the frozen composer basis.
+        TLRPC.TL_messages_editMessage request=VyrnBridge.editRequest(2,stale);request.id=stale.getId();request.peer=MessagesController.getInstance(2).getInputPeer(stale.getDialogId());request.flags=2048;request.message="must not overwrite";
+        TLRPC.TL_error conflict=editFailure(request);check(conflict!=null&&conflict.code==409&&conflict.text.equals("VYRN_EDIT_CONFLICT")&&repository.message(server).revision==4&&repository.message(server).text.equals(edited.text),"native_edit_ABA_conflict");passed.put("native_edit_ABA_conflict");
+        MessageObject unknown=new MessageObject(2,cached,false,false);VyrnBridge.captureEdit(2,unknown);request=VyrnBridge.editRequest(2,unknown);request.id=unknown.getId();request.peer=MessagesController.getInstance(2).getInputPeer(unknown.getDialogId());request.flags=2048;request.message="unknown basis";
+        TLRPC.TL_error missing=editFailure(request);check(missing!=null&&missing.text.equals("VYRN_EDIT_RELOAD_REQUIRED")&&repository.message(server).revision==4,"cached_edit_requires_reload");passed.put("cached_edit_requires_reload");
+        MessageObject current=observedText(group,server);VyrnBridge.captureEdit(2,current);request=VyrnBridge.editRequest(2,current);request.id=current.getId();TLRPC.TL_inputPeerChat wrong=new TLRPC.TL_inputPeerChat();wrong.chat_id=-current.getDialogId()+1;request.peer=wrong;request.flags=2048;request.message="wrong destination";
+        check(editFailure(request)!=null&&repository.message(server).revision==4,"edit_destination_bound");passed.put("edit_destination_bound");
+        request=VyrnBridge.editRequest(1,current);request.id=current.getId();request.peer=MessagesController.getInstance(2).getInputPeer(current.getDialogId());request.flags=2048;request.message="wrong account";
+        check(editFailure(request)!=null&&repository.message(server).revision==4,"edit_account_bound");passed.put("edit_account_bound");
+        write("vyrn-edit-test.json",new JSONObject().put("server",server).put("dialog",current.getDialogId()).put("ordinal",current.getId()).put("text",edited.text));
+        String deleted=repository.send(group,UUID.randomUUID().toString(),"Deleted during editing");MessageObject removed=observedText(group,deleted);VyrnBridge.captureEdit(2,removed);repository.request("DELETE","/v1/messages/"+deleted,null,true);request=VyrnBridge.editRequest(2,removed);request.id=removed.getId();request.peer=MessagesController.getInstance(2).getInputPeer(removed.getDialogId());request.flags=2048;request.message="must not resurrect";
+        check(editFailure(request)!=null&&repository.message(deleted).deleted,"deleted_edit_not_revived");passed.put("deleted_edit_not_revived");
     }
     private String createGroupThroughTelegram(RestRepository a,RestRepository b,String memberId) throws Exception {
         stage="Telegram_display_name_discovery";
@@ -656,6 +689,8 @@ public final class LocalIntegrationRunner extends Instrumentation {
         passed.put("lost_acknowledgement_recovery");
         List<Models.Message> messages=b.messages(state.getString("group"),null,100);
         check(messages.size()==4 && messages.get(0).text.equals("Offline two") && messages.get(1).text.equals("Offline one") && messages.get(2).text.equals("Realtime incoming") && messages.get(3).text.equals("Edited ویرایش"),"persisted_history");
+        JSONObject editState=read("vyrn-edit-test.json");TLRPC.Message savedEdit=MessagesStorage.getInstance(2).getMessage(editState.getLong("dialog"),editState.getInt("ordinal"));
+        check(savedEdit!=null&&savedEdit.message.equals(editState.getString("text"))&&savedEdit.edit_date>0,"native_edit_survives_restart");passed.put("native_edit_survives_restart");
         try(OutboxStore store=new OutboxStore(context,2)){
             OutboxStore.Entry sent=store.get(state.getString("user"),clientId(state.getString("user"),state.getLong("outbox_first")));
             check(sent.state==OutboxStore.SENT && sent.text==null,"outbox_ack_persisted_body_removed");

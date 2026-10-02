@@ -84,6 +84,16 @@ Edit 'TMessagesProj/src/main/java/org/telegram/messenger/SendMessagesHelper.java
  $marker='public void cancelSendingMessage(ArrayList<MessageObject> objects) {'
  if(!$t.Contains($marker)){throw 'Pinned message cancellation marker missing'}
  $t=$t.Replace($marker,$marker+"`n        if (xyz.eclipseofficial.vyrn.compat.VyrnBridge.cancelSendingMessages(currentAccount, objects)) return;")
+ $start=$t.IndexOf('    public int editMessage(MessageObject messageObject, String message,')
+ $end=$t.IndexOf('    public int editRichMessage(', $start)
+ if($start -lt 0 -or $end -lt 0){throw 'Pinned text edit markers missing'}
+ $section=$t.Substring($start,$end-$start)
+ $constructor='req = new TLRPC.TL_messages_editMessage();'
+ $success='getMessagesController().processUpdates((TLRPC.Updates) response, false);'
+ if(!$section.Contains($constructor) -or !$section.Contains($success)){throw 'Pinned text edit request markers missing'}
+ $section=$section.Replace($constructor,'req = xyz.eclipseofficial.vyrn.compat.VyrnBridge.editRequest(currentAccount, messageObject);').Replace($success,'xyz.eclipseofficial.vyrn.compat.VyrnBridge.processEditUpdates(currentAccount, req, (TLRPC.Updates) response);')
+ $section=$section.Replace('AlertsCreator.processError(currentAccount, error, fragment, req)','xyz.eclipseofficial.vyrn.compat.VyrnBridge.showEditError(currentAccount, error, fragment, req)')
+ $t=$t.Substring(0,$start)+$section+$t.Substring($end)
  $proof=@'
     public void vyrnResolveCancellation(int oldId, long dialogId, TLRPC.Message committed) {
         removeFromSendingMessages(oldId, false);
@@ -101,6 +111,13 @@ Edit 'TMessagesProj/src/main/java/org/telegram/messenger/SendMessagesHelper.java
 
 '@
  $t.Replace('    public boolean retrySendMessage(MessageObject messageObject, boolean unsent, long payStars) {',$proof+'    public boolean retrySendMessage(MessageObject messageObject, boolean unsent, long payStars) {')
+}
+Edit 'TMessagesProj/src/main/java/org/telegram/ui/Components/ChatActivityEnterView.java' {
+ param($t)
+ $t=(& git -c "safe.directory=$($upstream.Replace('\','/'))" -C $upstream show "${pin}:TMessagesProj/src/main/java/org/telegram/ui/Components/ChatActivityEnterView.java") -join "`n"
+ $marker='        editingMessageObject = messageObject;'
+ if(!$t.Contains($marker)){throw 'Pinned composer edit marker missing'}
+ $t.Replace($marker,$marker+"`n        xyz.eclipseofficial.vyrn.compat.VyrnBridge.captureEdit(currentAccount, messageObject);")
 }
 Edit 'TMessagesProj/jni/tgnet/Connection.cpp' {
  param($t)

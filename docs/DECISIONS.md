@@ -119,3 +119,10 @@
 - Expose server revision/conversation/edited timestamp in repository models and use the standard native edited flag/date. Keep incomplete acknowledgement revisions unknown rather than assuming one.
 - Schema3 IdMap stores transactional, monotonic sender/group/revision/body-hash observations. Preserve populated older IDs; require a fresh observation for legacy edit eligibility. Same-revision computed expiry tombstones invalidate eligibility without allowing resurrection.
 - Matching an observed text hash is not proof of the exact version originally shown by the UI, especially equal-text ABA edits. Composer entry must capture an immutable exact viewed revision; views without it must refresh or fail closed. The native edit transport/controller is still unfinished.
+
+## 2026-10-02 — immutable native text editing
+- Attach immutable server identity/revision provenance to mapped in-memory messages using a subclass with unchanged standard TL serialization. Decoding native cached messages intentionally does not fabricate a revision.
+- Capture that provenance at the original composer entry. Save creates a separate request carrying the frozen account, sender, group, UUID, ordinal and revision; newer equal-text observations cannot replace it.
+- Submit the exact revision through the existing server compare-and-swap mutation. Unknown cached revisions require reload, and conflicts show an explicit Persian/English alert. Never fetch a newer revision to make a stale edit succeed.
+- Feed accepted authoritative updates through the native update-array processor without treating stable message ordinals as Telegram PTS. Validate account identity again before native application; deleted authoritative states produce tombstone updates.
+- This connects plain group-text editing only. Full interactive composer/reload acceptance, rich entities, media edits and broader account-switch races remain unfinished.
