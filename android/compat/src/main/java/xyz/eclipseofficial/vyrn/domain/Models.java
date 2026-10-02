@@ -5,8 +5,9 @@ import java.util.List;
 public final class Models {
     private Models() {}
     public static final class User {
-        public final String id, name;
-        public User(String id, String name) { this.id=id; this.name=name; }
+        public final String id, name, firstName, lastName, about;
+        public User(String id, String name) { this(id,name,name,"",""); }
+        public User(String id,String name,String firstName,String lastName,String about){this.id=id;this.name=name;this.firstName=firstName;this.lastName=lastName;this.about=about;}
     }
     public static final class Conversation {
         public final String id, kind, title, role;

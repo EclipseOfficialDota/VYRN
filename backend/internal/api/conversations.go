@@ -24,11 +24,11 @@ func (s *Server) getProfile(w http.ResponseWriter, r *http.Request, id string, s
 		fail(w, 404, "not_found")
 		return
 	}
-	var name, email string
+	var name, email, first, lastName, about string
 	var avatar *string
 	var last time.Time
 	var admin bool
-	err := s.db.QueryRow(r.Context(), `SELECT display_name,email,avatar_id::text,last_seen,admin FROM users WHERE id=$1 AND NOT disabled`, id).Scan(&name, &email, &avatar, &last, &admin)
+	err := s.db.QueryRow(r.Context(), `SELECT display_name,email,avatar_id::text,last_seen,admin,COALESCE(first_name,display_name),last_name,about FROM users WHERE id=$1 AND NOT disabled`, id).Scan(&name, &email, &avatar, &last, &admin, &first, &lastName, &about)
 	if err == pgx.ErrNoRows {
 		fail(w, 404, "not_found")
 		return
@@ -37,7 +37,7 @@ func (s *Server) getProfile(w http.ResponseWriter, r *http.Request, id string, s
 		s.internal(w)
 		return
 	}
-	out := map[string]any{"id": id, "display_name": name, "avatar_id": avatar, "last_seen": last, "online": time.Since(last) < 45*time.Second}
+	out := map[string]any{"id": id, "display_name": name, "first_name": first, "last_name": lastName, "about": about, "avatar_id": avatar, "last_seen": last, "online": time.Since(last) < 45*time.Second}
 	if self {
 		out["email"] = email
 		out["admin"] = admin
@@ -47,25 +47,70 @@ func (s *Server) getProfile(w http.ResponseWriter, r *http.Request, id string, s
 }
 func (s *Server) updateProfile(w http.ResponseWriter, r *http.Request) {
 	var in struct {
-		Name   string  `json:"display_name"`
-		Avatar *string `json:"avatar_id"`
+		Name   *string         `json:"display_name"`
+		First  *string         `json:"first_name"`
+		Last   *string         `json:"last_name"`
+		About  *string         `json:"about"`
+		Avatar json.RawMessage `json:"avatar_id"`
 	}
 	if !decode(w, r, &in) {
 		return
 	}
-	if utf8.RuneCountInString(strings.TrimSpace(in.Name)) < 1 || utf8.RuneCountInString(in.Name) > 100 {
+	if in.Name == nil && in.First == nil && in.Last == nil && in.About == nil && len(in.Avatar) == 0 || in.Name != nil && (in.First != nil || in.Last != nil) {
 		fail(w, 400, "invalid_request")
 		return
 	}
-	if in.Avatar != nil {
-		var exists bool
-		if !validID(*in.Avatar) || s.db.QueryRow(r.Context(), `SELECT EXISTS(SELECT 1 FROM media WHERE id=$1 AND owner_id=$2 AND kind='avatar')`, *in.Avatar, current(r).UserID).Scan(&exists) != nil || !exists {
+	tx, err := s.db.Begin(r.Context())
+	if err != nil {
+		s.internal(w)
+		return
+	}
+	defer tx.Rollback(r.Context())
+	var name, first, last, about string
+	var avatar *string
+	if err = tx.QueryRow(r.Context(), `SELECT display_name,COALESCE(first_name,display_name),last_name,about,avatar_id::text FROM users WHERE id=$1 FOR UPDATE`, current(r).UserID).Scan(&name, &first, &last, &about, &avatar); err != nil {
+		s.internal(w)
+		return
+	}
+	if in.Name != nil {
+		first = strings.TrimSpace(*in.Name)
+		last = ""
+	}
+	if in.First != nil {
+		first = strings.TrimSpace(*in.First)
+	}
+	if in.Last != nil {
+		last = strings.TrimSpace(*in.Last)
+	}
+	if in.Name != nil || in.First != nil || in.Last != nil {
+		name = strings.TrimSpace(first + " " + last)
+	}
+	if in.About != nil {
+		about = *in.About
+	}
+	if first == "" || utf8.RuneCountInString(first) > 100 || utf8.RuneCountInString(last) > 100 || utf8.RuneCountInString(name) > 100 || utf8.RuneCountInString(about) > 280 {
+		fail(w, 400, "invalid_request")
+		return
+	}
+	if len(in.Avatar) > 0 {
+		if json.Unmarshal(in.Avatar, &avatar) != nil {
 			fail(w, 400, "invalid_avatar")
 			return
 		}
 	}
-	_, err := s.db.Exec(r.Context(), `UPDATE users SET display_name=$2,avatar_id=$3 WHERE id=$1`, current(r).UserID, in.Name, in.Avatar)
+	if len(in.Avatar) > 0 && avatar != nil {
+		var exists bool
+		if !validID(*avatar) || tx.QueryRow(r.Context(), `SELECT EXISTS(SELECT 1 FROM media WHERE id=$1 AND owner_id=$2 AND kind='avatar')`, *avatar, current(r).UserID).Scan(&exists) != nil || !exists {
+			fail(w, 400, "invalid_avatar")
+			return
+		}
+	}
+	_, err = tx.Exec(r.Context(), `UPDATE users SET display_name=$2,avatar_id=$3,first_name=$4,last_name=$5,about=$6 WHERE id=$1`, current(r).UserID, name, avatar, first, last, about)
 	if err != nil {
+		s.internal(w)
+		return
+	}
+	if err = tx.Commit(r.Context()); err != nil {
 		s.internal(w)
 		return
 	}
@@ -167,7 +212,7 @@ func (s *Server) conversationDetails(w http.ResponseWriter, r *http.Request) {
 	var created time.Time
 	var members json.RawMessage
 	err := s.db.QueryRow(r.Context(), `SELECT c.kind,c.title,m.role,c.disappearing_seconds,c.created_at,
-		(SELECT jsonb_agg(jsonb_build_object('id',u.id,'display_name',u.display_name,'role',all_members.role,'avatar_id',u.avatar_id,'joined_at',all_members.joined_at) ORDER BY all_members.joined_at,u.id)
+		(SELECT jsonb_agg(jsonb_build_object('id',u.id,'display_name',u.display_name,'first_name',COALESCE(u.first_name,u.display_name),'last_name',u.last_name,'role',all_members.role,'avatar_id',u.avatar_id,'joined_at',all_members.joined_at) ORDER BY all_members.joined_at,u.id)
 		 FROM members all_members JOIN users u ON u.id=all_members.user_id WHERE all_members.conversation_id=c.id)
 		FROM conversations c JOIN members m ON m.conversation_id=c.id WHERE c.id=$1 AND m.user_id=$2`, id, current(r).UserID).Scan(&kind, &title, &role, &seconds, &created, &members)
 	if err == pgx.ErrNoRows {
@@ -291,7 +336,7 @@ func (s *Server) listMembers(w http.ResponseWriter, r *http.Request) {
 		fail(w, 404, "not_found")
 		return
 	}
-	rows, err := s.db.Query(r.Context(), `SELECT u.id::text,u.display_name,m.role,u.avatar_id::text FROM members m JOIN users u ON u.id=m.user_id WHERE m.conversation_id=$1 ORDER BY m.joined_at,u.id`, id)
+	rows, err := s.db.Query(r.Context(), `SELECT u.id::text,u.display_name,m.role,u.avatar_id::text,COALESCE(u.first_name,u.display_name),u.last_name FROM members m JOIN users u ON u.id=m.user_id WHERE m.conversation_id=$1 ORDER BY m.joined_at,u.id`, id)
 	if err != nil {
 		s.internal(w)
 		return
@@ -299,13 +344,13 @@ func (s *Server) listMembers(w http.ResponseWriter, r *http.Request) {
 	defer rows.Close()
 	out := []map[string]any{}
 	for rows.Next() {
-		var user, name, role string
+		var user, name, role, first, last string
 		var avatar *string
-		if rows.Scan(&user, &name, &role, &avatar) != nil {
+		if rows.Scan(&user, &name, &role, &avatar, &first, &last) != nil {
 			s.internal(w)
 			return
 		}
-		out = append(out, map[string]any{"id": user, "display_name": name, "role": role, "avatar_id": avatar})
+		out = append(out, map[string]any{"id": user, "display_name": name, "first_name": first, "last_name": last, "role": role, "avatar_id": avatar})
 	}
 	if rows.Err() != nil {
 		s.internal(w)

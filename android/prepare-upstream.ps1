@@ -46,6 +46,45 @@ Edit 'TMessagesProj/src/main/java/org/telegram/ui/LaunchActivity.java' {
  $t=(& git -c "safe.directory=$($upstream.Replace('\','/'))" -C $upstream show "${pin}:TMessagesProj/src/main/java/org/telegram/ui/LaunchActivity.java") -join "`n"
  $t -replace '(?s)private BaseFragment getClientNotActivatedFragment\(\) \{.*?\n    \}', 'private BaseFragment getClientNotActivatedFragment() { return new xyz.eclipseofficial.vyrn.compat.VyrnLoginActivity(); }'
 }
+Edit 'TMessagesProj/src/main/java/org/telegram/ui/ChangeNameActivity.java' {
+ param($t)
+ $t=(& git -c "safe.directory=$($upstream.Replace('\','/'))" -C $upstream show "${pin}:TMessagesProj/src/main/java/org/telegram/ui/ChangeNameActivity.java") -join "`n"
+ $t=$t.Replace('private View doneButton;','private View doneButton; private boolean vyrnSaving; private long vyrnProfileOrigin;')
+ $t=$t.Replace('public View createView(Context context) {',"public View createView(Context context) {`n        vyrnProfileOrigin = UserConfig.getInstance(currentAccount).getClientUserId();")
+ $marker="saveName();`n                        finishFragment();"
+ if(!$t.Contains($marker)){throw 'Pinned name confirmation marker missing'}
+ $t=$t.Replace($marker,'saveName();')
+ $body=@'
+private void saveName() {
+        if (vyrnSaving || firstNameField.getText() == null || lastNameField.getText() == null) return;
+        final long origin = vyrnProfileOrigin;
+        if (origin == 0 || UserConfig.getInstance(currentAccount).getClientUserId() != origin) return;
+        TL_account.updateProfile request = new TL_account.updateProfile(); request.flags = 3;
+        request.first_name = firstNameField.getText().toString(); request.last_name = lastNameField.getText().toString();
+        vyrnSaving = true; doneButton.setEnabled(false);
+        ConnectionsManager.getInstance(currentAccount).sendRequest(request, (response, error) -> AndroidUtilities.runOnUIThread(() -> {
+            vyrnSaving = false; doneButton.setEnabled(true);
+            if (origin == 0 || UserConfig.getInstance(currentAccount).getClientUserId() != origin) return;
+            if (error != null || !(response instanceof TLRPC.User) || ((TLRPC.User) response).id != origin) {
+                org.telegram.ui.Components.AlertsCreator.showSimpleAlert(this, LocaleController.isRTL ? "ذخیرهٔ نام انجام نشد. دوباره تلاش کنید." : "Could not save your name. Try again."); return;
+            }
+            TLRPC.User accepted = (TLRPC.User) response;
+            TLRPC.User user = UserConfig.getInstance(currentAccount).getCurrentUser(); if (user == null) return;
+            user.first_name = accepted.first_name; user.last_name = accepted.last_name;
+            UserConfig.getInstance(currentAccount).setCurrentUser(user); UserConfig.getInstance(currentAccount).saveConfig(true);
+            MessagesController.getInstance(currentAccount).putUser(user, false);
+            java.util.ArrayList<TLRPC.User> users = new java.util.ArrayList<>(); users.add(user);
+            org.telegram.messenger.MessagesStorage.getInstance(currentAccount).putUsersAndChats(users, null, true, true);
+            NotificationCenter.getInstance(currentAccount).postNotificationName(NotificationCenter.mainUserInfoChanged);
+            NotificationCenter.getInstance(currentAccount).postNotificationName(NotificationCenter.updateInterfaces, MessagesController.UPDATE_MASK_NAME);
+            finishFragment();
+        }));
+    }
+'@
+ if(!$t.Contains('private void saveName() {')){throw 'Pinned name save method missing'}
+ $t=[regex]::Replace($t,'(?s)private void saveName\(\) \{.*?\n    \}',$body)
+ $t
+}
 Edit 'TMessagesProj/src/main/java/org/telegram/ui/SessionBottomSheet.java' {
  param($t)
  $t=(& git -c "safe.directory=$($upstream.Replace('\','/'))" -C $upstream show "${pin}:TMessagesProj/src/main/java/org/telegram/ui/SessionBottomSheet.java") -join "`n"

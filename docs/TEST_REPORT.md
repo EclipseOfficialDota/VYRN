@@ -2,6 +2,16 @@
 
 Updated: 2026-10-03. This records performed checks, not planned tests.
 
+## Structured profile and partial-update checkpoint — 2026-10-03
+
+- Migration005 adds nullable first_name with legacy display-name fallback, last_name and about. Self/public profiles, discovery and member snapshots expose actual separate names. Partial profile changes serialize under the user's row lock, preserve omitted fields and validate the combined100-character name and280-character biography. Legacy display_name updates reset the separate surname; explicit avatar_id:null removes the photo.
+- Fixed the existing name-only PATCH behavior that erased avatar_id. Actual owned-avatar fixtures now survive name and biography changes. Invalid input, unauthorized avatars and mixed legacy/structured names leave the profile unchanged. Concurrent first-name and biography updates both survive.
+- All20 real PostgreSQL API tests and go vet pass. The profile test reconstructs a populated pre005 user schema, applies the migration twice and verifies legacy fallback before changing the profile. Public profile/discovery tests still reject exposure of email/admin fields; discovery now allows exactly the five public fields including separate names.
+- Original Android account.updateProfile maps immutable request flags/strings through the origin-bound vault guard to the partial API. Separate names persist in domain/native models. The reproducible original ChangeNameActivity overlay saves the native user/cache and closes only after server confirmation, preserves other cached user attributes and binds edits to the identity present when the view opens. Failure leaves local names unchanged and allows retry.
+- All196 API35 emulator checks pass:126 first,5 profile,16 offline,49 restart. New checks cover separate/partial names, biography preserving names, invalid input, mismatched identity and fields after real process restart. The full suite initially hit actual HTTP429 when the extra profile calls followed the already heavy first phase; the harness now stops the app and waits60 seconds before its isolated profile phase, as for restart. Production rate limits are unchanged. artifacts/android-integration.json records the tested APK hash.
+- Final local instrumentation and all three normal ARM debug builds pass; APK signature/package/API/ABI/manifest checks pass. Local Core was replaced after exact PID/executable verification and applied the additive migration. Scanner passes118 tracked files.
+- Native request/model persistence is tested; full screen-driven ChangeNameActivity success/failure/cache restart, biography screen/loading, profile photo upload/rendering, profile realtime propagation, adversarial account-switch races, physical devices and production acceptance remain unfinished.
+
 ## Bulk device-session revocation checkpoint — 2026-10-03
 
 - DELETE /v1/sessions revokes every other owned session with one PostgreSQL UPDATE, preserving the authenticated caller and other users. Repeated calls return204. Original Android auth.resetAuthorizations uses this endpoint under the same originating-account guard as session listing and individual revocation; it does not loop over client-fetched sessions or report partial success.

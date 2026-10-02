@@ -63,7 +63,7 @@ public final class LocalIntegrationRunner extends Instrumentation {
             Intent launch=new Intent(Intent.ACTION_MAIN).setClassName(context,"org.telegram.ui.LaunchActivity").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
             check(startActivitySync(launch)!=null,"foreground_activity");
             waitForIdleSync();
-            if(phase.equals("first")) first(); else if(phase.equals("offline")) offline(); else if(phase.equals("restart")) restart(); else throw new IllegalArgumentException();
+            if(phase.equals("first")) first(); else if(phase.equals("profile")) profile(); else if(phase.equals("offline")) offline(); else if(phase.equals("restart")) restart(); else throw new IllegalArgumentException();
             result.putString("vyrn_result", "passed");
             result.putString("checks", passed.toString());
             result.putInt("process_id", android.os.Process.myPid());
@@ -387,8 +387,23 @@ public final class LocalIntegrationRunner extends Instrumentation {
         try(IdMap ids=new IdMap(context,2)){for(TLRPC.Message message:((TLRPC.messages_Messages)result.get(30,TimeUnit.SECONDS)).messages)if(ids.remote("message",message.id).equals(server))return new MessageObject(2,message,false,false);}
         throw new AssertionError();
     }
+    private void profile() throws Exception {
+        RestRepository a=repo(9001),b=repo(9002);check(a.me().id.equals(read("vyrn-test-state.json").getString("user")),"profile_process_identity");verifyNativeProfile(a,b);
+    }
+    private void verifyNativeProfile(RestRepository a,RestRepository b) throws Exception {
+        stage="native_profile";
+        TL_account.updateProfile names=new TL_account.updateProfile();names.flags=3;names.first_name="نام";names.last_name="خانوادگی";
+        TLRPC.User result=(TLRPC.User)nativeResponse(names);check(result.first_name.equals("نام") && result.last_name.equals("خانوادگی") && result.id==UserConfig.getInstance(2).getClientUserId(),"native_profile_separate_names");
+        TL_account.updateProfile first=new TL_account.updateProfile();first.flags=1;first.first_name="نام جدید";
+        result=(TLRPC.User)nativeResponse(first);check(result.first_name.equals("نام جدید") && result.last_name.equals("خانوادگی"),"native_profile_partial_name");
+        TL_account.updateProfile about=new TL_account.updateProfile();about.flags=4;about.about="دربارهٔ VYRN";nativeResponse(about);
+        Models.User current=a.me();check(current.firstName.equals("نام جدید") && current.lastName.equals("خانوادگی") && current.about.equals("دربارهٔ VYRN"),"native_profile_bio_preserves_names");
+        TL_account.updateProfile invalid=new TL_account.updateProfile();invalid.flags=3;invalid.first_name=" ";invalid.last_name="bad";check(editFailure(invalid)!=null && a.me().lastName.equals("خانوادگی"),"native_invalid_profile_preserves_server");
+        VyrnBridge bridge=VyrnBridge.forAccount(2);JSONObject saved=bridge.repository.vault.load();try{bridge.repository.vault.save(b.vault.load());check(editFailure(names)!=null,"native_profile_origin_guard");}finally{bridge.repository.vault.save(saved);}
+        passed.put("native_profile_separate_names").put("native_profile_partial_name").put("native_profile_bio_preserves_names").put("native_invalid_profile_preserves_server").put("native_profile_origin_guard");
+    }
     private TLObject nativeResponse(TLObject request) throws Exception {
-        CompletableFuture<TLObject> result=new CompletableFuture<>();ConnectionsManager.getInstance(2).sendRequest(request,(value,error)->{if(error!=null)result.completeExceptionally(new AssertionError());else result.complete(value);});return result.get(30,TimeUnit.SECONDS);
+        CompletableFuture<TLObject> result=new CompletableFuture<>();ConnectionsManager.getInstance(2).sendRequest(request,(value,error)->{if(error!=null){stage="native_request_status_"+error.code;result.completeExceptionally(new AssertionError());}else result.complete(value);});return result.get(30,TimeUnit.SECONDS);
     }
     private void verifyNativeSessions(RestRepository a,RestRepository b,JSONObject fixture) throws Exception {
         stage="native_sessions";RestRepository other=repo(9020);other.vault.clear();
@@ -827,6 +842,7 @@ public final class LocalIntegrationRunner extends Instrumentation {
         verifyLegacyDeletionCache();
         RestRepository a=repo(9001), b=repo(9002);
         check(a.me().id.equals(state.getString("user")),"persisted_session");
+        Models.User restoredProfile=a.me();check(restoredProfile.firstName.equals("نام جدید") && restoredProfile.lastName.equals("خانوادگی") && restoredProfile.about.equals("دربارهٔ VYRN"),"profile_names_bio_after_restart");passed.put("profile_names_bio_after_restart");
         stage="restart_durable_cancellation";
         try(OutboxSender sender=new OutboxSender(context,9008,a)){
             check(sender.cancelDurably(state.getString("user"),state.getString("cancelled_client")).get(45,TimeUnit.SECONDS),"cancel_confirmed_after_restart");

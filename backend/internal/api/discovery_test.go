@@ -28,7 +28,7 @@ func TestUserDiscoveryPrivacyAndBounds(t *testing.T) {
 			t.Fatal(err)
 		}
 		for _, user := range users {
-			if len(user) != 3 || user["email"] != nil || user["admin"] != nil {
+			if len(user) != 5 || user["email"] != nil || user["admin"] != nil || user["first_name"] == nil || user["last_name"] == nil {
 				t.Fatal("discovery exposed non-public fields")
 			}
 		}

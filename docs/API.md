@@ -10,7 +10,7 @@ All production endpoints require HTTPS. JSON uses UTF-8. Authentication is `Auth
 | POST `/v1/auth/recover` | email, recovery_code, new_password; consumes code and revokes sessions |
 | POST `/v1/auth/recovery-code` | authenticated password recheck; replaces recovery code |
 | POST `/v1/auth/logout` | revokes current session |
-| GET/PATCH `/v1/me` | profile; update display_name and owned avatar_id |
+| GET/PATCH `/v1/me` | profile; partial first_name/last_name/about/owned avatar_id changes preserve omitted fields; avatar_id:null clears photo; legacy display_name resets separate names; mixing display_name with first_name/last_name is invalid |
 | GET `/v1/users/{id}` | profile by UUID, without email |
 | GET `/v1/users/search?q=...&limit=50` | authenticated display-name discovery; maximum50 results, excludes self, disabled users and blocks in either direction; no email search or login fields |
 | GET `/v1/sessions` | active sessions for current user |

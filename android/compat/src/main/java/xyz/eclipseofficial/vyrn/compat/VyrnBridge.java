@@ -294,17 +294,25 @@ public final class VyrnBridge {
     public static boolean dispatch(int account,TLObject request,RequestDelegate callback,RequestDelegateTimestamp timestamp,int token){
         PendingRequest pending=new PendingRequest(account,token,request instanceof TLRPC.TL_messages_sendMessage,callback,timestamp);
         if(token!=0 && REQUESTS.putIfAbsent(requestKey(account,token),pending)!=null)throw new IllegalStateException("duplicate_request_token");
-        if(request instanceof TL_account.getAuthorizations || request instanceof TL_account.resetAuthorization || request instanceof TLRPC.TL_auth_resetAuthorizations){
+        if(request instanceof TL_account.getAuthorizations || request instanceof TL_account.resetAuthorization || request instanceof TLRPC.TL_auth_resetAuthorizations || request instanceof TL_account.updateProfile){
             pending.sessionOrigin=UserConfig.getInstance(account).getClientUserId();
             final long hash=request instanceof TL_account.resetAuthorization?((TL_account.resetAuthorization)request).hash:0;
             final boolean revoke=request instanceof TL_account.resetAuthorization;
             final boolean revokeOthers=request instanceof TLRPC.TL_auth_resetAuthorizations;
+            final boolean profile=request instanceof TL_account.updateProfile;
+            final int profileFlags=profile?((TL_account.updateProfile)request).flags:0;
+            final String first=profile?((TL_account.updateProfile)request).first_name:null,last=profile?((TL_account.updateProfile)request).last_name:null,about=profile?((TL_account.updateProfile)request).about:null;
             execute(()->{try{
                 VyrnBridge bridge=forAccount(account);pending.bridge=bridge;
                 synchronized(bridge.repository.vault.guard()){
                     String user=bridge.repository.vault.load().getString("user_id");pending.user=user;
                     if(pending.sessionOrigin==0 || UserConfig.getInstance(account).getClientUserId()!=pending.sessionOrigin || bridge.ids.local("user",user)!=pending.sessionOrigin)throw new SecurityException("account_changed");
-                    if(revokeOthers){bridge.repository.requestForUser(user,"DELETE","/v1/sessions",null,true);pending.complete(new TLRPC.TL_boolTrue(),null);}
+                    if(profile){
+                        if(profileFlags==0 || (profileFlags&~7)!=0 || (profileFlags&1)!=0 && first==null || (profileFlags&2)!=0 && last==null || (profileFlags&4)!=0 && about==null)throw new IllegalArgumentException("invalid_profile");
+                        JSONObject changes=new JSONObject();if((profileFlags&1)!=0)changes.put("first_name",first);if((profileFlags&2)!=0)changes.put("last_name",last);if((profileFlags&4)!=0)changes.put("about",about);
+                        pending.complete(bridge.mapUser(bridge.repository.updateProfileForUser(user,changes)),null);
+                    }
+                    else if(revokeOthers){bridge.repository.requestForUser(user,"DELETE","/v1/sessions",null,true);pending.complete(new TLRPC.TL_boolTrue(),null);}
                     else pending.complete(bridge.sessions(user,revoke,hash),null);
                 }
             }catch(Exception failure){pending.complete(null,failure);}});return true;
@@ -360,7 +368,7 @@ public final class VyrnBridge {
         if("VYRN_EDIT_CONFLICT".equals(error.text)||"VYRN_EDIT_RELOAD_REQUIRED".equals(error.text))org.telegram.ui.Components.AlertsCreator.showSimpleAlert(fragment,rtl?"پیام تغییر کرده یا نسخهٔ آن مشخص نیست. پیام را دوباره بارگیری کنید و ویرایش را تکرار کنید.":"The message changed or its version is unknown. Reload the message and edit again.");
         else org.telegram.ui.Components.AlertsCreator.processError(account,error,fragment,request);
     }
-    public TLRPC.User mapUser(Models.User value){TLRPC.TL_user u=new TLRPC.TL_user();u.id=ids.local("user",value.id);u.flags=2|4|32|64;u.first_name=value.name;u.last_name="";u.phone="";u.self=u.id==UserConfig.getInstance(account).getClientUserId();u.photo=new TLRPC.TL_userProfilePhotoEmpty();u.status=new TLRPC.TL_userStatusOffline();return u;}
+    public TLRPC.User mapUser(Models.User value){TLRPC.TL_user u=new TLRPC.TL_user();u.id=ids.local("user",value.id);u.flags=2|4|32|64;u.first_name=value.firstName;u.last_name=value.lastName;u.phone="";u.self=u.id==UserConfig.getInstance(account).getClientUserId();u.photo=new TLRPC.TL_userProfilePhotoEmpty();u.status=new TLRPC.TL_userStatusOffline();return u;}
     private TLRPC.Peer peer(Models.Conversation conversation,List<Models.User> members) throws Exception{
         if(conversation.kind.equals("group")){TLRPC.TL_peerChat peer=new TLRPC.TL_peerChat();peer.chat_id=ids.local("conversation",conversation.id);return peer;}
         String self=repository.vault.load().getString("user_id");for(Models.User user:members){if(!user.id.equals(self)){TLRPC.TL_peerUser peer=new TLRPC.TL_peerUser();peer.user_id=ids.local("user",user.id);privateConversations.put(peer.user_id,conversation.id);return peer;}}throw new IllegalStateException("private_member_missing");

@@ -42,11 +42,11 @@ if($process.ExitCode -ne 0){throw 'Private test fixture transfer failed'}
 $fixture=$null
 $rounds=@()
 try {
-    foreach($phase in @('first','offline','restart')){
+    foreach($phase in @('first','profile','offline','restart')){
         & $adb -s $Serial shell am force-stop $package
         # The full foreground suite shares the production 300-request/minute user
         # limit with realtime reconciliation. Start recovery in a fresh window.
-        if($phase -eq 'restart'){Write-Output 'Waiting 60 seconds for the API rate-limit window before restart tests.';Start-Sleep -Seconds 60}
+        if($phase -in @('profile','restart')){Write-Output "Waiting 60 seconds for the API rate-limit window before $phase tests.";Start-Sleep -Seconds 60}
         if($phase -eq 'offline'){& $adb -s $Serial reverse --remove tcp:18443}else{& $adb -s $Serial reverse tcp:18443 tcp:18443}
         if($LASTEXITCODE -ne 0){throw 'Test network transition failed'}
         $result=(& $adb -s $Serial shell am instrument -w -e phase $phase "$package.test/xyz.eclipseofficial.vyrn.test.LocalIntegrationRunner") -join "`n"
