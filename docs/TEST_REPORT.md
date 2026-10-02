@@ -2,6 +2,15 @@
 
 Updated: 2026-10-03. This records performed checks, not planned tests.
 
+## Nonblocking native deletion snapshots — 2026-10-03
+
+- All160 API35 Android checks pass:107 first,15 offline,38 restart. artifacts/android-integration.json records the tested APK hash.
+- MessagesStorage publishes an immutable volatile snapshot of persisted uid/mid fences after opening/migrating its database, and refreshes it after confirmed fence insertion before acknowledging deletion. Cleanup/reopen invalidates the prior snapshot. A failed reload invalidates readiness; an existing ready snapshot stays available during a successful replacement.
+- Native update/UI/history checks now read this snapshot without waiting on storage. Only background callers can wait for initial native database readiness; UI and storage-queue callers return unavailable if initialization has not completed.
+- The independent history-dispatch check holds the real native storage queue behind a latch. The filtered history notification must arrive within three seconds while that latch is still held, remove the deleted positive row and preserve the pending negative row/requested count. This passes in the initial phase and after real process restart. The existing update-before-deletion UI queue races continue to pass.
+- Local instrumentation and normal ARM debug builds pass. All three normal APKs pass signature/package/API/ABI/manifest verification. Backend unchanged; preceding18 API tests/vet remain evidence.
+- This proves this deletion guard does not wait for a busy storage queue. Whole-screen responsiveness, large deletion-ledger memory/reload cost, account switches, database recovery/migration and late dialog-list metadata still need broader acceptance tests.
+
 ## Deletion at final UI application checkpoint — 2026-10-03
 
 - All158 API35 checks pass:106 first,15 offline,37 restart. Evidence: artifacts/android-integration.json with the tested APK hash.

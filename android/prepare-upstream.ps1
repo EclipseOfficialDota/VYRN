@@ -166,6 +166,33 @@ Edit 'TMessagesProj/src/main/java/org/telegram/messenger/MessageCustomParamsHelp
 Edit 'TMessagesProj/src/main/java/org/telegram/messenger/MessagesStorage.java' {
  param($t)
  $t=(& git -c "safe.directory=$($upstream.Replace('\','/'))" -C $upstream show "${pin}:TMessagesProj/src/main/java/org/telegram/messenger/MessagesStorage.java") -join "`n"
+ foreach($marker in @('public void openDatabase(int openTries) {','            databaseCreated = true;','private void cleanupInternal(boolean deleteFiles) {')){if(!$t.Contains($marker)){throw 'Pinned native deletion snapshot lifecycle marker missing'}}
+ $t=$t.Replace('public void openDatabase(int openTries) {',"public void openDatabase(int openTries) {`n        vyrnDeletedMessages = null;")
+ $t=$t.Replace('            databaseCreated = true;',"            vyrnReloadDeletedMessages();`n            databaseCreated = true;")
+ $t=$t.Replace('private void cleanupInternal(boolean deleteFiles) {',"private void cleanupInternal(boolean deleteFiles) {`n        vyrnDeletedMessages = null;")
+ $snapshot=@'
+    private volatile java.util.Map<Long, java.util.Set<Integer>> vyrnDeletedMessages;
+
+    public java.util.Map<Long, java.util.Set<Integer>> getVyrnDeletedMessages() {
+        return vyrnDeletedMessages;
+    }
+
+    public void vyrnReloadDeletedMessages() throws org.telegram.SQLite.SQLiteException {
+        if (Thread.currentThread() != storageQueue) throw new IllegalStateException("storage_queue_required");
+        try {
+        java.util.Map<Long, java.util.Set<Integer>> loaded = new java.util.HashMap<>();
+        if (database.tableExists("vyrn_deleted_messages")) {
+            SQLiteCursor cursor = database.queryFinalized("SELECT uid, mid FROM vyrn_deleted_messages");
+            try {
+                while (cursor.next()) loaded.computeIfAbsent(cursor.longValue(0), key -> new java.util.HashSet<>()).add(cursor.intValue(1));
+            } finally { cursor.dispose(); }
+        }
+        for (java.util.Map.Entry<Long, java.util.Set<Integer>> entry : loaded.entrySet()) entry.setValue(java.util.Collections.unmodifiableSet(entry.getValue()));
+        vyrnDeletedMessages = java.util.Collections.unmodifiableMap(loaded);
+        } catch (org.telegram.SQLite.SQLiteException failure) { vyrnDeletedMessages = null; throw failure; }
+    }
+
+'@
  $start=$t.IndexOf('    public TLRPC.Message getMessage(long dialogId, long msgId) {')
  $end=$t.IndexOf('    private TLRPC.Message getMessageInternal(', $start)
  if($start -lt 0 -or $end -lt 0){throw 'Pinned stored message lookup markers missing'}
@@ -174,7 +201,7 @@ Edit 'TMessagesProj/src/main/java/org/telegram/messenger/MessagesStorage.java' {
  if(!$section.Contains($marker)){throw 'Pinned stored message decode marker missing'}
  $section=$section.Replace('SELECT data FROM messages_v2','SELECT data, custom_params FROM messages_v2')
  $section=$section.Replace($marker,"                        NativeByteBuffer localParams = cursor.byteBufferValue(1);`n                        if (localParams != null) { try { MessageCustomParamsHelper.readLocalParams(message, localParams); } finally { localParams.reuse(); } }`n"+$marker)
- $t=$t.Substring(0,$start)+$section+$t.Substring($end)
+ $t=$t.Substring(0,$start)+$snapshot+"`n"+$section+$t.Substring($end)
  $edit="                                    NativeByteBuffer customParams = cursor.byteBufferValue(6);`n                                    MessageCustomParamsHelper.readLocalParams(message, customParams);"
  $replace='                    customParams = cursor.byteBufferValue(2);'
  foreach($marker in @($edit,$replace)){if(!$t.Contains($marker)){throw 'Pinned existing message params merge marker missing'}}

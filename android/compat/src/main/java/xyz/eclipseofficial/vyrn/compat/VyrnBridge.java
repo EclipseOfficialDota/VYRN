@@ -202,18 +202,19 @@ public final class VyrnBridge {
     private static ArrayList<Integer> deletedMessagePositions(int account,ArrayList<TLRPC.Message> messages){
         boolean group=false;for(TLRPC.Message message:messages)if(message!=null&&message.id>0&&message.peer_id!=null&&message.peer_id.chat_id>0){group=true;break;}
         if(!group)return new ArrayList<>();
-        MessagesStorage storage=MessagesStorage.getInstance(account);CountDownLatch done=new CountDownLatch(1);boolean[] accepted={false};ArrayList<Integer> deleted=new ArrayList<>();
-        Runnable read=()->{try{
-            org.telegram.SQLite.SQLiteDatabase db=storage.getDatabase();
-            if(db.tableExists("vyrn_deleted_messages"))for(int i=0;i<messages.size();i++){
-                TLRPC.Message message=messages.get(i);if(message==null||message.id<=0||message.peer_id==null||message.peer_id.chat_id<=0)continue;
-                org.telegram.SQLite.SQLiteCursor cursor=db.queryFinalized("SELECT 1 FROM vyrn_deleted_messages WHERE uid=? AND mid=?",-message.peer_id.chat_id,message.id);
-                try{if(cursor.next())deleted.add(i);}finally{cursor.dispose();}
-            }
-            accepted[0]=true;
-        }catch(Exception unavailable){/* Caller retries; never apply unverified live updates. */}finally{done.countDown();}};
-        if(Thread.currentThread()==storage.getStorageQueue())read.run();else storage.getStorageQueue().postRunnable(read);
-        try{if(!done.await(20,TimeUnit.SECONDS)||!accepted[0])return null;}catch(InterruptedException interrupted){Thread.currentThread().interrupt();return null;}
+        MessagesStorage storage=MessagesStorage.getInstance(account);Map<Long,java.util.Set<Integer>> snapshot=storage.getVyrnDeletedMessages();
+        if(snapshot==null){
+            // Only background callers can wait for native database initialization.
+            if(Thread.currentThread()==ApplicationLoader.applicationHandler.getLooper().getThread()||Thread.currentThread()==storage.getStorageQueue())return null;
+            CountDownLatch ready=new CountDownLatch(1);storage.getStorageQueue().postRunnable(ready::countDown);
+            try{if(!ready.await(20,TimeUnit.SECONDS))return null;}catch(InterruptedException interrupted){Thread.currentThread().interrupt();return null;}
+            snapshot=storage.getVyrnDeletedMessages();if(snapshot==null)return null;
+        }
+        ArrayList<Integer> deleted=new ArrayList<>();
+        for(int i=0;i<messages.size();i++){
+            TLRPC.Message message=messages.get(i);if(message==null||message.id<=0||message.peer_id==null||message.peer_id.chat_id<=0)continue;
+            java.util.Set<Integer> ids=snapshot.get(-message.peer_id.chat_id);if(ids!=null&&ids.contains(message.id))deleted.add(i);
+        }
         return deleted;
     }
     /** One SQLite statement records the whole confirmed batch and removes its cached rows.
@@ -230,6 +231,7 @@ public final class VyrnBridge {
             for(int i=0;i<selected.size();i++){int id=selected.get(i);if(id<=0)throw new IllegalArgumentException("invalid_deleted_id");if(i>0)sql.append(',');sql.append('(').append(dialog).append(',').append(id).append(')');}
             if(selected.isEmpty())throw new IllegalArgumentException("empty_deleted_batch");
             db.executeFast(sql.toString()).stepThis().dispose();
+            storage.vyrnReloadDeletedMessages();
         }catch(Exception error){failure[0]=error;}finally{done.countDown();}});
         if(!done.await(20,TimeUnit.SECONDS))throw new IllegalStateException("deletion_cache_timeout");
         if(failure[0]!=null)throw failure[0];
