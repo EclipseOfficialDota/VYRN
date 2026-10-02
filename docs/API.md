@@ -31,6 +31,7 @@ All production endpoints require HTTPS. JSON uses UTF-8. Authentication is `Auth
 | POST `/v1/conversations/{id}/typing` | throttled five-second event |
 | GET `/v1/sync?cursor=0` | ordered events, next cursor, has_more |
 | GET `/v1/ws?cursor=0` | WebSocket upgrade using Authorization header |
+| PUT `/v1/conversations/{id}/sends/{client}/cancel` | atomically fence an unsent client ID or return its committed message ID |
 | POST `/v1/media?kind=file&conversation_id=...` | raw bytes, Content-Length, optional X-Filename; encrypted=true for private attachments |
 | GET `/v1/media/{id}` | authorized download with range support |
 | GET `/health/live`, `/health/ready` | process and PostgreSQL readiness |
@@ -38,6 +39,8 @@ All production endpoints require HTTPS. JSON uses UTF-8. Authentication is `Auth
 Plaintext group payload: `{"text":"Hello"}` (optional caption). Maximum combined text/caption length: 16,384 characters. Private plaintext returns `e2ee_required`; a ciphertext-envelope schema exists, but device-key endpoints and client cryptography remain incomplete. Cross-conversation forwarding is not yet implemented; current reference validation only accepts visible messages in the same conversation.
 
 Message read models include a positive integer `ordinal`, allocated once by the server and stable across devices, edits, retries and restarts. History is ordered by descending ordinal; `before` still takes the corresponding message UUID. The Android adapter uses this ordinal for Telegram's UI message ID, preventing older pages from receiving larger IDs than recent messages. Reaction summaries contain `emoji`, `count`, `mine`; receipt summaries contain `delivered`, `read`, `delivered_by_me`, `read_by_me`. Deleted and collected-expiry tombstones have empty payloads and zero reaction/receipt summaries. An expired message awaiting collection returns no content.
+
+Send cancellation is bound to the authenticated sender and the original conversation/client UUID. The cancellation endpoint returns `{"status":"cancelled"}` after committing a permanent client-ID fence, or `{"status":"committed","message_id":"..."}` if a send already committed. Repeated cancellation is idempotent. A delayed send for a fenced client ID returns409 `send_cancelled`. A committed message is retained; use the explicit message-deletion API to delete it. Sending and cancellation acquire the same transaction advisory lock, so an in-flight send cannot escape a successful cancellation. Cancellation fences are retained indefinitely to reject arbitrarily delayed offline replays; storage quota/operational controls and Android reconciliation remain acceptance work.
 
 WebSocket first returns `{"type":"ready",...}`. Each `events` frame has ordered events and `cursor`. Commit events locally, then send `{"type":"ack","cursor":N}`. Heartbeat is 20 seconds; an unacknowledged batch disconnects after 45 seconds. Reconnect with bounded exponential backoff and the last committed cursor. A revoked/expired session closes the stream; refresh authentication and reconnect. Android foreground consumption now journals raw batches and cursor before acknowledgement and adapts message events. Background execution, crash recovery at every boundary and complete mapping of conversation/member/typing/reaction/receipt events remain acceptance work.
 

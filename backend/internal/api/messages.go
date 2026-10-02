@@ -89,6 +89,19 @@ func (s *Server) sendMessage(w http.ResponseWriter, r *http.Request) {
 		fail(w, 422, "group_e2ee_not_available")
 		return
 	}
+	if _, err = tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,87221))`, p.UserID+":"+in.ClientID); err != nil {
+		s.internal(w)
+		return
+	}
+	var cancelled bool
+	if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM cancelled_sends WHERE sender_id=$1 AND client_id=$2)`, p.UserID, in.ClientID).Scan(&cancelled); err != nil {
+		s.internal(w)
+		return
+	}
+	if cancelled {
+		fail(w, 409, "send_cancelled")
+		return
+	}
 	if kind == "private" {
 		var blocked bool
 		if tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM blocks b JOIN members m ON m.user_id=b.user_id JOIN members n ON n.user_id=b.blocked_id WHERE m.conversation_id=$1 AND n.conversation_id=$1)`, conversation).Scan(&blocked) != nil {

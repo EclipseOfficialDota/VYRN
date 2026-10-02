@@ -61,6 +61,12 @@ Date: 2026-10-01. This records performed checks, not planned tests.
 - The sender claims before HTTP access and recovers interrupted claims using the same client ID on startup. Sent acknowledgements expire after seven days; cancelled rows expire after one day. The schema upgrade preserves queued payloads and treats existing rows as potentially attempted.
 - Telegram request-token cancellation and server reconciliation of uncertain cancellations remain incomplete. These tests verify the internal store/sender lifecycle; they do not establish the interactive cancel-message flow.
 
+## Server send-cancellation checkpoint on 2026-10-02
+
+- Ten PostgreSQL integration tests pass, including cancellation authorization, sender isolation, cross-conversation conflicts, repeated cancellation, permanent offline-retry rejection and reconciliation of an already committed message.
+- Twenty concurrent send/cancel races each yielded either no message with a committed cancellation fence, or one message with its exact ID returned by cancellation. All existing auth, media, permissions, sync and migration tests also pass; Go package tests and vet pass.
+- Android request-token wiring and durable cancellation-intent reconciliation are still outstanding. Cancellation fences have no expiry so old offline replays stay rejected; operational storage limits remain to be added.
+
 ## External checks
 
 - Dedicated SSH key authentication to port 3939 was rejected. No server commands ran.

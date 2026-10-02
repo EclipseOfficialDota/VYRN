@@ -101,6 +101,7 @@ func (s *Server) Handler() http.Handler {
 	secure("PATCH /v1/conversations/{id}", s.updateConversation)
 	secure("GET /v1/conversations/{id}/messages", s.messages)
 	secure("POST /v1/conversations/{id}/messages", s.sendMessage)
+	secure("PUT /v1/conversations/{id}/sends/{client}/cancel", s.cancelSend)
 	secure("GET /v1/messages/{id}", s.getMessage)
 	secure("PATCH /v1/messages/{id}", s.editMessage)
 	secure("DELETE /v1/messages/{id}", s.deleteMessage)

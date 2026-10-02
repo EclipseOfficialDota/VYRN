@@ -40,3 +40,4 @@
 - Claim queued rows atomically as SENDING before HTTP access. Recover interrupted claims only on sole-sender startup and retain the stable client ID for server deduplication.
 - Report local cancellation only when no sender has ever claimed the row. Preserve uncertain sends for server reconciliation, including legacy rows whose attempt history cannot be proved.
 - Keep accepted acknowledgement records for seven days and cancelled records for one day. Preserve pending and failed payloads for explicit user resolution.
+- Resolve uncertain cancellations transactionally on the server. Share a sender/client-ID advisory lock between send and cancel; permanently fence absent sends and return the original message ID for committed sends. Retain fences for delayed offline replays; deleting a committed message remains an explicit separate operation.
