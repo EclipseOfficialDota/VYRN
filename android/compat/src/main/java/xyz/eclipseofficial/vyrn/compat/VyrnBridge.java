@@ -196,7 +196,8 @@ public final class VyrnBridge {
     }
     private Models.Conversation conversationModel(String id) throws Exception{return repository.conversationDetails(id).conversation;}
     private void applyEvent(String kind,JSONObject body) throws Exception {
-        if(kind.equals("conversation.updated")){applyConversationEvent(body.getString("id"));return;}
+        if(kind.equals("conversation.updated")){applyConversationEvent(body.getString("id"),true);return;}
+        if(kind.equals("member.updated")||kind.equals("member.removed")){applyConversationEvent(body.getString("conversation_id"),false);return;}
         if(!kind.startsWith("message."))return;
         String conversation=body.getString("conversation_id"),messageId=body.getString("message_id");Models.Message value=repository.message(messageId);
         Models.Conversation model=conversationModel(conversation);List<Models.User> members=repository.members(conversation);TLRPC.Peer destination=peer(model,members);
@@ -213,21 +214,29 @@ public final class VyrnBridge {
         Utilities.stageQueue.postRunnable(()->{try{accepted[0]=MessagesController.getInstance(account).processUpdateArray(updates,users,chats,true,value.date);}finally{complete.countDown();}});
         if(!complete.await(20,TimeUnit.SECONDS)||!accepted[0])throw new IllegalStateException("telegram_update_rejected");
     }
-    private void applyConversationEvent(String id) throws Exception {
+    private void applyConversationEvent(String id,boolean refresh) throws Exception {
         String user;Models.ConversationDetails details;
         synchronized(repository.vault.guard()){user=repository.vault.load().getString("user_id");details=repository.conversationDetails(id);}
         if(!details.conversation.kind.equals("group"))return;
         TLRPC.Chat group=chat(details.conversation);group.date=details.createdDate;
         ArrayList<TLRPC.Chat> chats=new ArrayList<>();chats.add(group);ArrayList<TLRPC.User> users=new ArrayList<>();for(Models.Member member:details.members)users.add(mapUser(member.user));
-        ArrayList<TLRPC.Update> updates=new ArrayList<>();TL_update.TL_updateChat changed=new TL_update.TL_updateChat();changed.chat_id=group.id;updates.add(changed);
+        ArrayList<TLRPC.Update> updates=new ArrayList<>();if(refresh){TL_update.TL_updateChat changed=new TL_update.TL_updateChat();changed.chat_id=group.id;updates.add(changed);}
+        TL_update.TL_updateChatParticipants membership=new TL_update.TL_updateChatParticipants();membership.participants=participants(details);updates.add(membership);
         TL_update.TL_updatePeerHistoryTTL ttl=new TL_update.TL_updatePeerHistoryTTL();TLRPC.TL_peerChat destination=new TLRPC.TL_peerChat();destination.chat_id=group.id;ttl.peer=destination;ttl.ttl_period=details.conversation.disappearingSeconds;if(ttl.ttl_period>0)ttl.flags=1;updates.add(ttl);
         CountDownLatch applied=new CountDownLatch(1);boolean[] accepted={false};
-        Utilities.stageQueue.postRunnable(()->{try{if(!repository.vault.isUser(user)||UserConfig.getInstance(account).getClientUserId()!=ids.local("user",user))return;MessagesStorage.getInstance(account).putUsersAndChats(users,chats,false,true);accepted[0]=MessagesController.getInstance(account).processUpdateArray(updates,users,chats,true,(int)(System.currentTimeMillis()/1000));}finally{applied.countDown();}});
+        Utilities.stageQueue.postRunnable(()->{try{if(!repository.vault.isUser(user)||UserConfig.getInstance(account).getClientUserId()!=ids.local("user",user))return;AndroidUtilities.runOnUIThread(()->{if(!repository.vault.isUser(user))return;TLRPC.ChatFull full=MessagesController.getInstance(account).getChatFull(group.id);if(full!=null)full.participants=membership.participants;});MessagesStorage.getInstance(account).putUsersAndChats(users,chats,false,true);accepted[0]=MessagesController.getInstance(account).processUpdateArray(updates,users,chats,true,(int)(System.currentTimeMillis()/1000));}finally{applied.countDown();}});
         if(!applied.await(20,TimeUnit.SECONDS)||!accepted[0])throw new IllegalStateException("telegram_metadata_rejected");
         CountDownLatch scheduled=new CountDownLatch(1);AndroidUtilities.runOnUIThread(scheduled::countDown);if(!scheduled.await(20,TimeUnit.SECONDS))throw new IllegalStateException("telegram_metadata_timeout");
         CountDownLatch persisted=new CountDownLatch(1);boolean[] durable={false};MessagesStorage storage=MessagesStorage.getInstance(account);
         storage.getStorageQueue().postRunnable(()->{try{TLRPC.Chat saved=storage.getChat(group.id);durable[0]=repository.vault.isUser(user)&&saved!=null&&saved.title.equals(group.title);}finally{persisted.countDown();}});
         if(!persisted.await(20,TimeUnit.SECONDS)||!durable[0])throw new IllegalStateException("telegram_metadata_not_saved");
+    }
+    private TLRPC.TL_chatParticipants participants(Models.ConversationDetails details){
+        TLRPC.TL_chatParticipants result=new TLRPC.TL_chatParticipants();result.chat_id=ids.local("conversation",details.conversation.id);result.version=1;
+        for(Models.Member member:details.members){TLRPC.ChatParticipant participant;
+            if(member.role.equals("owner"))participant=new TLRPC.TL_chatParticipantCreator();else if(member.role.equals("admin"))participant=new TLRPC.TL_chatParticipantAdmin();else participant=new TLRPC.TL_chatParticipant();
+            participant.user_id=ids.local("user",member.user.id);participant.date=member.joinedDate;result.participants.add(participant);}
+        return result;
     }
     public long syncCursor() throws Exception {String user=repository.vault.load().optString("user_id");return user.isEmpty()?0:realtime.cursor(user);}
     public int syncPending() throws Exception {String user=repository.vault.load().optString("user_id");return user.isEmpty()?0:realtime.pending(user);}
@@ -247,11 +256,8 @@ public final class VyrnBridge {
             if(!details.conversation.kind.equals("group"))throw new IllegalArgumentException("group_required");
             TLRPC.TL_messages_chatFull result=new TLRPC.TL_messages_chatFull();TLRPC.Chat group=chat(details.conversation);group.date=details.createdDate;result.chats.add(group);
             TLRPC.TL_chatFull full=new TLRPC.TL_chatFull();full.id=in.chat_id;full.about="";full.chat_photo=new TLRPC.TL_photoEmpty();full.flags=4;full.notify_settings=new TLRPC.TL_peerNotifySettings();full.ttl_period=details.conversation.disappearingSeconds;if(full.ttl_period>0)full.flags|=16384;
-            TLRPC.TL_chatParticipants participants=new TLRPC.TL_chatParticipants();participants.chat_id=in.chat_id;participants.version=1;
-            for(Models.Member member:details.members){TLRPC.User user=mapUser(member.user);result.users.add(user);TLRPC.ChatParticipant participant;
-                if(member.role.equals("owner"))participant=new TLRPC.TL_chatParticipantCreator();else if(member.role.equals("admin"))participant=new TLRPC.TL_chatParticipantAdmin();else participant=new TLRPC.TL_chatParticipant();
-                participant.user_id=user.id;participant.date=member.joinedDate;participants.participants.add(participant);}
-            full.participants=participants;result.full_chat=full;return result;
+            for(Models.Member member:details.members)result.users.add(mapUser(member.user));
+            full.participants=participants(details);result.full_chat=full;return result;
         }
         if(request instanceof TLRPC.TL_contacts_search){
             TLRPC.TL_contacts_search in=(TLRPC.TL_contacts_search)request;TLRPC.TL_contacts_found result=new TLRPC.TL_contacts_found();

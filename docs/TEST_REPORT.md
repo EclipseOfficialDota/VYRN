@@ -146,6 +146,13 @@ Date: 2026-10-01. This records performed checks, not planned tests.
 - Earlier native creation/full-group/rename/TTL, cancellation and process-restart regressions pass. Backend unchanged; fourteen API tests and go vet verified at the preceding partial-settings checkpoint. All three ARM Debug APKs built successfully; signature, package, API, ABI and manifest verification pass.
 - Conversation creation/member events, stale updates after loss of membership, account switches during queued native updates and full UI crash recovery remain unfinished.
 
+## Native membership event checkpoint — 2026-10-02
+
+- All103 named Android checks pass across first/offline/restart. Real API demotion/promotion/add/remove mutations reach the receiving native chat/full-group cache via WebSocket; counts, roles and serializable member/admin dates match the authorized server snapshot after each change.
+- Initial and intermediate runs failed at membership_native_role_date: the assertion required a persisted owner date, but the pinned Telegram creator wire object has no such field. The final assertion checks owner zero and exact dates for other roles. A separate ordering change refreshes loaded participants before native TTL storage and avoids redundant full-chat requests for membership events.
+- Earlier name/TTL, outbox, cancellation and restart regressions pass. Backend unchanged; fourteen API tests and go vet retain their preceding verified checkpoint. All three normal ARM Debug APKs built successfully; signature, package, API, ABI and manifest policy verification pass.
+- This is one receiving emulator with authenticated repository mutations. Current-account removal, stale events after authorization loss, native member-management screens/permissions and complete two-device UI acceptance remain untested.
+
 ## External checks
 
 - Dedicated SSH key authentication to port 3939 was rejected. No server commands ran.

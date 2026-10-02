@@ -392,10 +392,28 @@ public final class LocalIntegrationRunner extends Instrumentation {
             verifyRealtimeGroup(a,b,group,local,"نام از دستگاه دیگر",0);
             verifyRealtimeGroup(a,b,group,local,"نام جدید گروه",3600);
             passed.put("remote_group_rename_realtime").put("remote_group_TTL_realtime").put("remote_group_TTL_disable_realtime").put("remote_group_metadata_durable");
+            verifyGroupMembershipEvents(a,group,local,memberId);
             passed.put("MessagesController_group_creation").put("created_group_native_cache").put("created_group_member_delivery");return group;
         } finally {AndroidUtilities.runOnUIThread(()->{center.removeObserver(observer,NotificationCenter.chatDidCreated);center.removeObserver(observer,NotificationCenter.chatDidFailCreate);});}
     }
 
+    private void verifyGroupMembershipEvents(RestRepository owner,String group,long local,String memberId) throws Exception {
+        stage="group_membership_realtime";VyrnBridge bridge=VyrnBridge.forAccount(2);
+        for(String role:new String[]{"member","admin"}){long before=bridge.syncCursor();owner.request("POST","/v1/conversations/"+group+"/members",new JSONObject().put("user_id",memberId).put("role",role),true);verifyMembershipCache(owner,group,local,before);}
+        RestRepository extra=repo(9013);extra.vault.clear();String added=register(extra,read("vyrn-test-fixture.json"),"member-events").getString("user_id");
+        long before=bridge.syncCursor();owner.request("POST","/v1/conversations/"+group+"/members",new JSONObject().put("user_id",added).put("role","member"),true);verifyMembershipCache(owner,group,local,before);
+        before=bridge.syncCursor();owner.request("DELETE","/v1/conversations/"+group+"/members/"+added,null,true);verifyMembershipCache(owner,group,local,before);
+        extra.vault.clear();passed.put("group_role_demotion_realtime").put("group_role_promotion_realtime").put("group_member_add_realtime").put("group_member_remove_realtime").put("group_member_cache_roles_dates");
+    }
+    private void verifyMembershipCache(RestRepository owner,String group,long local,long before) throws Exception {
+        VyrnBridge bridge=VyrnBridge.forAccount(2);JSONObject batch=(JSONObject)owner.request("GET","/v1/sync?cursor="+before,null,true);long target=0;JSONArray events=batch.getJSONArray("events");
+        for(int i=0;i<events.length();i++){JSONObject event=events.getJSONObject(i);if(event.getString("kind").startsWith("member.") && event.getJSONObject("body").optString("conversation_id").equals(group))target=event.getLong("sequence");}
+        check(target>before,"membership_event_emitted");long deadline=System.currentTimeMillis()+40000;while(System.currentTimeMillis()<deadline && (bridge.syncCursor()<target || bridge.syncPending()!=0))Thread.sleep(100);
+        check(bridge.syncCursor()>=target && bridge.syncPending()==0 && bridge.syncDead()==0,"membership_inbox_processed");
+        Models.ConversationDetails expected=owner.conversationDetails(group);TLRPC.Chat cached=cachedGroup(local);TLRPC.ChatFull full=cachedFullGroup(local);
+        check(cached!=null && cached.participants_count==expected.members.size() && full!=null && full.participants.participants.size()==expected.members.size(),"membership_native_count");
+        try(IdMap map=new IdMap(context,2)){for(TLRPC.ChatParticipant member:full.participants.participants){String remote=map.remote("user",member.user_id);String role=member instanceof TLRPC.TL_chatParticipantCreator?"owner":member instanceof TLRPC.TL_chatParticipantAdmin?"admin":"member";check(expected.members.stream().anyMatch(source->source.user.id.equals(remote)&&source.role.equals(role)&&(role.equals("owner")?member.date==0:source.joinedDate==member.date)),"membership_native_role_date");}}
+    }
     private void verifyRealtimeGroup(RestRepository viewer,RestRepository writer,String group,long local,String title,int seconds) throws Exception {
         stage="remote_group_metadata_realtime";VyrnBridge bridge=VyrnBridge.forAccount(2);long before=bridge.syncCursor();
         writer.request("PATCH","/v1/conversations/"+group,new JSONObject().put("title",title).put("disappearing_seconds",seconds),true);

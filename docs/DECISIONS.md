@@ -98,3 +98,9 @@
 - Resolve conversation.updated against the current authorized group snapshot rather than trusting stale event-body settings. Use standard native chat and history-TTL updates, preserving the actual creation date and serializable role/name fields.
 - Bind the snapshot read to the repository account lock and check repository/native identity before native application. Wait for the stage/UI/storage queues and verify the persisted chat title before marking the event processed.
 - The98-check emulator suite verifies other-member repository changes reaching the receiving Android cache over WebSocket, TTL zero flags and persistence through process restart. Two physical-device acceptance, removal authorization races and complete UI transaction recovery remain separate work.
+
+## 2026-10-02 — native membership events
+- Resolve member.updated/member.removed against the authorized current group snapshot and reuse one participant mapper for full-chat reads and realtime updates.
+- Update loaded full-group participants before standard TTL processing can serialize old members. Membership updates use the standard participant notification without requesting the same full snapshot again.
+- Telegram creator participant serialization has no join-date field. Verify owner cache date zero and exact server dates for member/admin classes; do not invent a custom wire format.
+- Current-account removal/stale authorization events, native mutation UI/permissions, absent full-cache recovery and account-switch races remain unfinished.
