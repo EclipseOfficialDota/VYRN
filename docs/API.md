@@ -12,6 +12,7 @@ All production endpoints require HTTPS. JSON uses UTF-8. Authentication is `Auth
 | POST `/v1/auth/logout` | revokes current session |
 | GET/PATCH `/v1/me` | profile; update display_name and owned avatar_id |
 | GET `/v1/users/{id}` | profile by UUID, without email |
+| GET `/v1/users/search?q=...&limit=50` | authenticated display-name discovery; maximum50 results, excludes self, disabled users and blocks in either direction; no email search or login fields |
 | GET `/v1/sessions` | active sessions for current user |
 | DELETE `/v1/sessions/{id}` | revoke an owned session |
 | PUT/DELETE `/v1/blocks/{id}` | block/unblock another user |

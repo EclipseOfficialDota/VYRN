@@ -173,7 +173,7 @@ public final class VyrnBridge {
         TLRPC.TL_error error=null;if(failure!=null){error=new TLRPC.TL_error();error.code=failure instanceof RestRepository.ApiException?((RestRepository.ApiException)failure).status:503;error.text=failure instanceof UnsupportedOperationException?"VYRN_FEATURE_UNAVAILABLE":"VYRN_REQUEST_FAILED";}
         return error;
     }
-    public TLRPC.User mapUser(Models.User value){TLRPC.TL_user u=new TLRPC.TL_user();u.id=ids.local("user",value.id);u.first_name=value.name;u.last_name="";u.phone="";u.self=u.id==UserConfig.getInstance(account).getClientUserId();u.photo=new TLRPC.TL_userProfilePhotoEmpty();u.status=new TLRPC.TL_userStatusOffline();return u;}
+    public TLRPC.User mapUser(Models.User value){TLRPC.TL_user u=new TLRPC.TL_user();u.id=ids.local("user",value.id);u.flags=2|4|32|64;u.first_name=value.name;u.last_name="";u.phone="";u.self=u.id==UserConfig.getInstance(account).getClientUserId();u.photo=new TLRPC.TL_userProfilePhotoEmpty();u.status=new TLRPC.TL_userStatusOffline();return u;}
     private TLRPC.Peer peer(Models.Conversation conversation,List<Models.User> members) throws Exception{
         if(conversation.kind.equals("group")){TLRPC.TL_peerChat peer=new TLRPC.TL_peerChat();peer.chat_id=ids.local("conversation",conversation.id);return peer;}
         String self=repository.vault.load().getString("user_id");for(Models.User user:members){if(!user.id.equals(self)){TLRPC.TL_peerUser peer=new TLRPC.TL_peerUser();peer.user_id=ids.local("user",user.id);privateConversations.put(peer.user_id,conversation.id);return peer;}}throw new IllegalStateException("private_member_missing");
@@ -216,6 +216,16 @@ public final class VyrnBridge {
     public int syncPending() throws Exception {String user=repository.vault.load().optString("user_id");return user.isEmpty()?0:realtime.pending(user);}
     public int syncDead() throws Exception {String user=repository.vault.load().optString("user_id");return user.isEmpty()?0:realtime.dead(user);}
     private synchronized TLObject handle(TLObject request) throws Exception {
+        if(request instanceof TLRPC.TL_contacts_search){
+            TLRPC.TL_contacts_search in=(TLRPC.TL_contacts_search)request;TLRPC.TL_contacts_found result=new TLRPC.TL_contacts_found();
+            for(Models.User found:repository.searchUsers(in.q,in.limit)){TLRPC.User user=mapUser(found);result.users.add(user);TLRPC.TL_peerUser peer=new TLRPC.TL_peerUser();peer.user_id=user.id;result.results.add(peer);}return result;
+        }
+        if(request instanceof TLRPC.TL_messages_createChat){
+            TLRPC.TL_messages_createChat in=(TLRPC.TL_messages_createChat)request;if(in.ttl_period!=0)throw new UnsupportedOperationException("group_creation_ttl_not_ready");
+            ArrayList<String> members=new ArrayList<>();for(TLRPC.InputUser member:in.users){if(member instanceof TLRPC.TL_inputUserSelf)continue;if(!(member instanceof TLRPC.TL_inputUser))throw new IllegalArgumentException("invalid_group_member");members.add(ids.remote("user",member.user_id));}
+            Models.Conversation created=repository.createGroup(in.title,members);TLRPC.TL_updates updates=new TLRPC.TL_updates();updates.date=(int)(System.currentTimeMillis()/1000);updates.chats.add(chat(created));
+            for(Models.User member:repository.members(created.id))updates.users.add(mapUser(member));TLRPC.TL_messages_invitedUsers result=new TLRPC.TL_messages_invitedUsers();result.updates=updates;return result;
+        }
         if(request instanceof TLRPC.TL_messages_getDialogs)return dialogs();
         if(request instanceof TLRPC.TL_messages_getHistory){
             TLRPC.TL_messages_getHistory in=(TLRPC.TL_messages_getHistory)request;String conversation=conversation(in.peer);String before=in.offset_id>0?ids.remote("message",in.offset_id):null;

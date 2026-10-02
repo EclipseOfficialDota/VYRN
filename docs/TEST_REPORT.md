@@ -103,6 +103,13 @@ Date: 2026-10-01. This records performed checks, not planned tests.
 - After real process death and reconnection, authorized reconciliation observes the server tombstone and removes both local rows without inserting an empty replacement message. The original SENT acknowledgement and server ID remain intact; cache verification precedes journal acknowledgement.
 - This covers an already-deleted committed send. Concurrent deletion after a reconciliation fetch, screen-driven cancellation and account-switch races still require verification.
 
+## Native discovery/group-creation checkpoint on 2026-10-02
+
+- All79 named Android checks pass over real first/offline/restart processes. ConnectionsManager contact search returns a Persian display-name match with a stable member ID; mapped user names survive native TL serialization.
+- The suite calls the original MessagesController.createChat and observes chatDidCreated. The returned group is cached with its Persian title, owner flag and two-member count; the invited member reads a message sent through the Telegram send adapter. The native cached group survives actual process death.
+- Eleven PostgreSQL API integration tests pass, including authenticated discovery, case-insensitive/Persian matching, literal wildcard handling, result/input bounds, exclusion of self/disabled users, blocks in either direction and absence of login fields. Security/update unit tests and go vet also pass.
+- These tests exercise the native request/controller path, not screen taps. Empty contact lists still rely on global display-name search. Group settings/member management, creation with a nonzero auto-delete period, interrupted-create acknowledgement/retry, and complete UI acceptance remain unfinished.
+
 ## External checks
 
 - Dedicated SSH key authentication to port 3939 was rejected. No server commands ran.

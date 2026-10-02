@@ -68,3 +68,8 @@
 ## 2026-10-02 — deleted committed sends
 - Preserve the original SENT acknowledgement when a committed send has subsequently been deleted. An authorized server tombstone removes both the original pending row and any stale positive native-cache row; it must never become an empty replacement message.
 - Verify absence of both native rows before acknowledging the UI journal. Retain the journal on any identity, cache or network failure.
+
+## 2026-10-02 — user discovery and native group creation
+- Search only public display names after authentication; expose no login email/admin data. Bound queries to100 characters and results to50, treat SQL wildcards literally and omit self, disabled users and blocks in either direction.
+- Route Telegram contacts.search and messages.createChat through repositories. Return the invitedUsers/updates/chat/user shapes expected by the original MessagesController rather than replacing its group-creation UI.
+- Serialize mapped user name/photo/status flags correctly so native cache persistence preserves display names. Nonzero create-time auto-delete remains unavailable until it is applied atomically on the server.

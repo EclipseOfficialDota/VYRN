@@ -31,6 +31,8 @@ import org.telegram.messenger.MessagesStorage;
 import org.telegram.messenger.MessagesController;
 import org.telegram.messenger.SendMessagesHelper;
 import org.telegram.messenger.UserConfig;
+import org.telegram.messenger.NotificationCenter;
+import org.telegram.messenger.ChatObject;
 import org.telegram.tgnet.ConnectionsManager;
 import org.telegram.tgnet.TLObject;
 import org.telegram.tgnet.TLRPC;
@@ -314,7 +316,8 @@ public final class LocalIntegrationRunner extends Instrumentation {
         ConnectionsManager.onLogout(2);waitForIdleSync();
         check(UserConfig.getInstance(2).getClientUserId()==uiUser.id && bridge.repository.vault.isUser(ta.getString("user_id")),"Telegram_native_logout_isolated");passed.put("Telegram_native_logout_isolated");
         check(bridge.repository.vault.isUser(ta.getString("user_id")) && !bridge.repository.vault.isUser(tb.getString("user_id")),"nonblocking_identity_snapshot");passed.put("nonblocking_identity_snapshot");
-        write("vyrn-test-state.json",new JSONObject().put("ui_deleted_random",uiDeletedRandom).put("ui_deleted_server",uiDeletedServer).put("ui_deleted_ordinal",uiDeletedOrdinal).put("ui_committed_random",uiCommittedRandom).put("ui_committed_server",uiCommittedServer).put("token_group",tokenGroup).put("uncertain_group",uncertainGroup).put("uncertain_random",uncertainRandom).put("uncertain_server",uncertainServer).put("group",groupId).put("message",messageId).put("oldest",oldest).put("oldest_ordinal",upper).put("user",ta.getString("user_id")).put("process_id",android.os.Process.myPid()));
+        String createdGroup=createGroupThroughTelegram(a,b,tb.getString("user_id"));
+        write("vyrn-test-state.json",new JSONObject().put("native_created_group",createdGroup).put("ui_deleted_random",uiDeletedRandom).put("ui_deleted_server",uiDeletedServer).put("ui_deleted_ordinal",uiDeletedOrdinal).put("ui_committed_random",uiCommittedRandom).put("ui_committed_server",uiCommittedServer).put("token_group",tokenGroup).put("uncertain_group",uncertainGroup).put("uncertain_random",uncertainRandom).put("uncertain_server",uncertainServer).put("group",groupId).put("message",messageId).put("oldest",oldest).put("oldest_ordinal",upper).put("user",ta.getString("user_id")).put("process_id",android.os.Process.myPid()));
         Files.delete(file("vyrn-test-fixture.json").toPath());
 
         // Run the isolated trust-store probe last. Some Android TLS providers retain
@@ -351,6 +354,31 @@ public final class LocalIntegrationRunner extends Instrumentation {
         VyrnBridge.dispatch(2,request,(value,error)->{if(error!=null)response.completeExceptionally(new AssertionError());else response.complete(value);},null);
         return response;
     }
+    private String createGroupThroughTelegram(RestRepository a,RestRepository b,String memberId) throws Exception {
+        stage="Telegram_display_name_discovery";
+        String name="عضو "+UUID.randomUUID();b.request("PATCH","/v1/me",new JSONObject().put("display_name",name),true);
+        TLRPC.TL_contacts_search search=new TLRPC.TL_contacts_search();search.q=name;search.limit=20;
+        CompletableFuture<TLObject> found=new CompletableFuture<>();ConnectionsManager.getInstance(2).sendRequest(search,(value,error)->{if(error!=null)found.completeExceptionally(new AssertionError());else found.complete(value);});
+        TLRPC.TL_contacts_found results=(TLRPC.TL_contacts_found)found.get(30,TimeUnit.SECONDS);
+        check(results.users.size()==1 && results.results.size()==1 && results.users.get(0).first_name.equals(name),"Telegram_discovery_response");
+        TLRPC.User member=results.users.get(0);try(IdMap map=new IdMap(context,2)){check(map.remote("user",member.id).equals(memberId),"discovered_member_identity");}
+        org.telegram.tgnet.SerializedData encoded=new org.telegram.tgnet.SerializedData();member.serializeToStream(encoded);org.telegram.tgnet.SerializedData decoded=new org.telegram.tgnet.SerializedData(encoded.toByteArray());
+        TLRPC.User restored=TLRPC.User.TLdeserialize(decoded,decoded.readInt32(true),true);encoded.cleanup();decoded.cleanup();check(restored.first_name.equals(name),"mapped_user_name_serialization");
+        passed.put("Telegram_display_name_discovery").put("mapped_user_name_serialization");
+        stage="MessagesController_group_creation";
+        CompletableFuture<Long> created=new CompletableFuture<>();NotificationCenter center=NotificationCenter.getInstance(2);
+        NotificationCenter.NotificationCenterDelegate observer=(id,account,args)->{if(id==NotificationCenter.chatDidCreated)created.complete((Long)args[0]);else created.completeExceptionally(new AssertionError());};
+        try {
+            AndroidUtilities.runOnUIThread(()->{MessagesController controller=MessagesController.getInstance(2);controller.putUser(member,false);center.addObserver(observer,NotificationCenter.chatDidCreated);center.addObserver(observer,NotificationCenter.chatDidFailCreate);ArrayList<Long> selected=new ArrayList<>();selected.add(member.id);controller.createChat("گروه از رابط اصلی",selected,"",ChatObject.CHAT_TYPE_CHAT,false,null,null,-1,null);});
+            long local=created.get(30,TimeUnit.SECONDS);String group;try(IdMap map=new IdMap(context,2)){group=map.remote("conversation",local);}
+            TLRPC.Chat cached=MessagesStorage.getInstance(2).getChat(local);check(cached!=null && cached.title.equals("گروه از رابط اصلی") && cached.participants_count==2 && cached.creator,"created_group_native_cache");
+            List<Models.User> members=b.members(group);check(members.size()==2 && members.stream().anyMatch(u->u.id.equals(memberId)),"created_group_membership");
+            TLRPC.TL_updateShortSentMessage ack=(TLRPC.TL_updateShortSentMessage)queueThroughUI(new JSONObject().put("group",group),UUID.randomUUID().getMostSignificantBits(),"پیام در گروه جدید").get(30,TimeUnit.SECONDS);
+            List<Models.Message> messages=b.messages(group,null,100);check(messages.size()==1 && messages.get(0).ordinal==ack.id && messages.get(0).text.equals("پیام در گروه جدید"),"created_group_message_delivery");
+            passed.put("MessagesController_group_creation").put("created_group_native_cache").put("created_group_member_delivery");return group;
+        } finally {AndroidUtilities.runOnUIThread(()->{center.removeObserver(observer,NotificationCenter.chatDidCreated);center.removeObserver(observer,NotificationCenter.chatDidFailCreate);});}
+    }
+
     private String clientId(String user,long randomId){return UUID.nameUUIDFromBytes((user+":"+randomId).getBytes(StandardCharsets.UTF_8)).toString();}
     private static final class TokenSend {int token;final CompletableFuture<TLObject> response=new CompletableFuture<>();}
     private TokenSend queueThroughTransport(JSONObject state,long randomId,String text) throws Exception {
@@ -493,6 +521,7 @@ public final class LocalIntegrationRunner extends Instrumentation {
             check(store.get(state.getString("user"),state.getString("token_cancel_client")).state==OutboxStore.CANCELLED && store.get(state.getString("user"),state.getString("guid_cancel_client")).state==OutboxStore.CANCELLED,"token_cancellations_survive_process_death");
         }
         passed.put("committed_token_cancel_ack").put("token_cancel_process_restart");
+        try(IdMap map=new IdMap(context,2)){long local=map.local("conversation",state.getString("native_created_group"));TLRPC.Chat cached=MessagesStorage.getInstance(2).getChat(local);check(cached!=null && cached.title.equals("گروه از رابط اصلی"),"created_group_survives_restart");}passed.put("created_group_survives_restart");
         stage="Telegram_UI_cancellation_restart";
         try(IdMap map=new IdMap(context,2)){check(UserConfig.getInstance(2).getClientUserId()==map.local("user",state.getString("user")),"Telegram_identity_restored");}passed.put("Telegram_identity_restored");
         try(OutboxStore store=new OutboxStore(context,2)){
