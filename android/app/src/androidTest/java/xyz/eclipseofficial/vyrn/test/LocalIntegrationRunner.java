@@ -179,6 +179,44 @@ public final class LocalIntegrationRunner extends Instrumentation {
             check(!store.failed(e,403,false),"permanent_error_no_retry");
         }
         context.deleteDatabase("vyrn_outbox_9009.db");
+        stage="outbox_claim_cancel_recovery";
+        String fixtureUser=ta.getString("user_id"),cancelledClient=UUID.randomUUID().toString(),claimedClient=UUID.randomUUID().toString();
+        try(OutboxStore store=new OutboxStore(context,9009)){
+            store.enqueue(fixtureUser,cancelledClient,groupId,"Never sent");
+            check(!store.cancel(tb.getString("user_id"),cancelledClient),"cancel_account_isolation");
+            check(store.cancel(fixtureUser,cancelledClient),"cancel_unsent");
+            check(store.get(fixtureUser,cancelledClient).text==null && store.next(fixtureUser)==null,"cancel_removes_payload_and_queue");
+            store.enqueue(fixtureUser,claimedClient,groupId,"Claim recovery");
+            OutboxStore.Entry claimed=store.next(fixtureUser);
+            check(claimed!=null && claimed.state==OutboxStore.SENDING,"durable_claim");
+            try(OutboxStore another=new OutboxStore(context,9009)){check(another.next(fixtureUser)==null,"exclusive_claim");}
+            check(!store.cancel(fixtureUser,claimedClient),"no_false_cancel_inflight");
+        }
+        try(OutboxStore store=new OutboxStore(context,9009)){
+            store.recover();OutboxStore.Entry recovered=store.get(fixtureUser,claimedClient);
+            check(recovered.state==OutboxStore.QUEUED && recovered.text.equals("Claim recovery"),"claim_reopened");
+            check(!store.cancel(fixtureUser,claimedClient),"uncertain_send_not_cancelled");
+            recovered=store.next(fixtureUser);
+            store.accepted(recovered,new Models.Message(UUID.randomUUID().toString(),fixtureUser,"",1,1,false,false));
+            store.getWritableDatabase().execSQL("UPDATE outbox SET completed_at=? WHERE user_id=? AND client_id=?",new Object[]{System.currentTimeMillis()-TimeUnit.DAYS.toMillis(8),fixtureUser,claimedClient});
+            store.prune();check(store.get(fixtureUser,claimedClient)==null,"sent_retention");
+            check(store.get(fixtureUser,cancelledClient)!=null,"recent_cancel_retained");
+        }
+        context.deleteDatabase("vyrn_outbox_9009.db");
+        passed.put("exclusive_outbox_claim").put("unsent_cancel_safety").put("outbox_claim_recovery").put("outbox_retention");
+        stage="outbox_populated_upgrade";
+        String legacyClient=UUID.randomUUID().toString();
+        try(android.database.sqlite.SQLiteDatabase legacy=context.openOrCreateDatabase("vyrn_outbox_9009.db",Context.MODE_PRIVATE,null)){
+            legacy.execSQL("CREATE TABLE outbox(queue_id INTEGER PRIMARY KEY AUTOINCREMENT,user_id TEXT NOT NULL,client_id TEXT NOT NULL,conversation_id TEXT NOT NULL,body TEXT,fingerprint TEXT NOT NULL,state INTEGER NOT NULL DEFAULT 0,attempts INTEGER NOT NULL DEFAULT 0,next_at INTEGER NOT NULL DEFAULT 0,server_id TEXT,ordinal INTEGER,date INTEGER,error INTEGER NOT NULL DEFAULT 0,created_at INTEGER NOT NULL,UNIQUE(user_id,client_id))");
+            legacy.execSQL("INSERT INTO outbox(user_id,client_id,conversation_id,body,fingerprint,created_at) VALUES(?,?,?,?,?,?)",new Object[]{fixtureUser,legacyClient,groupId,"Legacy pending","fixture",System.currentTimeMillis()});
+            legacy.setVersion(1);
+        }
+        try(OutboxStore upgraded=new OutboxStore(context,9009)){
+            check(upgraded.get(fixtureUser,legacyClient).text.equals("Legacy pending"),"upgrade_preserves_pending");
+            check(!upgraded.cancel(fixtureUser,legacyClient),"legacy_uncertainty_preserved");
+            check(upgraded.next(fixtureUser).state==OutboxStore.SENDING,"upgraded_queue_claimable");
+        }
+        context.deleteDatabase("vyrn_outbox_9009.db");passed.put("populated_outbox_upgrade");
         String uncertainGroup=((JSONObject)a.request("POST","/v1/conversations",new JSONObject().put("kind","group").put("title","Lost acknowledgement").put("members",new JSONArray().put(tb.getString("user_id"))),true)).getString("id");
         long uncertainRandom=UUID.randomUUID().getMostSignificantBits();String uncertainClient=clientId(ta.getString("user_id"),uncertainRandom);
         try(OutboxStore store=new OutboxStore(context,2)){store.enqueue(ta.getString("user_id"),uncertainClient,uncertainGroup,"Lost acknowledgement");}

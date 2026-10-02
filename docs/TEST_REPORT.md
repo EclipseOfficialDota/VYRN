@@ -55,6 +55,12 @@ Date: 2026-10-01. This records performed checks, not planned tests.
 - Successfully processed inbox rows are bounded to the newest1000 per account. Handler failures retry at most8 times and then remain as dead letters so a poison event cannot block later entries.
 - This checkpoint does not establish background survival, notification delivery, a forced crash exactly between persistence and application, or complete Telegram model updates for conversation/member/typing/reaction/receipt/pin events.
 
+## Android outbox lifecycle checkpoint on 2026-10-02
+
+- 37 named checks pass across first/offline/restart phases. Additional checks cover exclusive SQLite send claims across two database handles, payload removal for never-attempted cancellation, refusal to report an uncertain send cancelled, recovery after reopening a claimed row, acknowledgement retention and a populated schema1-to2 upgrade.
+- The sender claims before HTTP access and recovers interrupted claims using the same client ID on startup. Sent acknowledgements expire after seven days; cancelled rows expire after one day. The schema upgrade preserves queued payloads and treats existing rows as potentially attempted.
+- Telegram request-token cancellation and server reconciliation of uncertain cancellations remain incomplete. These tests verify the internal store/sender lifecycle; they do not establish the interactive cancel-message flow.
+
 ## External checks
 
 - Dedicated SSH key authentication to port 3939 was rejected. No server commands ran.

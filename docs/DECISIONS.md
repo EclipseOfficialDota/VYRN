@@ -35,3 +35,8 @@
 - Authenticate WebSockets with the bearer header and keep credentials out of URLs. Persist raw events and the resume cursor atomically before acknowledging a batch.
 - Process the durable inbox in sequence, cap handler retries at8 with exponential backoff, retain dead letters and prune successfully processed journal rows to the newest1000 per account.
 - Treat the current incoming-message adapter as a foreground checkpoint. Complete every event mapping, crash recovery, background scheduling and notification behavior before production acceptance.
+
+## 2026-10-02 — outbox lifecycle
+- Claim queued rows atomically as SENDING before HTTP access. Recover interrupted claims only on sole-sender startup and retain the stable client ID for server deduplication.
+- Report local cancellation only when no sender has ever claimed the row. Preserve uncertain sends for server reconciliation, including legacy rows whose attempt history cannot be proved.
+- Keep accepted acknowledgement records for seven days and cancelled records for one day. Preserve pending and failed payloads for explicit user resolution.

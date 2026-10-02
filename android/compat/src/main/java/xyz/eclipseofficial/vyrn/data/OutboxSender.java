@@ -15,7 +15,7 @@ public final class OutboxSender implements AutoCloseable {
     private final RestRepository repository;
     private final ScheduledExecutorService worker=Executors.newSingleThreadScheduledExecutor();
     private final ConcurrentHashMap<String,CompletableFuture<Models.Message>> waiting=new ConcurrentHashMap<>();
-    public OutboxSender(Context context,int account,RestRepository repository){this.repository=repository;store=new OutboxStore(context,account);worker.scheduleWithFixedDelay(this::drain,1,1,TimeUnit.SECONDS);}
+    public OutboxSender(Context context,int account,RestRepository repository){this.repository=repository;store=new OutboxStore(context,account);store.recover();worker.scheduleWithFixedDelay(this::drain,1,1,TimeUnit.SECONDS);worker.scheduleWithFixedDelay(store::prune,1,1,TimeUnit.HOURS);}
     private String key(String user,String client){return user+":"+client;}
     private Models.Message result(OutboxStore.Entry e){return new Models.Message(e.server,e.user,"",e.date,e.ordinal,false,false);}
     public synchronized CompletableFuture<Models.Message> send(String user,String conversation,String client,String text) throws Exception {
@@ -37,7 +37,7 @@ public final class OutboxSender implements AutoCloseable {
                 Models.Message sent=repository.sendForUser(user,entry.conversation,entry.client,entry.text);
                 store.accepted(entry,sent);
                 CompletableFuture<Models.Message> future=waiting.remove(key(user,entry.client));if(future!=null)future.complete(sent);
-            }catch(SecurityException changed){return;
+            }catch(SecurityException changed){store.release(entry);return;
             }catch(Exception failure){
                 int status=failure instanceof RestRepository.ApiException?((RestRepository.ApiException)failure).status:503;
                 boolean retryable=failure instanceof IOException || failure instanceof RestRepository.ApiException && (status==429 || status>=500);
@@ -46,6 +46,10 @@ public final class OutboxSender implements AutoCloseable {
                 }
             }
         }catch(Exception unavailable){/* Storage/auth failure: preserve rows; never log message bodies or credentials. */}
+    }
+    public synchronized boolean cancel(String user,String client){
+        if(!store.cancel(user,client))return false;
+        CompletableFuture<Models.Message> future=waiting.remove(key(user,client));if(future!=null)future.cancel(false);return true;
     }
     @Override public void close(){worker.shutdownNow();try{if(worker.awaitTermination(40,TimeUnit.SECONDS))store.close();}catch(InterruptedException interrupted){Thread.currentThread().interrupt();}}
 }
