@@ -106,17 +106,19 @@ public final class VyrnBridge {
         if(!resolution.user.equals(repository.vault.load().optString("user_id")))return;
         final long selfId=ids.local("user",resolution.user);
         final TLRPC.Message committed;
+        final int deletedId;
         if(resolution.state==OutboxStore.SENT){
             Models.Message remote=repository.messageForUser(resolution.user,resolution.server);
-            TLRPC.TL_peerChat peer=new TLRPC.TL_peerChat();peer.chat_id=-resolution.dialogId;
-            committed=message(remote,peer);committed.dialog_id=resolution.dialogId;committed.random_id=resolution.randomId;committed.out=true;committed.send_state=MessageObject.MESSAGE_SEND_STATE_SENT;
-        }else committed=null;
+            if(remote.deleted){committed=null;deletedId=ids.message(remote.id,remote.ordinal);}
+            else{deletedId=0;TLRPC.TL_peerChat peer=new TLRPC.TL_peerChat();peer.chat_id=-resolution.dialogId;
+                committed=message(remote,peer);committed.dialog_id=resolution.dialogId;committed.random_id=resolution.randomId;committed.out=true;committed.send_state=MessageObject.MESSAGE_SEND_STATE_SENT;}
+        }else{committed=null;deletedId=0;}
         MessagesStorage storage=MessagesStorage.getInstance(account);CountDownLatch written=new CountDownLatch(1);boolean[] safe={false};
         storage.getStorageQueue().postRunnable(()->{try{
             if(!repository.vault.isUser(resolution.user) || UserConfig.getInstance(account).getClientUserId()!=selfId)return;
             org.telegram.SQLite.SQLiteCursor cursor=storage.getDatabase().queryFinalized("SELECT r.random_id FROM messages_v2 m LEFT JOIN randoms_v2 r ON r.mid=m.mid AND r.uid=m.uid WHERE m.mid="+resolution.localId+" AND m.uid="+resolution.dialogId);
             try{if(cursor.next() && (cursor.isNull(0) || cursor.longValue(0)!=resolution.randomId))return;}finally{cursor.dispose();}
-            ArrayList<Integer> localIds=new ArrayList<>();localIds.add(resolution.localId);
+            ArrayList<Integer> localIds=new ArrayList<>();localIds.add(resolution.localId);if(deletedId!=0)localIds.add(deletedId);
             if(committed==null){storage.markMessagesAsDeleted(resolution.dialogId,localIds,false,false,0,0);storage.updateDialogsWithDeletedMessages(resolution.dialogId,0,localIds,null);}
             else{storage.updateMessageStateAndId(resolution.randomId,resolution.dialogId,resolution.localId,committed.id,committed.date,false,0,0);ArrayList<TLRPC.Message> messages=new ArrayList<>();messages.add(committed);storage.putMessages(messages,true,false,false,0,0,0);}
             safe[0]=true;
@@ -125,7 +127,8 @@ public final class VyrnBridge {
         CountDownLatch displayed=new CountDownLatch(1);boolean[] active={false};
         AndroidUtilities.runOnUIThread(()->{try{
             if(!repository.vault.isUser(resolution.user) || UserConfig.getInstance(account).getClientUserId()!=selfId)return;
-            SendMessagesHelper.getInstance(account).vyrnResolveCancellation(resolution.localId,resolution.dialogId,committed);active[0]=true;
+            SendMessagesHelper.getInstance(account).vyrnResolveCancellation(resolution.localId,resolution.dialogId,committed);
+            if(deletedId!=0)SendMessagesHelper.getInstance(account).vyrnResolveCancellation(deletedId,resolution.dialogId,null);active[0]=true;
         }finally{displayed.countDown();}});
         if(!displayed.await(20,TimeUnit.SECONDS) || !active[0])return;
         CountDownLatch verified=new CountDownLatch(1);boolean[] complete={false};
@@ -134,6 +137,7 @@ public final class VyrnBridge {
             org.telegram.SQLite.SQLiteCursor cursor=storage.getDatabase().queryFinalized("SELECT count(*) FROM messages_v2 WHERE mid="+resolution.localId+" AND uid="+resolution.dialogId);
             try{complete[0]=cursor.next() && cursor.intValue(0)==0;}finally{cursor.dispose();}
             if(complete[0] && committed!=null){cursor=storage.getDatabase().queryFinalized("SELECT count(*) FROM messages_v2 WHERE mid="+committed.id+" AND uid="+resolution.dialogId+" AND send_state=0");try{complete[0]=cursor.next() && cursor.intValue(0)==1;}finally{cursor.dispose();}}
+            if(complete[0] && deletedId!=0){cursor=storage.getDatabase().queryFinalized("SELECT count(*) FROM messages_v2 WHERE mid="+deletedId+" AND uid="+resolution.dialogId);try{complete[0]=cursor.next() && cursor.intValue(0)==0;}finally{cursor.dispose();}}
         }catch(Exception unavailable){complete[0]=false;}finally{verified.countDown();}});
         if(verified.await(20,TimeUnit.SECONDS) && complete[0])outbox.acknowledgeUi(resolution);
     }

@@ -305,13 +305,16 @@ public final class LocalIntegrationRunner extends Instrumentation {
         passed.put("bounded_outbox_retry_policy");
         String tokenGroup=((JSONObject)a.request("POST","/v1/conversations",new JSONObject().put("kind","group").put("title","Token cancellation").put("members",new JSONArray().put(tb.getString("user_id"))),true)).getString("id");
         long uiCommittedRandom=UUID.randomUUID().getMostSignificantBits();String uiCommittedServer=a.send(tokenGroup,clientId(ta.getString("user_id"),uiCommittedRandom),"Committed UI cancellation");
+        long uiDeletedRandom=UUID.randomUUID().getMostSignificantBits();String uiDeletedServer=a.send(tokenGroup,clientId(ta.getString("user_id"),uiDeletedRandom),"Deleted UI cancellation");
+        int uiDeletedOrdinal=a.message(uiDeletedServer).ordinal;
+        a.request("DELETE","/v1/messages/"+uiDeletedServer,null,true);
         CompletableFuture<Boolean> configured=new CompletableFuture<>();TLRPC.User uiUser=bridge.mapUser(a.me());
         AndroidUtilities.runOnUIThread(()->{UserConfig.getInstance(2).setCurrentUser(uiUser);UserConfig.getInstance(2).saveConfig(true);MessagesController.getInstance(2).putUser(uiUser,false);configured.complete(true);});configured.get(10,TimeUnit.SECONDS);
         check(UserConfig.getInstance(2).getPreferences().contains("user") && UserConfig.getInstance(2).getPreferences().edit().commit(),"Telegram_fixture_identity_durable");
         ConnectionsManager.onLogout(2);waitForIdleSync();
         check(UserConfig.getInstance(2).getClientUserId()==uiUser.id && bridge.repository.vault.isUser(ta.getString("user_id")),"Telegram_native_logout_isolated");passed.put("Telegram_native_logout_isolated");
         check(bridge.repository.vault.isUser(ta.getString("user_id")) && !bridge.repository.vault.isUser(tb.getString("user_id")),"nonblocking_identity_snapshot");passed.put("nonblocking_identity_snapshot");
-        write("vyrn-test-state.json",new JSONObject().put("ui_committed_random",uiCommittedRandom).put("ui_committed_server",uiCommittedServer).put("token_group",tokenGroup).put("uncertain_group",uncertainGroup).put("uncertain_random",uncertainRandom).put("uncertain_server",uncertainServer).put("group",groupId).put("message",messageId).put("oldest",oldest).put("oldest_ordinal",upper).put("user",ta.getString("user_id")).put("process_id",android.os.Process.myPid()));
+        write("vyrn-test-state.json",new JSONObject().put("ui_deleted_random",uiDeletedRandom).put("ui_deleted_server",uiDeletedServer).put("ui_deleted_ordinal",uiDeletedOrdinal).put("ui_committed_random",uiCommittedRandom).put("ui_committed_server",uiCommittedServer).put("token_group",tokenGroup).put("uncertain_group",uncertainGroup).put("uncertain_random",uncertainRandom).put("uncertain_server",uncertainServer).put("group",groupId).put("message",messageId).put("oldest",oldest).put("oldest_ordinal",upper).put("user",ta.getString("user_id")).put("process_id",android.os.Process.myPid()));
         Files.delete(file("vyrn-test-fixture.json").toPath());
 
         // Run the isolated trust-store probe last. Some Android TLS providers retain
@@ -432,14 +435,18 @@ public final class LocalIntegrationRunner extends Instrumentation {
         stage="offline_SendMessagesHelper_cancellation";
         long uiRandom=UUID.randomUUID().getMostSignificantBits();String uiClient=clientId(state.getString("user"),uiRandom),uiCommittedClient=clientId(state.getString("user"),state.getLong("ui_committed_random"));
         MessageObject uiPending=pendingUi(state,-91001,uiRandom,"Pending UI cancellation"),uiCommitted=pendingUi(state,-91002,state.getLong("ui_committed_random"),"Committed UI cancellation");
+        MessageObject uiDeleted=pendingUi(state,-91003,state.getLong("ui_deleted_random"),"Deleted UI cancellation");
+        pendingUi(state,state.getInt("ui_deleted_ordinal"),state.getLong("ui_deleted_random"),"Stale deleted cached body");
+        String uiDeletedClient=clientId(state.getString("user"),state.getLong("ui_deleted_random"));
         try(OutboxStore store=new OutboxStore(context,2)){
             store.enqueue(state.getString("user"),uiClient,state.getString("token_group"),"Pending UI cancellation");store.enqueue(state.getString("user"),uiCommittedClient,state.getString("token_group"),"Committed UI cancellation");
-            store.getWritableDatabase().execSQL("UPDATE outbox SET attempted=1 WHERE user_id=? AND client_id IN (?,?)",new Object[]{state.getString("user"),uiClient,uiCommittedClient});
+            store.enqueue(state.getString("user"),uiDeletedClient,state.getString("token_group"),"Deleted UI cancellation");
+            store.getWritableDatabase().execSQL("UPDATE outbox SET attempted=1 WHERE user_id=? AND client_id IN (?,?,?)",new Object[]{state.getString("user"),uiClient,uiCommittedClient,uiDeletedClient});
         }
-        CompletableFuture<Boolean> requested=new CompletableFuture<>();AndroidUtilities.runOnUIThread(()->{SendMessagesHelper.getInstance(2).cancelSendingMessage(uiPending);SendMessagesHelper.getInstance(2).cancelSendingMessage(uiCommitted);requested.complete(true);});requested.get(10,TimeUnit.SECONDS);
+        CompletableFuture<Boolean> requested=new CompletableFuture<>();AndroidUtilities.runOnUIThread(()->{SendMessagesHelper.getInstance(2).cancelSendingMessage(uiPending);SendMessagesHelper.getInstance(2).cancelSendingMessage(uiCommitted);SendMessagesHelper.getInstance(2).cancelSendingMessage(uiDeleted);requested.complete(true);});requested.get(10,TimeUnit.SECONDS);
         try(OutboxStore store=new OutboxStore(context,2)){
-            long deadline=System.currentTimeMillis()+45000;while(store.pendingUi(state.getString("user"))<2 && System.currentTimeMillis()<deadline)Thread.sleep(100);
-            check(store.pendingUi(state.getString("user"))==2 && store.resolvedUi(state.getString("user")).isEmpty(),"UI_cancellation_waits_for_server_proof");
+            long deadline=System.currentTimeMillis()+45000;while(store.pendingUi(state.getString("user"))<3 && System.currentTimeMillis()<deadline)Thread.sleep(100);
+            check(store.pendingUi(state.getString("user"))==3 && store.resolvedUi(state.getString("user")).isEmpty(),"UI_cancellation_waits_for_server_proof");
         }
         check(MessagesStorage.getInstance(2).getMessage(uiPending.getDialogId(),-91001)!=null && MessagesStorage.getInstance(2).getMessage(uiCommitted.getDialogId(),-91002)!=null,"offline_UI_not_optimistically_removed");
         state.put("ui_dialog",uiPending.getDialogId()).put("ui_cancel_client",uiClient);write("vyrn-test-state.json",state);
@@ -495,8 +502,13 @@ public final class LocalIntegrationRunner extends Instrumentation {
             check(committed.state==OutboxStore.SENT && committed.server.equals(state.getString("ui_committed_server")),"UI_committed_send_preserved");
             MessagesStorage storage=MessagesStorage.getInstance(2);check(storage.getMessage(state.getLong("ui_dialog"),-91001)==null && storage.getMessage(state.getLong("ui_dialog"),-91002)==null,"negative_UI_rows_resolved");
             TLRPC.Message cached=storage.getMessage(state.getLong("ui_dialog"),committed.ordinal);check(cached!=null && cached.message.equals("Committed UI cancellation"),"committed_UI_message_cached");
+            OutboxStore.Entry deleted=store.get(state.getString("user"),clientId(state.getString("user"),state.getLong("ui_deleted_random")));
+            check(deleted.state==OutboxStore.SENT && deleted.server.equals(state.getString("ui_deleted_server")),"deleted_committed_send_keeps_ack");
+            check(storage.getMessage(state.getLong("ui_dialog"),-91003)==null && storage.getMessage(state.getLong("ui_dialog"),state.getInt("ui_deleted_ordinal"))==null,"server_deleted_UI_not_revived");
         }
-        check(b.messages(state.getString("token_group"),null,100).size()==1,"UI_cancel_no_server_message_created");
+        List<Models.Message> uiHistory=b.messages(state.getString("token_group"),null,100);
+        check(uiHistory.size()==2 && uiHistory.stream().filter(m->m.deleted && m.id.equals(state.optString("ui_deleted_server"))).count()==1,"UI_cancel_no_server_message_created");
+        passed.put("server_deleted_UI_not_revived").put("deleted_committed_send_keeps_ack");
         passed.put("UI_cancel_cleanup_after_process_death").put("committed_UI_restored_after_process_death").put("UI_journal_ack_after_cache_proof");
         List<Models.Message> uncertainHistory=b.messages(state.getString("uncertain_group"),null,100);
         check(uncertainHistory.size()==1 && uncertainHistory.get(0).id.equals(state.getString("uncertain_server")) && uncertainHistory.get(0).ordinal==recovered.id,"lost_ack_no_duplicate");

@@ -64,3 +64,7 @@
 - Intercept pending group-text cancellation in SendMessagesHelper, retain negative local rows until cancellation proof, and replay terminal journal records after process death. Restore committed sends using their original server IDs.
 - Verify native cache changes before acknowledging the durable journal. Preserve originating-user, active native-account and random-ID checks without acquiring the network token lock on UI/storage queues.
 - Ignore Telegram native onLogout: absence of an upstream Telegram auth key cannot revoke an independent VYRN session. VYRN authentication owns session validity.
+
+## 2026-10-02 — deleted committed sends
+- Preserve the original SENT acknowledgement when a committed send has subsequently been deleted. An authorized server tombstone removes both the original pending row and any stale positive native-cache row; it must never become an empty replacement message.
+- Verify absence of both native rows before acknowledging the UI journal. Retain the journal on any identity, cache or network failure.

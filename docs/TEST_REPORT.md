@@ -97,6 +97,12 @@ Date: 2026-10-01. This records performed checks, not planned tests.
 - A failed restart exposed Telegram's native missing-auth-key logout clearing VYRN's independent user. The reproducible ConnectionsManager overlay ignores native onLogout; explicit callback isolation and native identity restoration pass without weakening account or random-ID guards.
 - Complete screen-driven cancellation, account-switch races and reconciliation of a committed message subsequently deleted on the server remain unverified.
 
+## Deleted committed-send recovery checkpoint on 2026-10-02
+
+- All73 named emulator checks pass over first/offline/restart. A third cancellation fixture commits a send, deletes it on the server, then seeds both a pending negative native row and a stale positive native row while offline.
+- After real process death and reconnection, authorized reconciliation observes the server tombstone and removes both local rows without inserting an empty replacement message. The original SENT acknowledgement and server ID remain intact; cache verification precedes journal acknowledgement.
+- This covers an already-deleted committed send. Concurrent deletion after a reconciliation fetch, screen-driven cancellation and account-switch races still require verification.
+
 ## External checks
 
 - Dedicated SSH key authentication to port 3939 was rejected. No server commands ran.
