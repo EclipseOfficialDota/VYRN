@@ -23,6 +23,8 @@ import java.security.KeyStore;
 import org.json.JSONArray;
 import org.json.JSONObject;
 import org.telegram.messenger.BuildConfig;
+import org.telegram.messenger.Utilities;
+import org.telegram.tgnet.ConnectionsManager;
 import org.telegram.tgnet.TLObject;
 import org.telegram.tgnet.TLRPC;
 import xyz.eclipseofficial.vyrn.compat.VyrnBridge;
@@ -239,13 +241,27 @@ public final class LocalIntegrationRunner extends Instrumentation {
         }
         passed.put("populated_schema2_cancel_upgrade");
         context.deleteDatabase("vyrn_outbox_9009.db");passed.put("populated_outbox_upgrade");
+        stage="cancel_before_send_preparation";
+        CompletableFuture<Boolean> preSendCancelled=new CompletableFuture<>(),readCancelled=new CompletableFuture<>();
+        CompletableFuture<TLObject> preSendResponse=new CompletableFuture<>(),readResponse=new CompletableFuture<>();
+        Utilities.stageQueue.postRunnable(()->{
+            TLRPC.TL_messages_sendMessage privateSend=new TLRPC.TL_messages_sendMessage();privateSend.peer=new TLRPC.TL_inputPeerUser();privateSend.message="Unavailable private fixture";privateSend.random_id=123;
+            int token=ConnectionsManager.getInstance(2).sendRequestSync(privateSend,(value,error)->preSendResponse.complete(value),null,null,0,ConnectionsManager.DEFAULT_DATACENTER_ID,ConnectionsManager.ConnectionTypeGeneric,true);
+            VyrnBridge.cancelRequest(2,token,()->preSendCancelled.complete(true));
+            token=ConnectionsManager.getInstance(2).sendRequestSync(new TLRPC.TL_updates_getState(),(value,error)->readResponse.complete(value),null,null,0,ConnectionsManager.DEFAULT_DATACENTER_ID,ConnectionsManager.ConnectionTypeGeneric,true);
+            VyrnBridge.cancelRequest(2,token,()->readCancelled.complete(true));
+        });
+        preSendCancelled.get(10,TimeUnit.SECONDS);readCancelled.get(10,TimeUnit.SECONDS);
+        check(!preSendResponse.isDone() && !readResponse.isDone(),"cancelled_callbacks_suppressed");
+        passed.put("cancel_before_send_preparation").put("cancelled_read_callback_suppressed");
         String uncertainGroup=((JSONObject)a.request("POST","/v1/conversations",new JSONObject().put("kind","group").put("title","Lost acknowledgement").put("members",new JSONArray().put(tb.getString("user_id"))),true)).getString("id");
         long uncertainRandom=UUID.randomUUID().getMostSignificantBits();String uncertainClient=clientId(ta.getString("user_id"),uncertainRandom);
         try(OutboxStore store=new OutboxStore(context,2)){store.enqueue(ta.getString("user_id"),uncertainClient,uncertainGroup,"Lost acknowledgement");}
         // Simulate a server commit whose response was lost before the local acknowledgement commit.
         String uncertainServer=a.send(uncertainGroup,uncertainClient,"Lost acknowledgement");
         passed.put("bounded_outbox_retry_policy");
-        write("vyrn-test-state.json",new JSONObject().put("uncertain_group",uncertainGroup).put("uncertain_random",uncertainRandom).put("uncertain_server",uncertainServer).put("group",groupId).put("message",messageId).put("oldest",oldest).put("oldest_ordinal",upper).put("user",ta.getString("user_id")).put("process_id",android.os.Process.myPid()));
+        String tokenGroup=((JSONObject)a.request("POST","/v1/conversations",new JSONObject().put("kind","group").put("title","Token cancellation").put("members",new JSONArray().put(tb.getString("user_id"))),true)).getString("id");
+        write("vyrn-test-state.json",new JSONObject().put("token_group",tokenGroup).put("uncertain_group",uncertainGroup).put("uncertain_random",uncertainRandom).put("uncertain_server",uncertainServer).put("group",groupId).put("message",messageId).put("oldest",oldest).put("oldest_ordinal",upper).put("user",ta.getString("user_id")).put("process_id",android.os.Process.myPid()));
         Files.delete(file("vyrn-test-fixture.json").toPath());
 
         // Run the isolated trust-store probe last. Some Android TLS providers retain
@@ -283,6 +299,13 @@ public final class LocalIntegrationRunner extends Instrumentation {
         return response;
     }
     private String clientId(String user,long randomId){return UUID.nameUUIDFromBytes((user+":"+randomId).getBytes(StandardCharsets.UTF_8)).toString();}
+    private static final class TokenSend {int token;final CompletableFuture<TLObject> response=new CompletableFuture<>();}
+    private TokenSend queueThroughTransport(JSONObject state,long randomId,String text) throws Exception {
+        TLRPC.TL_messages_sendMessage request=new TLRPC.TL_messages_sendMessage();TLRPC.TL_inputPeerChat peer=new TLRPC.TL_inputPeerChat();
+        try(IdMap map=new IdMap(context,2)){peer.chat_id=map.local("conversation",state.getString("group"));}
+        request.peer=peer;request.message=text;request.random_id=randomId;
+        TokenSend send=new TokenSend();send.token=ConnectionsManager.getInstance(2).sendRequest(request,(value,error)->{if(error!=null)send.response.completeExceptionally(new AssertionError());else send.response.complete(value);});return send;
+    }
     private void offline() throws Exception {
         stage="offline_UI_outbox";
         JSONObject state=read("vyrn-test-state.json");
@@ -323,6 +346,31 @@ public final class LocalIntegrationRunner extends Instrumentation {
         }
         state.put("cancelled_client",cancelled).put("committed_cancel_client",committed);write("vyrn-test-state.json",state);
         passed.put("offline_cancel_no_false_confirmation").put("durable_cancel_intent");
+        stage="offline_Telegram_request_cancellation";
+        JSONObject cancellationGroup=new JSONObject().put("group",state.getString("token_group"));
+        long cancelRandom=UUID.randomUUID().getMostSignificantBits(),guidRandom=UUID.randomUUID().getMostSignificantBits();
+        TokenSend tokenSend=queueThroughTransport(cancellationGroup,cancelRandom,"Token cancellation");
+        String tokenClient=clientId(state.getString("user"),cancelRandom),guidClient=clientId(state.getString("user"),guidRandom);
+        try(OutboxStore store=new OutboxStore(context,2)){
+            long deadline=System.currentTimeMillis()+45000;OutboxStore.Entry entry=store.get(state.getString("user"),tokenClient);
+            while((entry==null || entry.attempts==0) && System.currentTimeMillis()<deadline){Thread.sleep(100);entry=store.get(state.getString("user"),tokenClient);}
+            check(entry!=null && entry.attempts>0,"token_send_attempted");
+            CompletableFuture<Boolean> wrongAccount=new CompletableFuture<>();VyrnBridge.cancelRequest(9007,tokenSend.token,()->wrongAccount.complete(true));
+            CompletableFuture<Boolean> barrier=new CompletableFuture<>();Utilities.stageQueue.postRunnable(()->barrier.complete(true));barrier.get(5,TimeUnit.SECONDS);
+            check(!wrongAccount.isDone() && !store.get(state.getString("user"),tokenClient).cancellation,"token_account_isolation");
+            CompletableFuture<Boolean> cancelledCallback=new CompletableFuture<>();ConnectionsManager.getInstance(2).cancelRequest(tokenSend.token,true,()->cancelledCallback.complete(true));
+            deadline=System.currentTimeMillis()+10000;
+            while(!store.get(state.getString("user"),tokenClient).cancellation && System.currentTimeMillis()<deadline)Thread.sleep(100);
+            check(store.get(state.getString("user"),tokenClient).cancellation,"token_cancellation_persisted");
+            check(!cancelledCallback.isDone() && !tokenSend.response.isDone(),"token_cancel_no_false_callback");
+            TokenSend guidSend=queueThroughTransport(cancellationGroup,guidRandom,"GUID cancellation");
+            ConnectionsManager.getInstance(2).bindRequestToGuid(guidSend.token,3455);ConnectionsManager.getInstance(2).cancelRequestsForGuid(3455);
+            deadline=System.currentTimeMillis()+45000;OutboxStore.Entry guid=store.get(state.getString("user"),guidClient);
+            while((guid==null || !guid.cancellation && guid.state!=OutboxStore.CANCELLED) && System.currentTimeMillis()<deadline){Thread.sleep(100);guid=store.get(state.getString("user"),guidClient);}
+            check(guid!=null && (guid.cancellation || guid.state==OutboxStore.CANCELLED) && !guidSend.response.isDone(),"guid_cancellation_routed");
+        }
+        state.put("token_cancel_client",tokenClient).put("guid_cancel_client",guidClient);write("vyrn-test-state.json",state);
+        passed.put("Telegram_request_token_cancellation").put("request_token_account_isolation").put("cancel_callback_waits_for_confirmation").put("Telegram_GUID_cancellation");
     }
 
     private void restart() throws Exception {
@@ -351,7 +399,20 @@ public final class LocalIntegrationRunner extends Instrumentation {
         TLRPC.TL_updateShortSentMessage replay=(TLRPC.TL_updateShortSentMessage)queueThroughUI(state,state.getLong("outbox_first"),"Offline one").get(5,TimeUnit.SECONDS);
         check(replay.id==first.id,"outbox_completed_retry");
         JSONObject uncertain=new JSONObject().put("group",state.getString("uncertain_group"));
+        stage="committed_Telegram_token_cancellation";
+        TokenSend committedToken=queueThroughTransport(uncertain,state.getLong("uncertain_random"),"Lost acknowledgement");
+        CompletableFuture<Boolean> falseCancellation=new CompletableFuture<>();ConnectionsManager.getInstance(2).cancelRequest(committedToken.token,true,()->falseCancellation.complete(true));
+        TLRPC.TL_updateShortSentMessage reconciled=(TLRPC.TL_updateShortSentMessage)committedToken.response.get(45,TimeUnit.SECONDS);
+        check(!falseCancellation.isDone(),"committed_token_not_reported_cancelled");
         TLRPC.TL_updateShortSentMessage recovered=(TLRPC.TL_updateShortSentMessage)queueThroughUI(uncertain,state.getLong("uncertain_random"),"Lost acknowledgement").get(45,TimeUnit.SECONDS);
+        check(reconciled.id==recovered.id,"committed_token_ack_preserved");
+        stage="token_cancellation_restart_recovery";
+        try(OutboxStore store=new OutboxStore(context,2)){
+            long deadline=System.currentTimeMillis()+45000;
+            while(System.currentTimeMillis()<deadline){OutboxStore.Entry token=store.get(state.getString("user"),state.getString("token_cancel_client")),guid=store.get(state.getString("user"),state.getString("guid_cancel_client"));if(token!=null && guid!=null && token.state==OutboxStore.CANCELLED && guid.state==OutboxStore.CANCELLED)break;Thread.sleep(100);}
+            check(store.get(state.getString("user"),state.getString("token_cancel_client")).state==OutboxStore.CANCELLED && store.get(state.getString("user"),state.getString("guid_cancel_client")).state==OutboxStore.CANCELLED,"token_cancellations_survive_process_death");
+        }
+        passed.put("committed_token_cancel_ack").put("token_cancel_process_restart");
         List<Models.Message> uncertainHistory=b.messages(state.getString("uncertain_group"),null,100);
         check(uncertainHistory.size()==1 && uncertainHistory.get(0).id.equals(state.getString("uncertain_server")) && uncertainHistory.get(0).ordinal==recovered.id,"lost_ack_no_duplicate");
         passed.put("lost_acknowledgement_recovery");

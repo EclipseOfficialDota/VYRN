@@ -47,3 +47,10 @@
 - Prioritize cancellation intents, preserve them through bounded retries and process restart, and prevent explicit resend from reviving a cancelled client ID.
 - Confirm cancellation only after local proof of never-attempted delivery or a server cancellation fence. Reconcile committed sends through an account-bound message fetch and persist the acknowledgement before completing callbacks.
 - Keep Telegram request-token wiring and interactive UI acceptance open; internal sender tests do not establish that user flow.
+
+## 2026-10-02 — Telegram request lifecycle
+- Route request tokens, GUID binding and cancellation through the VYRN adapter rather than the disabled Telegram native transport. Key outstanding requests by account and token and remove them on terminal delivery.
+- Suppress cancelled read callbacks. For sends, wait for durable cancellation proof before invoking onCancelled; preserve the original send acknowledgement when the server committed first.
+- Keep the originating user immutable in request metadata. Persist cancellation intent without waiting for the token-vault network lock; reconciliation still sends only under the matching active account.
+- Post completion handling onto Telegram's stage queue so future callbacks do not acquire other request locks inline during cancellation.
+- Interactive SendMessagesHelper cancellation remains open: its original optimistic local removal must be reconciled with confirmed cancellation and UI cleanup must survive process death.

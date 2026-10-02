@@ -75,6 +75,14 @@ Date: 2026-10-01. This records performed checks, not planned tests.
 - The offline retry assertion now waits within a bounded deadline for the durable retry state, instead of assuming a fixed six-second network failure. The committed fixture explicitly records its attempted claim.
 - Telegram request-token cancellation wiring and the interactive cancel-message flow remain unverified. These checks exercise the store/sender and real server endpoint.
 
+## Telegram request-cancellation checkpoint on 2026-10-02
+
+- 55 named Android checks pass over first/offline/restart. New checks exercise actual ConnectionsManager dispatch, cancelRequest, bindRequestToGuid and cancelRequestsForGuid hooks with the local HTTPS backend.
+- An attempted send cancelled while disconnected persists intent without an onCancelled callback or a send acknowledgement. Token and GUID cancellation survive process death, and both entries become CANCELLED after reconnecting. An account with the same numeric token cannot cancel the originating request.
+- Cancelling a server-committed request preserves its original acknowledgement and does not invoke onCancelled. Cancellation before unsupported private-send preparation and cancellation of a read request suppress their completion callbacks.
+- The pinned preparation script regenerates ConnectionsManager from the exact upstream commit before applying all hooks, retaining reproducibility across repeated builds. A cancelled row discovered after send-future registration now cancels that future instead of leaving it unresolved.
+- These are transport integration tests. Original SendMessagesHelper still performs optimistic local deletion during cancelSendingMessage; deferring that removal until proof, durable UI cleanup and the complete interactive cancel-message flow remain required.
+
 ## External checks
 
 - Dedicated SSH key authentication to port 3939 was rejected. No server commands ran.

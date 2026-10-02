@@ -20,7 +20,7 @@ public final class OutboxSender implements AutoCloseable {
     public OutboxSender(Context context,int account,RestRepository repository){this.repository=repository;store=new OutboxStore(context,account);store.recover();worker.scheduleWithFixedDelay(this::drain,1,1,TimeUnit.SECONDS);worker.scheduleWithFixedDelay(store::prune,1,1,TimeUnit.HOURS);}
     private String key(String user,String client){return user+":"+client;}
     private Models.Message result(OutboxStore.Entry e){return new Models.Message(e.server,e.user,"",e.date,e.ordinal,false,false);}
-    public synchronized CompletableFuture<Models.Message> send(String user,String conversation,String client,String text) throws Exception {
+    public CompletableFuture<Models.Message> send(String user,String conversation,String client,String text) throws Exception {
         if(!user.equals(repository.vault.load().optString("user_id")))throw new SecurityException("account_changed");
         OutboxStore.Entry entry=store.enqueue(user,client,conversation,text);
         if(entry.state==OutboxStore.SENT)return CompletableFuture.completedFuture(result(entry));
@@ -29,6 +29,7 @@ public final class OutboxSender implements AutoCloseable {
         entry=store.get(user,client);
         if(entry.state==OutboxStore.SENT){waiting.remove(key(user,client),future);future.complete(result(entry));}
         else if(entry.state==OutboxStore.FAILED){waiting.remove(key(user,client),future);future.completeExceptionally(new RestRepository.ApiException(entry.error,"send_failed"));}
+        else if(entry.state==OutboxStore.CANCELLED){waiting.remove(key(user,client),future);future.cancel(false);}
         worker.execute(this::drain);return future;
     }
     private void drain(){
@@ -57,13 +58,17 @@ public final class OutboxSender implements AutoCloseable {
             }
         }catch(Exception unavailable){/* Storage/auth failure: preserve rows; never log message bodies or credentials. */}
     }
-    public synchronized boolean cancel(String user,String client){
+    public boolean cancel(String user,String client){
         if(!store.cancel(user,client))return false;
         CompletableFuture<Models.Message> future=waiting.remove(key(user,client));if(future!=null)future.cancel(false);return true;
     }
     /** True means cancellation was confirmed; false means the server already committed the send. */
-    public synchronized CompletableFuture<Boolean> cancelDurably(String user,String client) throws Exception {
+    public CompletableFuture<Boolean> cancelDurably(String user,String client) throws Exception {
         if(!user.equals(repository.vault.load().optString("user_id")))throw new SecurityException("account_changed");
+        return cancelForOrigin(user,client);
+    }
+    /** The bridge supplies the immutable originating user from its request token. No network/auth lock is needed to persist intent. */
+    public CompletableFuture<Boolean> cancelForOrigin(String user,String client) throws Exception {
         CompletableFuture<Boolean> future=cancellations.computeIfAbsent(key(user,client),ignored->new CompletableFuture<>());
         try {
             if(store.cancel(user,client)){completeCancellation(user,client,true);return future;}

@@ -10,6 +10,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.ConcurrentHashMap;
 import org.json.JSONObject;
 import org.telegram.messenger.ApplicationLoader;
 import org.telegram.messenger.MessagesController;
@@ -32,6 +33,43 @@ public final class VyrnBridge {
     private static final ExecutorService IO=Executors.newFixedThreadPool(2);
     private static final ExecutorService SEND=Executors.newSingleThreadExecutor();
     private static final Map<Integer,VyrnBridge> INSTANCES=new HashMap<>();
+    private static final ConcurrentHashMap<Long,PendingRequest> REQUESTS=new ConcurrentHashMap<>();
+    private static long requestKey(int account,int token){return ((long)account<<32)|(token&0xffffffffL);}
+    private static final class PendingRequest {
+        final int account,token;final boolean send;final RequestDelegate callback;final RequestDelegateTimestamp timestamp;
+        int guid;boolean cancellationRequested,cancellationStarted,resultReady,finished,ready;
+        Boolean cancellationResult;TLObject result;Throwable failure;VyrnBridge bridge;String user,client;
+        final ArrayList<Runnable> cancelledCallbacks=new ArrayList<>();
+        PendingRequest(int account,int token,boolean send,RequestDelegate callback,RequestDelegateTimestamp timestamp){this.account=account;this.token=token;this.send=send;this.callback=callback;this.timestamp=timestamp;}
+        synchronized void complete(TLObject result,Throwable failure){
+            if(finished)return;this.result=result;this.failure=failure;resultReady=true;
+            if(cancellationRequested && send && !ready)cancellationResult=bridge==null;
+            Utilities.stageQueue.postRunnable(this::deliver);
+        }
+        synchronized void cancel(Runnable onCancelled){
+            if(finished)return;cancellationRequested=true;if(onCancelled!=null)cancelledCallbacks.add(onCancelled);
+            if(!send || !ready && resultReady){cancellationResult=!send || bridge==null;Utilities.stageQueue.postRunnable(this::deliver);}
+            else if(ready)startCancellation();
+        }
+        synchronized void startCancellation(){
+            if(!cancellationRequested || cancellationStarted || finished || !ready)return;cancellationStarted=true;
+            try{bridge.outbox.cancelForOrigin(user,client).whenComplete((cancelled,error)->Utilities.stageQueue.postRunnable(()->{
+                synchronized(this){if(finished)return;cancellationResult=error==null && Boolean.TRUE.equals(cancelled);}
+                deliver();
+            }));}catch(Exception error){cancellationResult=false;Utilities.stageQueue.postRunnable(this::deliver);}
+        }
+        void deliver(){
+            TLObject response;Throwable error;ArrayList<Runnable> cancelled;
+            synchronized(this){
+                if(finished || cancellationRequested && cancellationResult==null)return;
+                if(Boolean.TRUE.equals(cancellationResult)){cancelled=new ArrayList<>(cancelledCallbacks);response=null;error=null;}
+                else{if(!resultReady)return;cancelled=null;response=result;error=failure;}
+                finished=true;if(token!=0)REQUESTS.remove(requestKey(account,token),this);
+            }
+            if(cancelled!=null){for(Runnable task:cancelled)task.run();return;}
+            TLRPC.TL_error problem=problem(error);if(callback!=null)callback.run(response,problem);if(timestamp!=null)timestamp.run(response,problem,System.currentTimeMillis());
+        }
+    }
     public final RestRepository repository;
     private final IdMap ids;
     private final OutboxSender outbox;
@@ -42,23 +80,34 @@ public final class VyrnBridge {
     public static synchronized VyrnBridge forAccount(int account){VyrnBridge bridge=INSTANCES.get(account);if(bridge==null){bridge=new VyrnBridge(account);INSTANCES.put(account,bridge);}return bridge;}
     public static void execute(Runnable task){IO.execute(task);}
     public static boolean dispatch(int account,TLObject request,RequestDelegate callback,RequestDelegateTimestamp timestamp){
+        return dispatch(account,request,callback,timestamp,0);
+    }
+    public static boolean dispatch(int account,TLObject request,RequestDelegate callback,RequestDelegateTimestamp timestamp,int token){
+        PendingRequest pending=new PendingRequest(account,token,request instanceof TLRPC.TL_messages_sendMessage,callback,timestamp);
+        if(token!=0 && REQUESTS.putIfAbsent(requestKey(account,token),pending)!=null)throw new IllegalStateException("duplicate_request_token");
         if(request instanceof TLRPC.TL_messages_sendMessage){
             SEND.execute(()->{try{VyrnBridge bridge=forAccount(account);TLRPC.TL_messages_sendMessage in=(TLRPC.TL_messages_sendMessage)request;
                 if(in.peer.chat_id==0)throw new UnsupportedOperationException("e2ee_not_ready");
                 String user=bridge.repository.vault.load().getString("user_id");
                 String client=UUID.nameUUIDFromBytes((user+":"+in.random_id).getBytes(StandardCharsets.UTF_8)).toString();
-                bridge.outbox.send(user,bridge.ids.remote("conversation",in.peer.chat_id),client,in.message).whenComplete((sent,failure)->{
-                    if(failure!=null){deliver(null,failure,callback,timestamp);return;}
-                    try{TLRPC.TL_updateShortSentMessage out=new TLRPC.TL_updateShortSentMessage();out.id=bridge.ids.message(sent.id,sent.ordinal);out.date=sent.date;out.out=true;out.pts=out.id;out.pts_count=1;deliver(out,null,callback,timestamp);}catch(Exception error){deliver(null,error,callback,timestamp);}
-                });
-            }catch(Exception failure){deliver(null,failure,callback,timestamp);}});return true;
+                synchronized(pending){pending.bridge=bridge;pending.user=user;pending.client=client;}
+                java.util.concurrent.CompletableFuture<Models.Message> delivery=bridge.outbox.send(user,bridge.ids.remote("conversation",in.peer.chat_id),client,in.message);
+                synchronized(pending){pending.ready=true;}
+                delivery.whenComplete((sent,failure)->Utilities.stageQueue.postRunnable(()->{
+                    if(failure!=null){pending.complete(null,failure);return;}
+                    try{TLRPC.TL_updateShortSentMessage out=new TLRPC.TL_updateShortSentMessage();out.id=bridge.ids.message(sent.id,sent.ordinal);out.date=sent.date;out.out=true;out.pts=out.id;out.pts_count=1;pending.complete(out,null);}catch(Exception error){pending.complete(null,error);}
+                }));
+                pending.startCancellation();
+            }catch(Exception failure){pending.complete(null,failure);synchronized(pending){pending.startCancellation();}}});return true;
         }
-        execute(()->{TLObject response=null;TLRPC.TL_error error=null;try{response=forAccount(account).handle(request);}catch(Exception failure){error=new TLRPC.TL_error();error.code=failure instanceof RestRepository.ApiException?((RestRepository.ApiException)failure).status:503;error.text=failure instanceof UnsupportedOperationException?"VYRN_FEATURE_UNAVAILABLE":"VYRN_REQUEST_FAILED";}
-            final TLObject result=response;final TLRPC.TL_error problem=error;Utilities.stageQueue.postRunnable(()->{if(callback!=null)callback.run(result,problem);if(timestamp!=null)timestamp.run(result,problem,System.currentTimeMillis());});});return true;
+        execute(()->{try{pending.complete(forAccount(account).handle(request),null);}catch(Exception failure){pending.complete(null,failure);}});return true;
     }
-    private static void deliver(TLObject result,Throwable failure,RequestDelegate callback,RequestDelegateTimestamp timestamp){
+    public static void cancelRequest(int account,int token,Runnable onCancelled){PendingRequest pending=REQUESTS.get(requestKey(account,token));if(pending!=null)pending.cancel(onCancelled);}
+    public static void bindRequestToGuid(int account,int token,int guid){PendingRequest pending=REQUESTS.get(requestKey(account,token));if(pending!=null && guid!=0)synchronized(pending){pending.guid=guid;}}
+    public static void cancelRequestsForGuid(int account,int guid){if(guid==0)return;for(PendingRequest pending:REQUESTS.values()){boolean matches;synchronized(pending){matches=pending.account==account && pending.guid==guid;}if(matches)pending.cancel(null);}}
+    private static TLRPC.TL_error problem(Throwable failure){
         TLRPC.TL_error error=null;if(failure!=null){error=new TLRPC.TL_error();error.code=failure instanceof RestRepository.ApiException?((RestRepository.ApiException)failure).status:503;error.text=failure instanceof UnsupportedOperationException?"VYRN_FEATURE_UNAVAILABLE":"VYRN_REQUEST_FAILED";}
-        final TLRPC.TL_error problem=error;Utilities.stageQueue.postRunnable(()->{if(callback!=null)callback.run(result,problem);if(timestamp!=null)timestamp.run(result,problem,System.currentTimeMillis());});
+        return error;
     }
     public TLRPC.User mapUser(Models.User value){TLRPC.TL_user u=new TLRPC.TL_user();u.id=ids.local("user",value.id);u.first_name=value.name;u.last_name="";u.phone="";u.self=u.id==UserConfig.getInstance(account).getClientUserId();u.photo=new TLRPC.TL_userProfilePhotoEmpty();u.status=new TLRPC.TL_userStatusOffline();return u;}
     private TLRPC.Peer peer(Models.Conversation conversation,List<Models.User> members) throws Exception{

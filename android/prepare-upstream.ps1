@@ -48,8 +48,14 @@ Edit 'TMessagesProj/src/main/java/org/telegram/ui/LaunchActivity.java' {
 }
 Edit 'TMessagesProj/src/main/java/org/telegram/tgnet/ConnectionsManager.java' {
  param($t)
+ $t=(& git -c "safe.directory=$($upstream.Replace('\','/'))" -C $upstream show "${pin}:TMessagesProj/src/main/java/org/telegram/tgnet/ConnectionsManager.java") -join "`n"
  $marker='private void sendRequestInternal(TLObject object, RequestDelegate onComplete, RequestDelegateTimestamp onCompleteTimestamp, QuickAckDelegate onQuickAck, WriteToSocketDelegate onWriteToSocket, int flags, int datacenterId, int connectionType, boolean immediate, int requestToken) {'
- if(!$t.Contains('VyrnBridge.dispatch')){$t=$t.Replace($marker,$marker+"`n        if (xyz.eclipseofficial.vyrn.compat.VyrnBridge.dispatch(currentAccount, object, onComplete, onCompleteTimestamp)) return;")};$t
+ if(!$t.Contains($marker)){throw 'Pinned request dispatch marker missing'}
+ $t=$t.Replace($marker,$marker+"`n        if (xyz.eclipseofficial.vyrn.compat.VyrnBridge.dispatch(currentAccount, object, onComplete, onCompleteTimestamp, requestToken)) return;")
+ $t=$t -replace '(?s)public void cancelRequest\(int token, boolean notifyServer, Runnable onCancelled\) \{.*?\n    \}', 'public void cancelRequest(int token, boolean notifyServer, Runnable onCancelled) { Utilities.stageQueue.postRunnable(() -> xyz.eclipseofficial.vyrn.compat.VyrnBridge.cancelRequest(currentAccount, token, onCancelled)); }'
+ $t=$t.Replace('native_cancelRequestsForGuid(currentAccount, guid);','xyz.eclipseofficial.vyrn.compat.VyrnBridge.cancelRequestsForGuid(currentAccount, guid);')
+ $t=$t.Replace('native_bindRequestToGuid(currentAccount, requestToken, guid);','Utilities.stageQueue.postRunnable(() -> xyz.eclipseofficial.vyrn.compat.VyrnBridge.bindRequestToGuid(currentAccount, requestToken, guid));')
+ $t
 }
 Edit 'TMessagesProj/jni/tgnet/Connection.cpp' {
  param($t)
