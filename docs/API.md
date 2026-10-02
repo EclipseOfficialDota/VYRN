@@ -17,6 +17,7 @@ All production endpoints require HTTPS. JSON uses UTF-8. Authentication is `Auth
 | DELETE `/v1/sessions/{id}` | revoke an owned session |
 | PUT/DELETE `/v1/blocks/{id}` | block/unblock another user |
 | GET/POST `/v1/conversations` | list or create private/group conversation with members and title; groups accept optional disappearing_seconds from0 to31536000, committed atomically with members/events |
+| GET `/v1/conversations/{id}` | member-authorized snapshot of conversation metadata and members with roles/joined_at; independent of the bounded conversation list; removed members and outsiders receive404 |
 | PATCH `/v1/conversations/{id}` | title and disappearing_seconds |
 | GET/POST `/v1/conversations/{id}/members` | list or add/change member role; owner/admin permissions enforced |
 | DELETE `/v1/conversations/{id}/members/{user}` | remove member/leave group |

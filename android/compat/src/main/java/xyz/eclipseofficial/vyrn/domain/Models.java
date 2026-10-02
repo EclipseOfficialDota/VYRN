@@ -19,6 +19,14 @@ public final class Models {
         public final boolean encrypted, deleted;
         public Message(String id,String sender,String text,int date,int ordinal,boolean encrypted,boolean deleted){this.id=id;this.sender=sender;this.text=text;this.date=date;this.ordinal=ordinal;this.encrypted=encrypted;this.deleted=deleted;}
     }
+    public static final class Member {
+        public final User user;public final String role;public final int joinedDate;
+        public Member(User user,String role,int joinedDate){this.user=user;this.role=role;this.joinedDate=joinedDate;}
+    }
+    public static final class ConversationDetails {
+        public final Conversation conversation;public final List<Member> members;public final int createdDate;
+        public ConversationDetails(Conversation conversation,List<Member> members,int createdDate){this.conversation=conversation;this.members=members;this.createdDate=createdDate;}
+    }
     public interface Repository {
         User me() throws Exception;
         List<Conversation> conversations() throws Exception;

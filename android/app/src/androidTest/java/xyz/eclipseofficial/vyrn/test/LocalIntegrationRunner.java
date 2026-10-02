@@ -379,10 +379,27 @@ public final class LocalIntegrationRunner extends Instrumentation {
             CompletableFuture<TLObject> snapshot=new CompletableFuture<>();ConnectionsManager.getInstance(2).sendRequest(new TLRPC.TL_messages_getDialogs(),(value,error)->{if(error!=null)snapshot.completeExceptionally(new AssertionError());else snapshot.complete(value);});
             TLRPC.TL_messages_dialogs dialogs=(TLRPC.TL_messages_dialogs)snapshot.get(30,TimeUnit.SECONDS);TLRPC.Dialog ttlDialog=null;for(TLRPC.Dialog dialog:dialogs.dialogs)if(dialog.id==-local)ttlDialog=dialog;
             check(ttlDialog!=null && ttlDialog.ttl_period==86400 && (ttlDialog.flags&32)!=0,"created_group_dialog_TTL");passed.put("first_message_uses_creation_TTL").put("created_group_dialog_TTL");
+            a.request("POST","/v1/conversations/"+group+"/members",new JSONObject().put("user_id",memberId).put("role","admin"),true);
+            verifyFullGroup(local);
             passed.put("MessagesController_group_creation").put("created_group_native_cache").put("created_group_member_delivery");return group;
         } finally {AndroidUtilities.runOnUIThread(()->{center.removeObserver(observer,NotificationCenter.chatDidCreated);center.removeObserver(observer,NotificationCenter.chatDidFailCreate);});}
     }
 
+    private TLRPC.ChatFull cachedFullGroup(long local) throws Exception {
+        CompletableFuture<TLRPC.ChatFull> cached=new CompletableFuture<>();MessagesStorage storage=MessagesStorage.getInstance(2);
+        storage.getStorageQueue().postRunnable(()->{try{cached.complete(storage.loadChatInfoInQueue(local,false,false,false,0));}catch(Throwable error){cached.completeExceptionally(error);}});return cached.get(10,TimeUnit.SECONDS);
+    }
+    private void verifyFullGroup(long local) throws Exception {
+        stage="native_full_group_information";CompletableFuture<TLRPC.ChatFull> loaded=new CompletableFuture<>();NotificationCenter center=NotificationCenter.getInstance(2);
+        NotificationCenter.NotificationCenterDelegate observer=(id,account,args)->{TLRPC.ChatFull full=(TLRPC.ChatFull)args[0];if(full.id==local)loaded.complete(full);};
+        try {
+            AndroidUtilities.runOnUIThread(()->{center.addObserver(observer,NotificationCenter.chatInfoDidLoad);MessagesController.getInstance(2).loadFullChat(local,0,true);});
+            TLRPC.ChatFull full=loaded.get(30,TimeUnit.SECONDS);check(full.ttl_period==86400 && (full.flags&16384)!=0 && full.participants.participants.size()==2,"native_full_group_TTL_members");
+            int owners=0,admins=0;for(TLRPC.ChatParticipant member:full.participants.participants){if(member instanceof TLRPC.TL_chatParticipantCreator)owners++;if(member instanceof TLRPC.TL_chatParticipantAdmin){admins++;check(member.date>0 && member.date<=System.currentTimeMillis()/1000,"native_member_join_timestamp");}}
+            check(owners==1 && admins==1,"native_full_group_roles");TLRPC.ChatFull cached=cachedFullGroup(local);check(cached!=null && cached.ttl_period==86400 && cached.participants.participants.size()==2,"native_full_group_persisted");
+            passed.put("MessagesController_full_group_load").put("native_full_group_roles_dates").put("native_full_group_persisted");
+        } finally {AndroidUtilities.runOnUIThread(()->center.removeObserver(observer,NotificationCenter.chatInfoDidLoad));}
+    }
     private String clientId(String user,long randomId){return UUID.nameUUIDFromBytes((user+":"+randomId).getBytes(StandardCharsets.UTF_8)).toString();}
     private static final class TokenSend {int token;final CompletableFuture<TLObject> response=new CompletableFuture<>();}
     private TokenSend queueThroughTransport(JSONObject state,long randomId,String text) throws Exception {
@@ -527,6 +544,7 @@ public final class LocalIntegrationRunner extends Instrumentation {
         passed.put("committed_token_cancel_ack").put("token_cancel_process_restart");
         try(IdMap map=new IdMap(context,2)){long local=map.local("conversation",state.getString("native_created_group"));TLRPC.Chat cached=MessagesStorage.getInstance(2).getChat(local);check(cached!=null && cached.title.equals("گروه از رابط اصلی"),"created_group_survives_restart");}passed.put("created_group_survives_restart");
         boolean ttlRestored=false;for(Models.Conversation group:a.conversations())if(group.id.equals(state.getString("native_created_group")))ttlRestored=group.disappearingSeconds==86400;check(ttlRestored,"created_group_TTL_survives_restart");passed.put("created_group_TTL_survives_restart");
+        try(IdMap map=new IdMap(context,2)){TLRPC.ChatFull cached=cachedFullGroup(map.local("conversation",state.getString("native_created_group")));check(cached!=null && cached.ttl_period==86400 && cached.participants.participants.stream().anyMatch(p->p instanceof TLRPC.TL_chatParticipantAdmin),"full_group_survives_restart");}passed.put("full_group_survives_restart");
         stage="Telegram_UI_cancellation_restart";
         try(IdMap map=new IdMap(context,2)){check(UserConfig.getInstance(2).getClientUserId()==map.local("user",state.getString("user")),"Telegram_identity_restored");}passed.put("Telegram_identity_restored");
         try(OutboxStore store=new OutboxStore(context,2)){

@@ -116,6 +116,13 @@ Date: 2026-10-01. This records performed checks, not planned tests.
 - Twelve PostgreSQL API integration tests pass. The new test verifies zero/minimum/maximum periods, first-send expiry, matching creation/member/recipient-event state and rejection of invalid TTL/member inputs without orphan conversations. go vet passes.
 - Creation-time group TTL is now atomic. Screen-driven settings, changing group TTL from native settings, per-message countdown visuals and invited-device realtime TTL mapping remain unfinished; these checks do not establish complete auto-delete UI acceptance.
 
+## Full-group-information checkpoint on 2026-10-02
+
+- All86 named Android checks pass. The original MessagesController.loadFullChat observes a full group containing the actual owner/admin participant types, admin join timestamp and one-day auto-delete period. Native full-group data is serialized into the existing Telegram cache and survives real process death.
+- Thirteen PostgreSQL API integration tests pass, including authorized role/date/TTL snapshots, unauthenticated/outsider denial, revoked-member denial and targeted lookup after501 newer groups exclude the old group from the500-item list. go vet passes.
+- Native full-group loading and read-only role display are tested through controller entry points, not screen taps. Member-management mutations, native permission controls, group photos and complete screen acceptance remain unfinished.
+- A temporary automatic approval-review usage-limit failure prevented the first debug build; usage availability was rechecked after reset and the same reviewed action completed. No approval bypass was used.
+
 ## External checks
 
 - Dedicated SSH key authentication to port 3939 was rejected. No server commands ran.

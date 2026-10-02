@@ -156,6 +156,31 @@ func (s *Server) conversations(w http.ResponseWriter, r *http.Request) {
 	}
 	respond(w, 200, out)
 }
+func (s *Server) conversationDetails(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if !validID(id) {
+		fail(w, 404, "not_found")
+		return
+	}
+	var kind, title, role string
+	var seconds int
+	var created time.Time
+	var members json.RawMessage
+	err := s.db.QueryRow(r.Context(), `SELECT c.kind,c.title,m.role,c.disappearing_seconds,c.created_at,
+		(SELECT jsonb_agg(jsonb_build_object('id',u.id,'display_name',u.display_name,'role',all_members.role,'avatar_id',u.avatar_id,'joined_at',all_members.joined_at) ORDER BY all_members.joined_at,u.id)
+		 FROM members all_members JOIN users u ON u.id=all_members.user_id WHERE all_members.conversation_id=c.id)
+		FROM conversations c JOIN members m ON m.conversation_id=c.id WHERE c.id=$1 AND m.user_id=$2`, id, current(r).UserID).Scan(&kind, &title, &role, &seconds, &created, &members)
+	if err == pgx.ErrNoRows {
+		fail(w, 404, "not_found")
+		return
+	}
+	if err != nil {
+		s.internal(w)
+		return
+	}
+	respond(w, 200, map[string]any{"id": id, "kind": kind, "title": title, "role": role, "disappearing_seconds": seconds, "created_at": created, "members": members})
+}
+
 func (s *Server) createConversation(w http.ResponseWriter, r *http.Request) {
 	var in struct {
 		Kind    string   `json:"kind"`

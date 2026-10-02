@@ -78,3 +78,8 @@
 - Accept the native createChat TTL flag and persist group disappearing_seconds in the initial conversation transaction with membership and recipient events. Never create a group and then patch its TTL in a separate request.
 - Validate the same0-to31536000-second bound used by existing settings. Initial private-conversation creation still requires zero; its existing settings API remains unchanged.
 - Map persisted TTL into native dialog fields/serialization flags and the creator's peer-history-TTL update. The first send derives its expiry directly from the committed conversation setting.
+
+## 2026-10-02 — full group information
+- Read conversation metadata and member roles/join dates in one authorized PostgreSQL statement. Targeted lookup must work for groups outside the bounded500-item list; removed members and outsiders receive the same404.
+- Map that snapshot to the original messages.getFullChat response with native owner/admin/member participant types, actual membership dates, TTL flags and group creation date. Unknown inviter metadata stays unset.
+- Use targeted repository lookup for incoming-event conversation metadata as well. Native role reads/cache are separate from unfinished member-management mutations and permission controls.

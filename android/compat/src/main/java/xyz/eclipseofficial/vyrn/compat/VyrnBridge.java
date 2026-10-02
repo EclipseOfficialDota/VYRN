@@ -194,7 +194,7 @@ public final class VyrnBridge {
             List<Models.Message> messages=repository.messages(c.id,null,1);if(!messages.isEmpty()){TLRPC.Message message=message(messages.get(0),peer);result.messages.add(message);dialog.top_message=message.id;dialog.last_message_date=message.date;}result.dialogs.add(dialog);
         }return result;
     }
-    private Models.Conversation conversationModel(String id) throws Exception{for(Models.Conversation value:repository.conversations())if(value.id.equals(id))return value;throw new IllegalStateException("conversation_missing");}
+    private Models.Conversation conversationModel(String id) throws Exception{return repository.conversationDetails(id).conversation;}
     private void applyEvent(String kind,JSONObject body) throws Exception {
         if(!kind.startsWith("message."))return;
         String conversation=body.getString("conversation_id"),messageId=body.getString("message_id");Models.Message value=repository.message(messageId);
@@ -216,6 +216,17 @@ public final class VyrnBridge {
     public int syncPending() throws Exception {String user=repository.vault.load().optString("user_id");return user.isEmpty()?0:realtime.pending(user);}
     public int syncDead() throws Exception {String user=repository.vault.load().optString("user_id");return user.isEmpty()?0:realtime.dead(user);}
     private synchronized TLObject handle(TLObject request) throws Exception {
+        if(request instanceof TLRPC.TL_messages_getFullChat){
+            TLRPC.TL_messages_getFullChat in=(TLRPC.TL_messages_getFullChat)request;Models.ConversationDetails details=repository.conversationDetails(ids.remote("conversation",in.chat_id));
+            if(!details.conversation.kind.equals("group"))throw new IllegalArgumentException("group_required");
+            TLRPC.TL_messages_chatFull result=new TLRPC.TL_messages_chatFull();TLRPC.Chat group=chat(details.conversation);group.date=details.createdDate;result.chats.add(group);
+            TLRPC.TL_chatFull full=new TLRPC.TL_chatFull();full.id=in.chat_id;full.about="";full.chat_photo=new TLRPC.TL_photoEmpty();full.flags=4;full.notify_settings=new TLRPC.TL_peerNotifySettings();full.ttl_period=details.conversation.disappearingSeconds;if(full.ttl_period>0)full.flags|=16384;
+            TLRPC.TL_chatParticipants participants=new TLRPC.TL_chatParticipants();participants.chat_id=in.chat_id;participants.version=1;
+            for(Models.Member member:details.members){TLRPC.User user=mapUser(member.user);result.users.add(user);TLRPC.ChatParticipant participant;
+                if(member.role.equals("owner"))participant=new TLRPC.TL_chatParticipantCreator();else if(member.role.equals("admin"))participant=new TLRPC.TL_chatParticipantAdmin();else participant=new TLRPC.TL_chatParticipant();
+                participant.user_id=user.id;participant.date=member.joinedDate;participants.participants.add(participant);}
+            full.participants=participants;result.full_chat=full;return result;
+        }
         if(request instanceof TLRPC.TL_contacts_search){
             TLRPC.TL_contacts_search in=(TLRPC.TL_contacts_search)request;TLRPC.TL_contacts_found result=new TLRPC.TL_contacts_found();
             for(Models.User found:repository.searchUsers(in.q,in.limit)){TLRPC.User user=mapUser(found);result.users.add(user);TLRPC.TL_peerUser peer=new TLRPC.TL_peerUser();peer.user_id=user.id;result.results.add(peer);}return result;

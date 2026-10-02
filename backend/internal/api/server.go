@@ -95,6 +95,7 @@ func (s *Server) Handler() http.Handler {
 	secure("PUT /v1/blocks/{id}", s.block)
 	secure("DELETE /v1/blocks/{id}", s.unblock)
 	secure("GET /v1/conversations", s.conversations)
+	secure("GET /v1/conversations/{id}", s.conversationDetails)
 	secure("POST /v1/conversations", s.createConversation)
 	secure("POST /v1/conversations/{id}/members", s.addMember)
 	secure("GET /v1/conversations/{id}/members", s.listMembers)

@@ -49,6 +49,12 @@ public final class RestRepository implements Models.Repository {
         }finally{connection.disconnect();}
     }
     public Models.User me() throws Exception {return user((JSONObject)request("GET","/v1/me",null,true));}
+    public Models.ConversationDetails conversationDetails(String id) throws Exception {
+        JSONObject data=(JSONObject)request("GET","/v1/conversations/"+id,null,true);JSONArray raw=data.getJSONArray("members");List<Models.Member> members=new ArrayList<>();
+        for(int i=0;i<raw.length();i++){JSONObject member=raw.getJSONObject(i);members.add(new Models.Member(user(member),member.getString("role"),(int)Instant.parse(member.getString("joined_at")).getEpochSecond()));}
+        Models.Conversation conversation=new Models.Conversation(data.getString("id"),data.getString("kind"),data.getString("title"),data.getString("role"),members.size(),data.getInt("disappearing_seconds"));
+        return new Models.ConversationDetails(conversation,members,(int)Instant.parse(data.getString("created_at")).getEpochSecond());
+    }
     public List<Models.User> searchUsers(String query,int limit) throws Exception {
         JSONArray data=(JSONArray)request("GET","/v1/users/search?q="+java.net.URLEncoder.encode(query,"UTF-8")+"&limit="+Math.max(1,Math.min(limit,50)),null,true);
         List<Models.User> result=new ArrayList<>();for(int i=0;i<data.length();i++)result.add(user(data.getJSONObject(i)));return result;
