@@ -2,6 +2,13 @@
 
 Updated: 2026-10-02. This records performed checks, not planned tests.
 
+## Persisted native edit provenance checkpoint — 2026-10-02
+
+- All132 named API35 checks pass:90 first,14 offline,28 restart. artifacts/android-integration.json records the actual tested APK hash. The original SendMessagesHelper successfully edits a restored native cached message after process restart using its persisted exact revision.
+- Older cached equal-text provenance returns a real409 revision conflict despite newer history observations. Legacy local parameter blobs preserve their original fields and clear orphan provenance; altered cached bodies cannot reuse a snapshot. The latest authoritative revision is verified in the persisted native row before process death.
+- The first run failed at latest_edit_provenance_persisted: native edit storage merged the previous custom_params blob into the incoming message and replaced the new snapshot with the old one. Corrected both edit-cache merge and replaceMessageIfExists to retain incoming provenance without copying an old basis to unknown incoming content. The complete suite passed after the repair.
+- Local x86_64 debug/instrumentation build passes. All three normal ARM Debug APKs built successfully and passed signature/package/API/ABI/manifest verification. Physical-device and screen-driven composer/reload/conflict-alert acceptance remain unfinished. Backend source unchanged.
+
 ## Native plain-text edit checkpoint — 2026-10-02
 
 - All126 named API35 Android checks pass:86 first,14 offline,26 restart. Evidence: artifacts/android-integration.json with the tested APK SHA-256. The original SendMessagesHelper dispatched an edit using a real foreground fragment; actual server revision/text/date and serialized native cache agree.

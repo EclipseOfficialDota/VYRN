@@ -119,6 +119,39 @@ Edit 'TMessagesProj/src/main/java/org/telegram/ui/Components/ChatActivityEnterVi
  if(!$t.Contains($marker)){throw 'Pinned composer edit marker missing'}
  $t.Replace($marker,$marker+"`n        xyz.eclipseofficial.vyrn.compat.VyrnBridge.captureEdit(currentAccount, messageObject);")
 }
+Edit 'TMessagesProj/src/main/java/org/telegram/messenger/MessageCustomParamsHelper.java' {
+ param($t)
+ $t=(& git -c "safe.directory=$($upstream.Replace('\','/'))" -C $upstream show "${pin}:TMessagesProj/src/main/java/org/telegram/messenger/MessageCustomParamsHelper.java") -join "`n"
+ # Extend only the app-private custom_params blob, never a Telegram wire constructor.
+ $empty='            message.voiceTranscription == null &&'
+ $flag='            flags = setFlag(flags, FLAG_13, message.translatedRichMessage != null);'
+ $write="                message.translatedRichMessage.serializeToStream(stream);`n            }"
+ $read='                message.translatedRichMessage = TL_iv.RichMessage.TLdeserialize(stream, stream.readInt32(exception), exception);'+"`n            }"
+ foreach($marker in @($empty,$flag,$write,$read)){if(!$t.Contains($marker)){throw 'Pinned local message params marker missing'}}
+ $t=$t.Replace($empty,"            (message.params == null || !message.params.containsKey(xyz.eclipseofficial.vyrn.compat.VyrnBridge.EDIT_SNAPSHOT)) &&`n"+$empty)
+ $t=$t.Replace($flag,$flag+"`n            flags = setFlag(flags, FLAG_14, message.params != null && message.params.containsKey(xyz.eclipseofficial.vyrn.compat.VyrnBridge.EDIT_SNAPSHOT));")
+ $t=$t.Replace($write,$write+"`n            if (hasFlag(flags, FLAG_14)) stream.writeString(message.params.get(xyz.eclipseofficial.vyrn.compat.VyrnBridge.EDIT_SNAPSHOT));")
+ $t=$t.Replace('            flags = stream.readInt32(true);',"            if (message.params != null) message.params.remove(xyz.eclipseofficial.vyrn.compat.VyrnBridge.EDIT_SNAPSHOT);`n            flags = stream.readInt32(true);")
+ $t.Replace($read,$read+"`n            if (hasFlag(flags, FLAG_14)) { if (message.params == null) message.params = new java.util.HashMap<>(); message.params.put(xyz.eclipseofficial.vyrn.compat.VyrnBridge.EDIT_SNAPSHOT, stream.readString(exception)); }")
+}
+Edit 'TMessagesProj/src/main/java/org/telegram/messenger/MessagesStorage.java' {
+ param($t)
+ $t=(& git -c "safe.directory=$($upstream.Replace('\','/'))" -C $upstream show "${pin}:TMessagesProj/src/main/java/org/telegram/messenger/MessagesStorage.java") -join "`n"
+ $start=$t.IndexOf('    public TLRPC.Message getMessage(long dialogId, long msgId) {')
+ $end=$t.IndexOf('    private TLRPC.Message getMessageInternal(', $start)
+ if($start -lt 0 -or $end -lt 0){throw 'Pinned stored message lookup markers missing'}
+ $section=$t.Substring($start,$end-$start)
+ $marker='                        ref.set(message);'
+ if(!$section.Contains($marker)){throw 'Pinned stored message decode marker missing'}
+ $section=$section.Replace('SELECT data FROM messages_v2','SELECT data, custom_params FROM messages_v2')
+ $section=$section.Replace($marker,"                        NativeByteBuffer localParams = cursor.byteBufferValue(1);`n                        if (localParams != null) { try { MessageCustomParamsHelper.readLocalParams(message, localParams); } finally { localParams.reuse(); } }`n"+$marker)
+ $t=$t.Substring(0,$start)+$section+$t.Substring($end)
+ $edit="                                    NativeByteBuffer customParams = cursor.byteBufferValue(6);`n                                    MessageCustomParamsHelper.readLocalParams(message, customParams);"
+ $replace='                    customParams = cursor.byteBufferValue(2);'
+ foreach($marker in @($edit,$replace)){if(!$t.Contains($marker)){throw 'Pinned existing message params merge marker missing'}}
+ $t=$t.Replace($edit,"                                    NativeByteBuffer customParams = cursor.byteBufferValue(6);`n                                    xyz.eclipseofficial.vyrn.compat.VyrnBridge.mergeLocalMessageParams(message, customParams);")
+ $t.Replace($replace,$replace+"`n                    xyz.eclipseofficial.vyrn.compat.VyrnBridge.mergeLocalMessageParams(message, customParams);`n                    if (customParams != null) customParams.reuse();`n                    customParams = MessageCustomParamsHelper.writeLocalParams(message);")
+}
 Edit 'TMessagesProj/jni/tgnet/Connection.cpp' {
  param($t)
  if(!$t.Contains('VYRN: Telegram sockets are disabled')){$t=$t.Replace('void Connection::connect() {',"void Connection::connect() {`n    return; // VYRN: Telegram sockets are disabled; REST/WebSocket own transport.")};$t

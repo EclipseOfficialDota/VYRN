@@ -40,10 +40,18 @@ public final class VyrnBridge {
     private static final ExecutorService SEND=Executors.newSingleThreadExecutor();
     private static final Map<Integer,VyrnBridge> INSTANCES=new HashMap<>();
     private static final Map<MessageObject,EditRequest> EDITS=new java.util.WeakHashMap<>();
-    /** Local provenance only; inherited TL serialization deliberately omits it. */
-    private static final class ObservedMessage extends TLRPC.TL_message {
-        final String serverId,conversation,sender;final int revision,ordinal;
-        ObservedMessage(Models.Message value){serverId=value.id;conversation=value.conversation;sender=value.sender;revision=value.deleted||value.encrypted?0:value.revision;ordinal=value.ordinal;}
+    public static final String EDIT_SNAPSHOT="vyrn_edit_snapshot";
+    private static String textHash(String text){try{return java.util.Base64.getEncoder().encodeToString(java.security.MessageDigest.getInstance("SHA-256").digest(text.getBytes(StandardCharsets.UTF_8)));}catch(java.security.NoSuchAlgorithmException impossible){throw new AssertionError(impossible);}}
+    private static String editSnapshot(Models.Message value){
+        if(value.revision<=0||value.deleted||value.encrypted||value.conversation==null)return null;
+        try{return new JSONObject().put("version",1).put("id",value.id).put("conversation",value.conversation).put("sender",value.sender).put("ordinal",value.ordinal).put("revision",value.revision).put("date",value.date).put("edited",value.editedDate).put("hash",textHash(value.text)).toString();}catch(org.json.JSONException impossible){throw new IllegalStateException(impossible);}
+    }
+    /** Keep existing local UI attributes without assigning an older edit basis to incoming content. */
+    public static void mergeLocalMessageParams(TLRPC.Message message,org.telegram.tgnet.NativeByteBuffer previous){
+        String snapshot=message.params==null?null:message.params.get(EDIT_SNAPSHOT);
+        org.telegram.messenger.MessageCustomParamsHelper.readLocalParams(message,previous);
+        if(message.params!=null)message.params.remove(EDIT_SNAPSHOT);
+        if(snapshot!=null){if(message.params==null)message.params=new HashMap<>();message.params.put(EDIT_SNAPSHOT,snapshot);}
     }
     private static final class EditRequest extends TLRPC.TL_messages_editMessage {
         final int account,revision,originalId;final long dialog;final String user,conversation,serverId;
@@ -51,10 +59,11 @@ public final class VyrnBridge {
     }
     public static synchronized void captureEdit(int account,MessageObject object){
         if(object==null)return;EDITS.remove(object);
-        if(!(object.messageOwner instanceof ObservedMessage)||object.getDialogId()>=0)return;
-        ObservedMessage value=(ObservedMessage)object.messageOwner;VyrnBridge bridge=forAccount(account);
-        if(value.revision<=0||value.ordinal!=object.getId()||!bridge.repository.vault.isUser(value.sender)||UserConfig.getInstance(account).getClientUserId()!=bridge.ids.local("user",value.sender))return;
-        EDITS.put(object,new EditRequest(account,value.revision,object.getId(),object.getDialogId(),value.sender,value.conversation,value.serverId));
+        TLRPC.Message message=object.messageOwner;if(message==null||message.params==null||object.getDialogId()>=0)return;
+        try{JSONObject value=new JSONObject(message.params.get(EDIT_SNAPSHOT));VyrnBridge bridge=forAccount(account);String sender=value.getString("sender"),conversation=value.getString("conversation"),id=value.getString("id");
+            if(value.getInt("version")!=1||value.getInt("revision")<=0||value.getInt("ordinal")!=object.getId()||value.getInt("date")!=message.date||value.getInt("edited")!=message.edit_date||!value.getString("hash").equals(textHash(message.message))||!bridge.repository.vault.isUser(sender)||UserConfig.getInstance(account).getClientUserId()!=bridge.ids.local("user",sender)||message.from_id==null||message.from_id.user_id!=bridge.ids.local("user",sender)||!conversation.equals(bridge.ids.remote("conversation",-object.getDialogId()))||!id.equals(bridge.ids.remote("message",object.getId())))return;
+            EDITS.put(object,new EditRequest(account,value.getInt("revision"),object.getId(),object.getDialogId(),sender,conversation,id));
+        }catch(Exception unavailable){/* Unknown or mismatched cache provenance must refresh before editing. */}
     }
     public static synchronized TLRPC.TL_messages_editMessage editRequest(int account,MessageObject object){
         EditRequest basis=EDITS.get(object);
@@ -218,7 +227,7 @@ public final class VyrnBridge {
     }
     private TLRPC.Message message(Models.Message m,TLRPC.Peer peer){
         ids.observe(m);
-        TLRPC.TL_message out=new ObservedMessage(m);out.id=ids.message(m.id,m.ordinal);out.peer_id=peer;TLRPC.TL_peerUser sender=new TLRPC.TL_peerUser();sender.user_id=ids.local("user",m.sender);out.from_id=sender;out.flags|=256;out.date=m.date;out.message=m.deleted?"":m.encrypted?(org.telegram.messenger.LocaleController.isRTL?"این پیام در این دستگاه قابل نمایش نیست.":"This message cannot be displayed on this device."):m.text;out.out=sender.user_id==UserConfig.getInstance(account).getClientUserId();out.media=new TLRPC.TL_messageMediaEmpty();out.edit_date=m.editedDate;if(m.editedDate>0)out.flags|=TLRPC.MESSAGE_FLAG_EDITED;return out;
+        TLRPC.TL_message out=new TLRPC.TL_message();String snapshot=editSnapshot(m);if(snapshot!=null){out.params=new HashMap<>();out.params.put(EDIT_SNAPSHOT,snapshot);}out.id=ids.message(m.id,m.ordinal);out.peer_id=peer;TLRPC.TL_peerUser sender=new TLRPC.TL_peerUser();sender.user_id=ids.local("user",m.sender);out.from_id=sender;out.flags|=256;out.date=m.date;out.message=m.deleted?"":m.encrypted?(org.telegram.messenger.LocaleController.isRTL?"این پیام در این دستگاه قابل نمایش نیست.":"This message cannot be displayed on this device."):m.text;out.out=sender.user_id==UserConfig.getInstance(account).getClientUserId();out.media=new TLRPC.TL_messageMediaEmpty();out.edit_date=m.editedDate;if(m.editedDate>0)out.flags|=TLRPC.MESSAGE_FLAG_EDITED;return out;
     }
     private TLRPC.TL_messages_dialogs dialogs() throws Exception {
         TLRPC.TL_messages_dialogs result=new TLRPC.TL_messages_dialogs();

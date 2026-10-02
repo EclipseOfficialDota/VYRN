@@ -1,6 +1,6 @@
 # Local Android integration
 
-Latest verified checkpoint:126 named API35 checks pass across first/offline/restart. Plain group-text editing exercises the original SendMessagesHelper, exact captured revision, native cache, equal-text ABA conflict, missing cached revision, account/destination binding, deletion and restart persistence. Complete screen-driven composer/reload, rich/media edits and physical-device acceptance remain unfinished.
+Latest verified checkpoint:132 named API35 checks pass across first/offline/restart. Plain group-text editing exercises the original SendMessagesHelper, exact captured revision, native cache, equal-text ABA conflict, missing cached revision, account/destination binding, deletion and restart persistence. Exact revision metadata now persists in native custom_params; old-cache ABA conflict, legacy decoding, content binding and successful original-helper editing after process restart pass. Complete screen-driven composer/reload, rich/media edits and physical-device acceptance remain unfinished.
 
 Use the project-local `vyrn_api35` emulator. These commands reject other devices and keep production credentials, endpoints and signing separate.
 

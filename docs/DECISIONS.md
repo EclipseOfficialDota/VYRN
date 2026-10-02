@@ -126,3 +126,10 @@
 - Submit the exact revision through the existing server compare-and-swap mutation. Unknown cached revisions require reload, and conflicts show an explicit Persian/English alert. Never fetch a newer revision to make a stale edit succeed.
 - Feed accepted authoritative updates through the native update-array processor without treating stable message ordinals as Telegram PTS. Validate account identity again before native application; deleted authoritative states produce tombstone updates.
 - This connects plain group-text editing only. Full interactive composer/reload acceptance, rich entities, media edits and broader account-switch races remain unfinished.
+
+## 2026-10-02 — persisted native edit provenance
+- Store the exact mapped revision, UUID, group, sender, ordinal, timestamps and text SHA-256 in the existing app-private messages_v2.custom_params blob. Extend only its local Params_v1 flag14/string; standard Telegram constructors and message wire serialization remain unchanged.
+- Restore that local snapshot when reading cached messages. Composer capture validates identity, timestamps and body hash and freezes the persisted revision even if newer observations exist. Do not infer cached revisions from the newest matching text.
+- Old blobs without the field remain readable and explicitly clear any stale provenance when decoded into an existing object. Unknown, malformed or content-mismatched snapshots require refresh; no database migration or fabricated revision is needed.
+- The native custom-parameter copier does not transfer a snapshot from an older message to a replacement; incoming authoritative snapshots retain their own version.
+- Native edit storage and replaceMessageIfExists merge old local UI attributes while preserving the incoming provenance, or remove it when the incoming version is unknown. Never copy an old basis alongside newly received content. The132-check emulator suite verifies latest persisted revision and a successful original-helper edit after process restart.
