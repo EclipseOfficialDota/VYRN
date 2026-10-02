@@ -2,23 +2,29 @@ package xyz.eclipseofficial.vyrn.compat;
 
 import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import org.json.JSONObject;
 import org.telegram.messenger.ApplicationLoader;
+import org.telegram.messenger.MessagesController;
 import org.telegram.messenger.UserConfig;
 import org.telegram.messenger.Utilities;
 import org.telegram.tgnet.RequestDelegate;
 import org.telegram.tgnet.RequestDelegateTimestamp;
 import org.telegram.tgnet.TLObject;
 import org.telegram.tgnet.TLRPC;
+import org.telegram.tgnet.tl.TL_update;
 import xyz.eclipseofficial.vyrn.data.IdMap;
 import xyz.eclipseofficial.vyrn.data.RestRepository;
 import xyz.eclipseofficial.vyrn.data.TokenVault;
 import xyz.eclipseofficial.vyrn.data.OutboxSender;
+import xyz.eclipseofficial.vyrn.data.RealtimeSync;
 import xyz.eclipseofficial.vyrn.domain.Models;
 
 /** The only adapter allowed to depend on both Telegram wire-shaped UI models and VYRN domain models. */
@@ -29,9 +35,10 @@ public final class VyrnBridge {
     public final RestRepository repository;
     private final IdMap ids;
     private final OutboxSender outbox;
+    private final RealtimeSync realtime;
     private final int account;
     private final Map<Long,String> privateConversations=new HashMap<>();
-    private VyrnBridge(int account){this.account=account;repository=new RestRepository(new TokenVault(ApplicationLoader.applicationContext,account));ids=new IdMap(ApplicationLoader.applicationContext,account);outbox=new OutboxSender(ApplicationLoader.applicationContext,account,repository);}
+    private VyrnBridge(int account){this.account=account;repository=new RestRepository(new TokenVault(ApplicationLoader.applicationContext,account));ids=new IdMap(ApplicationLoader.applicationContext,account);outbox=new OutboxSender(ApplicationLoader.applicationContext,account,repository);realtime=new RealtimeSync(ApplicationLoader.applicationContext,account,repository,this::applyEvent);}
     public static synchronized VyrnBridge forAccount(int account){VyrnBridge bridge=INSTANCES.get(account);if(bridge==null){bridge=new VyrnBridge(account);INSTANCES.put(account,bridge);}return bridge;}
     public static void execute(Runnable task){IO.execute(task);}
     public static boolean dispatch(int account,TLObject request,RequestDelegate callback,RequestDelegateTimestamp timestamp){
@@ -74,6 +81,27 @@ public final class VyrnBridge {
             List<Models.Message> messages=repository.messages(c.id,null,1);if(!messages.isEmpty()){TLRPC.Message message=message(messages.get(0),peer);result.messages.add(message);dialog.top_message=message.id;dialog.last_message_date=message.date;}result.dialogs.add(dialog);
         }return result;
     }
+    private Models.Conversation conversationModel(String id) throws Exception{for(Models.Conversation value:repository.conversations())if(value.id.equals(id))return value;throw new IllegalStateException("conversation_missing");}
+    private void applyEvent(String kind,JSONObject body) throws Exception {
+        if(!kind.startsWith("message."))return;
+        String conversation=body.getString("conversation_id"),messageId=body.getString("message_id");Models.Message value=repository.message(messageId);
+        Models.Conversation model=conversationModel(conversation);List<Models.User> members=repository.members(conversation);TLRPC.Peer destination=peer(model,members);
+        ArrayList<TLRPC.User> users=new ArrayList<>();for(Models.User user:members)users.add(mapUser(user));ArrayList<TLRPC.Chat> chats=new ArrayList<>();if(model.kind.equals("group"))chats.add(chat(model));
+        ArrayList<TLRPC.Update> updates=new ArrayList<>();
+        if(kind.equals("message.deleted")||kind.equals("message.expired")){
+            TL_update.TL_updateDeleteMessages update=new TL_update.TL_updateDeleteMessages();update.messages.add(ids.message(value.id,value.ordinal));update.pts=value.ordinal;update.pts_count=1;updates.add(update);
+        }else{
+            TLRPC.Message mapped=message(value,destination);
+            if(kind.equals("message.created")){TL_update.TL_updateNewMessage update=new TL_update.TL_updateNewMessage();update.message=mapped;update.pts=value.ordinal;update.pts_count=1;updates.add(update);}
+            else{TL_update.TL_updateEditMessage update=new TL_update.TL_updateEditMessage();update.message=mapped;update.pts=value.ordinal;update.pts_count=1;updates.add(update);}
+        }
+        CountDownLatch complete=new CountDownLatch(1);boolean[] accepted={false};
+        Utilities.stageQueue.postRunnable(()->{try{accepted[0]=MessagesController.getInstance(account).processUpdateArray(updates,users,chats,true,value.date);}finally{complete.countDown();}});
+        if(!complete.await(20,TimeUnit.SECONDS)||!accepted[0])throw new IllegalStateException("telegram_update_rejected");
+    }
+    public long syncCursor() throws Exception {String user=repository.vault.load().optString("user_id");return user.isEmpty()?0:realtime.cursor(user);}
+    public int syncPending() throws Exception {String user=repository.vault.load().optString("user_id");return user.isEmpty()?0:realtime.pending(user);}
+    public int syncDead() throws Exception {String user=repository.vault.load().optString("user_id");return user.isEmpty()?0:realtime.dead(user);}
     private synchronized TLObject handle(TLObject request) throws Exception {
         if(request instanceof TLRPC.TL_messages_getDialogs)return dialogs();
         if(request instanceof TLRPC.TL_messages_getHistory){

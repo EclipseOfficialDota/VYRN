@@ -9,3 +9,5 @@ VYRN modifications introduce independent branding, email authentication, backend
 Android dependency notices, native library notices and source/build instructions must accompany distributed builds. A complete source distribution and license review are release gates. The repository presently has no public source remote.
 
 Backend dependencies and their license files are available from the exact versions in `backend/go.mod` and `backend/go.sum`. The updater uses standard Ed25519. Password hashing uses Argon2id from `golang.org/x/crypto`; administrator TOTP uses `github.com/pquerna/otp`. No private signing or infrastructure credentials belong in this repository.
+
+The Android compatibility layer uses Square OkHttp 5.3.0 for authenticated WebSocket transport. OkHttp and its transitive Okio/Kotlin dependencies retain their own Apache License 2.0 notices and license terms; include the Gradle-resolved notices in any binary distribution.

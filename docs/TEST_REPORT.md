@@ -46,7 +46,14 @@ Date: 2026-10-01. This records performed checks, not planned tests.
 - 29 named Android checks pass in three instrumentation processes. The test removes the local HTTPS reverse-forwarding rule for the offline process, then restores it after process death. Two group-text messages remain pending without false acknowledgement and later arrive in order, exactly once, through the Telegram request adapter.
 - A server-committed message whose local acknowledgement was deliberately left pending is retried after restart without inserting a duplicate. The completed result is persisted before notifying the adapter, and its pending body is cleared.
 - Retry budget stops at8 failures, explicit resend resets the budget, permanent rejection does not retry, and different payloads cannot reuse a queued client ID. Cross-account request rejection and concurrent refresh using two repository objects pass.
-- Pending cancellation, incoming durable synchronization, background execution and interactive composer restoration are not established by these tests.
+- Pending cancellation, background execution and interactive composer restoration are not established by these tests.
+
+## Android incoming-sync checkpoint on 2026-10-02
+
+- 32 named checks now pass across the three Android instrumentation processes. The first process opens an authenticated WebSocket, observes a message sent by a second user, advances the SQLite-backed resume cursor only with the raw event batch committed, and processes the journal to zero pending/dead entries.
+- The incoming message is fetched through the authorized single-message endpoint and accepted by Telegram's update processor. WebSocket credentials stay in the Authorization header; reconnect uses the committed cursor and bounded exponential backoff.
+- Successfully processed inbox rows are bounded to the newest1000 per account. Handler failures retry at most8 times and then remain as dead letters so a poison event cannot block later entries.
+- This checkpoint does not establish background survival, notification delivery, a forced crash exactly between persistence and application, or complete Telegram model updates for conversation/member/typing/reaction/receipt/pin events.
 
 ## External checks
 
@@ -56,6 +63,6 @@ Date: 2026-10-01. This records performed checks, not planned tests.
 
 ## Not yet passed
 
-Full Android interactive UI E2E, offline client flows, E2EE protocol tests, background push, final release/R8 builds, physical ARM-device tests, external backup/retention/restore, production VPS reboot/DNS/TLS, TURN and load testing. Foreground repository/adapter tests do not prove Persian layout or complete multi-device synchronization.
+Full Android interactive UI E2E, complete offline incoming flows, E2EE protocol tests, background push, final release/R8 builds, physical ARM-device tests, external backup/retention/restore, production VPS reboot/DNS/TLS, TURN and load testing. Foreground repository/adapter tests do not prove Persian layout or complete multi-device synchronization.
 
 Integration tests use disposable PostgreSQL schemas and fail on unexpected status codes without printing account tokens or passwords. Test fixtures contain only artificial local data. The local backup dump is ignored and is not an external backup.

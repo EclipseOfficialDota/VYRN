@@ -31,7 +31,7 @@ Open VYRN Control at `http://127.0.0.1:8080`. The same origin serves the API. Br
 
 ## Android
 
-Upstream pin: `f2908b14133bbffbf7ab04f641ecb5bfaf533242` (12.10.6 / 7112). Initialize its exact submodules before building. `android/prepare-upstream.ps1` applies VYRN changes without replacing Telegram's UI implementation. Telegram socket transport is disabled at `Connection::connect`; supported UI requests go through `VyrnBridge`.
+Upstream pin: `f2908b14133bbffbf7ab04f641ecb5bfaf533242` (12.10.6 / 7112). Initialize its exact submodules before building. `android/prepare-upstream.ps1` applies VYRN changes without replacing Telegram's UI implementation. Telegram socket transport is disabled at `Connection::connect`; supported UI requests and foreground VYRN message events go through `VyrnBridge`.
 
 ```powershell
 ./android/fetch-upstream.ps1

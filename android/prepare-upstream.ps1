@@ -26,6 +26,7 @@ Edit 'TMessagesProj/build.gradle' {
  param($t)
  $t=$t -replace "apply plugin: 'com.google.gms.google-services'",''
  $t=$t -replace 'minSdkVersion 21','minSdkVersion 26'
+ if(!$t.Contains("com.squareup.okhttp3:okhttp:5.3.0")){$t+="`ndependencies { implementation 'com.squareup.okhttp3:okhttp:5.3.0' }`n"}
  if(!$t.Contains('VYRN_API_URL')){
  $extra=@'
 

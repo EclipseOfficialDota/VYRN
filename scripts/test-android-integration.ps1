@@ -12,6 +12,10 @@ foreach($path in @($apk,$testApk)){
     $output=(& $adb -s $Serial install -r -t $path) -join "`n"
     if($LASTEXITCODE -ne 0 -or $output -notmatch 'Success'){throw 'Test APK installation failed'}
 }
+# Each suite models a fresh install. Reused emulator state can contain identifier
+# mappings from a different disposable database and would invalidate the fixture.
+$cleared=(& $adb -s $Serial shell pm clear $package) -join "`n"
+if($LASTEXITCODE -ne 0 -or $cleared -notmatch 'Success'){throw 'Test app data reset failed'}
 & $adb -s $Serial reverse tcp:18443 tcp:18443
 if($LASTEXITCODE -ne 0){throw 'Local TLS port forwarding failed'}
 & $adb -s $Serial shell run-as $package mkdir -p files

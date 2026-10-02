@@ -29,4 +29,9 @@
 - Persist group-text sends before network access. Bind entries and HTTP authentication to the originating user, retain stable client IDs, preserve per-conversation queue order, and persist acknowledgements before notifying the Telegram adapter.
 - Share the token-vault lock across repository instances so rotating refresh tokens cannot be reused concurrently and queued sends cannot switch identities mid-request.
 - Retry transient failures with a bounded exponential backoff and jitter. Keep failures available for explicit retry; remove accepted payload text from the outbox.
-- Pending cancellation/reconciliation and incoming durable synchronization remain mandatory acceptance gaps, not optional follow-ups.
+- Pending cancellation/reconciliation remains a mandatory acceptance gap, not an optional follow-up.
+
+## 2026-10-02 — incoming foreground synchronization
+- Authenticate WebSockets with the bearer header and keep credentials out of URLs. Persist raw events and the resume cursor atomically before acknowledging a batch.
+- Process the durable inbox in sequence, cap handler retries at8 with exponential backoff, retain dead letters and prune successfully processed journal rows to the newest1000 per account.
+- Treat the current incoming-message adapter as a foreground checkpoint. Complete every event mapping, crash recovery, background scheduling and notification behavior before production acceptance.

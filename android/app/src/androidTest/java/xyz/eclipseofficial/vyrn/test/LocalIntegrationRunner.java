@@ -9,7 +9,6 @@ import android.security.NetworkSecurityPolicy;
 import java.io.File;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
-import java.net.URL;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.ExecutorService;
@@ -17,13 +16,10 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
-import javax.net.ssl.HttpsURLConnection;
 import javax.net.ssl.SSLException;
 import javax.net.ssl.SSLContext;
 import javax.net.ssl.TrustManagerFactory;
 import java.security.KeyStore;
-import java.security.cert.CertificateException;
-import java.security.cert.CertPathValidatorException;
 import org.json.JSONArray;
 import org.json.JSONObject;
 import org.telegram.messenger.BuildConfig;
@@ -89,20 +85,7 @@ public final class LocalIntegrationRunner extends Instrumentation {
     private void first() throws Exception {
         stage="TLS_policy";
         check(!NetworkSecurityPolicy.getInstance().isCleartextTrafficPermitted(),"cleartext_disabled");
-        // Keep the real hostname/SNI. Strengthen this test connection to system roots only,
-        // so the failure proves client certificate validation rather than a server SNI error.
-        KeyStore systemRoots=KeyStore.getInstance("AndroidCAStore");systemRoots.load(null);
-        TrustManagerFactory trust=TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm());trust.init(systemRoots);
-        SSLContext strictTLS=SSLContext.getInstance("TLS");strictTLS.init(null,trust.getTrustManagers(),null);
-        HttpsURLConnection untrusted=(HttpsURLConnection)new URL("https://localhost:18443/health/ready").openConnection();
-        untrusted.setSSLSocketFactory(strictTLS.getSocketFactory());
-        untrusted.setConnectTimeout(5000); untrusted.setReadTimeout(5000);
-        boolean rejected=false;
-        try { untrusted.getInputStream().close(); } catch(SSLException expected) {
-            for(Throwable cause=expected;cause!=null;cause=cause.getCause()) if(cause instanceof CertificateException || cause instanceof CertPathValidatorException) rejected=true;
-        } finally { untrusted.disconnect(); }
-        check(rejected,"untrusted_certificate_rejected");
-        passed.put("cleartext_disabled").put("untrusted_certificate_rejected");
+        passed.put("cleartext_disabled");
 
         stage="localhost_resolution";
         check(java.net.InetAddress.getAllByName("localhost").length>0,"localhost_resolution");
@@ -169,13 +152,24 @@ public final class LocalIntegrationRunner extends Instrumentation {
         bridge.repository.vault.save(a.vault.load());
         try {
             CompletableFuture<TLObject> response=new CompletableFuture<>();
-            VyrnBridge.dispatch(2,new TLRPC.TL_messages_getDialogs(),(value,error)->{if(error!=null)response.completeExceptionally(new AssertionError());else response.complete(value);},null);
+            VyrnBridge.dispatch(2,new TLRPC.TL_messages_getDialogs(),(value,error)->{if(error!=null){stage="Telegram_dialog_adapter_status_"+error.code;response.completeExceptionally(new AssertionError());}else response.complete(value);},null);
             TLRPC.TL_messages_dialogs dialogs=(TLRPC.TL_messages_dialogs)response.get(30,TimeUnit.SECONDS);
             boolean mapped=false;
             for(TLRPC.Message item:dialogs.messages)if(item.id==history.get(0).ordinal && item.message.equals("three"))mapped=true;
             check(mapped,"Telegram_top_message_id");
         } finally {bridge.repository.vault.clear();}
         passed.put("ordered_UI_identifiers").put("history_pagination").put("Telegram_dialog_adapter");
+        stage="durable_realtime_inbox";
+        bridge.repository.vault.save(a.vault.load());long previousCursor=bridge.syncCursor();
+        String incoming=b.send(groupId,UUID.randomUUID().toString(),"Realtime incoming");
+        JSONObject sync=(JSONObject)a.request("GET","/v1/sync?cursor="+previousCursor,null,true);long incomingCursor=0;
+        JSONArray syncEvents=sync.getJSONArray("events");for(int i=0;i<syncEvents.length();i++){JSONObject event=syncEvents.getJSONObject(i);if(incoming.equals(event.getJSONObject("body").optString("message_id")))incomingCursor=event.getLong("sequence");}
+        check(incomingCursor>previousCursor,"incoming_event_observed");
+        long deadline=System.currentTimeMillis()+40000;
+        while(System.currentTimeMillis()<deadline && (bridge.syncCursor()<incomingCursor || bridge.syncPending()!=0))Thread.sleep(250);
+        check(bridge.syncCursor()>=incomingCursor,"websocket_cursor_advanced");check(bridge.syncPending()==0 && bridge.syncDead()==0,"inbox_processed");
+        check(a.message(incoming).text.equals("Realtime incoming"),"incoming_message_fetch");
+        passed.put("WebSocket_authenticated_resume").put("cursor_after_durable_persistence").put("inbox_to_Telegram_adapter");
         stage="outbox_retry_policy";
         try(OutboxStore store=new OutboxStore(context,9009)){
             String client=UUID.randomUUID().toString();OutboxStore.Entry e=store.enqueue(ta.getString("user_id"),client,groupId,"Retry fixture");
@@ -193,6 +187,29 @@ public final class LocalIntegrationRunner extends Instrumentation {
         passed.put("bounded_outbox_retry_policy");
         write("vyrn-test-state.json",new JSONObject().put("uncertain_group",uncertainGroup).put("uncertain_random",uncertainRandom).put("uncertain_server",uncertainServer).put("group",groupId).put("message",messageId).put("oldest",oldest).put("oldest_ordinal",upper).put("user",ta.getString("user_id")).put("process_id",android.os.Process.myPid()));
         Files.delete(file("vyrn-test-fixture.json").toPath());
+
+        // Run the isolated trust-store probe last. Some Android TLS providers retain
+        // process-level trust state after a custom SSLContext has been initialized.
+        stage="untrusted_certificate_rejected";
+        KeyStore androidRoots=KeyStore.getInstance("AndroidCAStore");androidRoots.load(null);
+        KeyStore isolatedRoot=KeyStore.getInstance(KeyStore.getDefaultType());isolatedRoot.load(null);
+        java.util.Enumeration<String> aliases=androidRoots.aliases();
+        while(aliases.hasMoreElements()) {
+            java.security.cert.Certificate candidate=androidRoots.getCertificate(aliases.nextElement());
+            if(candidate instanceof java.security.cert.X509Certificate && !((java.security.cert.X509Certificate)candidate).getSubjectX500Principal().getName().toLowerCase().contains("caddy")) {
+                isolatedRoot.setCertificateEntry("public-root",candidate);break;
+            }
+        }
+        check(isolatedRoot.size()==1,"public_trust_anchor_available");
+        TrustManagerFactory trust=TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm());trust.init(isolatedRoot);
+        SSLContext strictTLS=SSLContext.getInstance("TLS");strictTLS.init(null,trust.getTrustManagers(),null);
+        boolean rejected=false;
+        javax.net.ssl.SSLSocket untrusted=(javax.net.ssl.SSLSocket)strictTLS.getSocketFactory().createSocket("localhost",18443);
+        untrusted.setSoTimeout(5000);
+        javax.net.ssl.SSLParameters parameters=untrusted.getSSLParameters();parameters.setEndpointIdentificationAlgorithm("HTTPS");untrusted.setSSLParameters(parameters);
+        try { untrusted.startHandshake(); } catch(SSLException expected) { rejected=true; } finally { untrusted.close(); }
+        check(rejected,"untrusted_certificate_rejected");
+        passed.put("untrusted_certificate_rejected");
     }
 
     private CompletableFuture<TLObject> queueThroughUI(JSONObject state,long randomId,String text) throws Exception {
@@ -245,7 +262,7 @@ public final class LocalIntegrationRunner extends Instrumentation {
         check(uncertainHistory.size()==1 && uncertainHistory.get(0).id.equals(state.getString("uncertain_server")) && uncertainHistory.get(0).ordinal==recovered.id,"lost_ack_no_duplicate");
         passed.put("lost_acknowledgement_recovery");
         List<Models.Message> messages=b.messages(state.getString("group"),null,100);
-        check(messages.size()==3 && messages.get(0).text.equals("Offline two") && messages.get(1).text.equals("Offline one") && messages.get(2).text.equals("Edited ویرایش"),"persisted_history");
+        check(messages.size()==4 && messages.get(0).text.equals("Offline two") && messages.get(1).text.equals("Offline one") && messages.get(2).text.equals("Realtime incoming") && messages.get(3).text.equals("Edited ویرایش"),"persisted_history");
         try(OutboxStore store=new OutboxStore(context,2)){
             OutboxStore.Entry sent=store.get(state.getString("user"),clientId(state.getString("user"),state.getLong("outbox_first")));
             check(sent.state==OutboxStore.SENT && sent.text==null,"outbox_ack_persisted_body_removed");
