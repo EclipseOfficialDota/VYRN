@@ -294,16 +294,18 @@ public final class VyrnBridge {
     public static boolean dispatch(int account,TLObject request,RequestDelegate callback,RequestDelegateTimestamp timestamp,int token){
         PendingRequest pending=new PendingRequest(account,token,request instanceof TLRPC.TL_messages_sendMessage,callback,timestamp);
         if(token!=0 && REQUESTS.putIfAbsent(requestKey(account,token),pending)!=null)throw new IllegalStateException("duplicate_request_token");
-        if(request instanceof TL_account.getAuthorizations || request instanceof TL_account.resetAuthorization){
+        if(request instanceof TL_account.getAuthorizations || request instanceof TL_account.resetAuthorization || request instanceof TLRPC.TL_auth_resetAuthorizations){
             pending.sessionOrigin=UserConfig.getInstance(account).getClientUserId();
             final long hash=request instanceof TL_account.resetAuthorization?((TL_account.resetAuthorization)request).hash:0;
             final boolean revoke=request instanceof TL_account.resetAuthorization;
+            final boolean revokeOthers=request instanceof TLRPC.TL_auth_resetAuthorizations;
             execute(()->{try{
                 VyrnBridge bridge=forAccount(account);pending.bridge=bridge;
                 synchronized(bridge.repository.vault.guard()){
                     String user=bridge.repository.vault.load().getString("user_id");pending.user=user;
                     if(pending.sessionOrigin==0 || UserConfig.getInstance(account).getClientUserId()!=pending.sessionOrigin || bridge.ids.local("user",user)!=pending.sessionOrigin)throw new SecurityException("account_changed");
-                    pending.complete(bridge.sessions(user,revoke,hash),null);
+                    if(revokeOthers){bridge.repository.requestForUser(user,"DELETE","/v1/sessions",null,true);pending.complete(new TLRPC.TL_boolTrue(),null);}
+                    else pending.complete(bridge.sessions(user,revoke,hash),null);
                 }
             }catch(Exception failure){pending.complete(null,failure);}});return true;
         }

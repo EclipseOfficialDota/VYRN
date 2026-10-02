@@ -412,6 +412,16 @@ public final class LocalIntegrationRunner extends Instrumentation {
         boolean rejected=false;try{other.me();}catch(RestRepository.ApiException expected){rejected=expected.status==401;}
         check(rejected && a.me()!=null,"native_revoked_device_cannot_refresh");
         listed=(TL_account.authorizations)nativeResponse(new TL_account.getAuthorizations());check(listed.authorizations.size()==1 && listed.authorizations.get(0).current,"native_sessions_after_revoke");other.vault.clear();
+        RestRepository third=repo(9021);third.vault.clear();
+        other.vault.save((JSONObject)other.request("POST","/v1/auth/login",login,false));
+        JSONObject thirdLogin=new JSONObject(login.toString()).put("device_id",third.vault.device()).put("device_name","دستگاه سوم VYRN");
+        third.vault.save((JSONObject)third.request("POST","/v1/auth/login",thirdLogin,false));
+        listed=(TL_account.authorizations)nativeResponse(new TL_account.getAuthorizations());check(listed.authorizations.size()==3,"native_three_device_sessions");
+        check(nativeResponse(new TLRPC.TL_auth_resetAuthorizations()) instanceof TLRPC.TL_boolTrue,"native_revoke_all_other_sessions");
+        for(RestRepository device:new RestRepository[]{other,third}){boolean denied=false;try{device.me();}catch(RestRepository.ApiException expected){denied=expected.status==401;}check(denied,"native_bulk_revoked_devices_cannot_refresh");device.vault.clear();}
+        listed=(TL_account.authorizations)nativeResponse(new TL_account.getAuthorizations());check(listed.authorizations.size()==1 && listed.authorizations.get(0).current && a.me()!=null && b.me()!=null,"native_bulk_preserves_current_and_other_user");
+        check(nativeResponse(new TLRPC.TL_auth_resetAuthorizations()) instanceof TLRPC.TL_boolTrue,"native_bulk_revoke_idempotent");
+        passed.put("native_three_device_sessions").put("native_revoke_all_other_sessions").put("native_bulk_revoked_devices_cannot_refresh").put("native_bulk_preserves_current_and_other_user").put("native_bulk_revoke_idempotent");
         passed.put("native_sessions_list").put("native_sessions_metadata").put("native_session_hash_stable").put("native_current_session_revoke_denied").put("native_unknown_session_revoke_denied").put("native_session_account_binding").put("native_other_session_revoked").put("native_revoked_device_cannot_refresh").put("native_sessions_after_revoke");
     }
     private TLRPC.TL_error editFailure(TLObject request) throws Exception {

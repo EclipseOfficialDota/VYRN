@@ -87,6 +87,7 @@ func (s *Server) Handler() http.Handler {
 	secure("GET /v1/me", s.me)
 	secure("PATCH /v1/me", s.updateProfile)
 	secure("GET /v1/sessions", s.sessions)
+	secure("DELETE /v1/sessions", s.revokeOtherSessions)
 	secure("DELETE /v1/sessions/{id}", s.revokeSession)
 	secure("POST /v1/auth/logout", s.logout)
 	secure("POST /v1/auth/recovery-code", s.newRecoveryCode)

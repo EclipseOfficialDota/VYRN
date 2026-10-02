@@ -14,6 +14,7 @@ All production endpoints require HTTPS. JSON uses UTF-8. Authentication is `Auth
 | GET `/v1/users/{id}` | profile by UUID, without email |
 | GET `/v1/users/search?q=...&limit=50` | authenticated display-name discovery; maximum50 results, excludes self, disabled users and blocks in either direction; no email search or login fields |
 | GET `/v1/sessions` | active sessions for current user |
+| DELETE `/v1/sessions` | atomically revoke every other owned session, preserving the caller; repeatable204 response |
 | DELETE `/v1/sessions/{id}` | revoke an owned session |
 | PUT/DELETE `/v1/blocks/{id}` | block/unblock another user |
 | GET/POST `/v1/conversations` | list or create private/group conversation with members and title; groups accept optional disappearing_seconds from0 to31536000, committed atomically with members/events |

@@ -2,6 +2,14 @@
 
 Updated: 2026-10-03. This records performed checks, not planned tests.
 
+## Bulk device-session revocation checkpoint — 2026-10-03
+
+- DELETE /v1/sessions revokes every other owned session with one PostgreSQL UPDATE, preserving the authenticated caller and other users. Repeated calls return204. Original Android auth.resetAuthorizations uses this endpoint under the same originating-account guard as session listing and individual revocation; it does not loop over client-fetched sessions or report partial success.
+- All19 PostgreSQL API tests and go vet pass. The added test establishes three owned devices, denies unauthenticated revocation, connects both other devices through actual WebSockets, revokes both and observes policy-violation closure. Their access and refresh tokens fail; the caller can still refresh, an unrelated user remains authenticated, repeated revocation succeeds and a new device can log in afterward.
+- All190 Android API35 checks pass:126 first,16 offline,48 restart. Five additional checks establish three real sessions through login, invoke the original native bulk request, prove access/refresh rejection on both other devices, preserve the current and unrelated users and repeat the operation. artifacts/android-integration.json records the tested APK hash.
+- Local x86_64 instrumentation and all three normal ARM debug APKs build successfully. APK signature/package/API/ABI/manifest verification passes. The local WSL Core was replaced only after verifying its exact existing executable and PID; readiness and the Android suite confirm the new endpoint runs.
+- Full rendered session-screen acceptance, callback/account-switch races at final UI dispatch, configurable lifetime, authenticated logout/recovery, physical devices and production deployment remain unfinished. Concurrent new logins after revocation are permitted; this operation does not ban future devices.
+
 ## Native session management checkpoint — 2026-10-03
 
 - Android dispatch maps original account.getAuthorizations and account.resetAuthorization to the authenticated VYRN session API. The original SessionsActivity receives actual device names, creation/activity timestamps and the server's current-session flag. Unknown OS, application-version and IP/location data remain empty. The displayed30-day lifetime matches the fixed server refresh lifetime; changing it is not implemented.

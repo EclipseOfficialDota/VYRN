@@ -348,6 +348,15 @@ func (s *Server) sessions(w http.ResponseWriter, r *http.Request) {
 	}
 	respond(w, 200, out)
 }
+func (s *Server) revokeOtherSessions(w http.ResponseWriter, r *http.Request) {
+	p := current(r)
+	_, err := s.db.Exec(r.Context(), `UPDATE sessions SET revoked_at=now() WHERE user_id=$1 AND id<>$2 AND revoked_at IS NULL`, p.UserID, p.SessionID)
+	if err != nil {
+		s.internal(w)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
 func (s *Server) revokeSession(w http.ResponseWriter, r *http.Request) {
 	if !validID(r.PathValue("id")) {
 		fail(w, 404, "not_found")
