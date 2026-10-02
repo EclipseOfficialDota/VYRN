@@ -66,6 +66,9 @@ Edit 'TMessagesProj/src/main/java/org/telegram/messenger/MessagesController.java
  $deletion='public void deleteMessages(ArrayList<Integer> messages, ArrayList<Long> randoms, TLRPC.EncryptedChat encryptedChat, long dialogId, boolean forAll, int mode, boolean cacheOnly, long taskId, TLObject taskRequest, int topicId, boolean movedToScheduled, int movedToScheduledMessageId) {'
  if(!$t.Contains($deletion)){throw 'Pinned message deletion marker missing'}
  $t=$t.Replace($deletion,$deletion+"`n        if (!cacheOnly) { xyz.eclipseofficial.vyrn.compat.VyrnBridge.deleteMessages(currentAccount, dialogId, messages, forAll, mode, topicId, encryptedChat != null || taskId != 0); return; }")
+ $updates='public boolean processUpdateArray(ArrayList<TLRPC.Update> updates, ArrayList<TLRPC.User> usersArr, ArrayList<TLRPC.Chat> chatsArr, boolean fromGetDifference, int date) {'
+ if(!$t.Contains($updates)){throw 'Pinned native update array marker missing'}
+ $t=$t.Replace($updates,$updates+"`n        if (!xyz.eclipseofficial.vyrn.compat.VyrnBridge.filterDeletedUpdates(currentAccount, updates)) return false;")
  $marker='public void setDialogHistoryTTL(long did, int ttl) {'
  if(!$t.Contains($marker)){throw 'Pinned history TTL marker missing'}
  # Commit native cache/UI changes only after the server accepts the setting.

@@ -2,6 +2,14 @@
 
 Updated: 2026-10-03. This records performed checks, not planned tests.
 
+## Confirmed deletion at native update entry — 2026-10-03
+
+- All154 API35 Android checks pass:105 first,15 offline,34 restart. artifacts/android-integration.json records the actual tested APK hash.
+- The pinned original MessagesController.processUpdateArray now reads persistent deletion fences before applying positive-ID group new/edit updates. Fenced live updates become standard delete updates; no new wire constructor or synthetic PTS is introduced. Missing/unavailable cache verification returns false for retry. Calls already on the storage queue read directly, avoiding a self-wait.
+- Tests submit a real prefetched live message through the original native update processor as both new and edited after confirmed deletion, and repeat with its saved serialization after real process restart. The native messagesDeleted notification must occur; matching didReceiveNewMessages/replaceMessagesObjects notifications must not occur, and the cached row must remain absent. Existing live incoming/edit tests continue to pass.
+- Local instrumentation and all three normal ARM debug builds pass; signature/package/API/ABI/manifest verification passes. Backend unchanged; preceding18 PostgreSQL tests/vet remain evidence. The harness keeps the app stopped for the existing rate-limit window before restart recovery.
+- This closes replay entering the processor after the fence is recorded. It does not prove the race where processing starts before deletion and a queued UI operation runs later, or late history/dialog responses. Final UI application guards, full screen-driven acceptance, account switches and database recovery/migration remain unfinished.
+
 ## Durable native deletion cache checkpoint — 2026-10-03
 
 - All150 API35 Android checks pass:103 first,15 offline,32 restart. Evidence: artifacts/android-integration.json with the tested local TLS APK hash.

@@ -178,6 +178,30 @@ public final class VyrnBridge {
     }
     public static synchronized VyrnBridge forAccount(int account){VyrnBridge bridge=INSTANCES.get(account);if(bridge==null){bridge=new VyrnBridge(account);INSTANCES.put(account,bridge);}return bridge;}
     public static void execute(Runnable task){IO.execute(task);}
+    /** Replayed live updates must follow a confirmed deletion through the native delete path. */
+    public static boolean filterDeletedUpdates(int account,ArrayList<TLRPC.Update> updates){
+        ArrayList<Integer> positions=new ArrayList<>();ArrayList<TLRPC.Message> messages=new ArrayList<>();
+        for(int i=0;i<updates.size();i++){
+            TLRPC.Update update=updates.get(i);TLRPC.Message message=null;
+            if(update instanceof TL_update.TL_updateNewMessage)message=((TL_update.TL_updateNewMessage)update).message;
+            else if(update instanceof TL_update.TL_updateEditMessage)message=((TL_update.TL_updateEditMessage)update).message;
+            if(message!=null&&message.id>0&&message.peer_id!=null&&message.peer_id.chat_id>0){positions.add(i);messages.add(message);}
+        }
+        if(messages.isEmpty())return true;
+        MessagesStorage storage=MessagesStorage.getInstance(account);CountDownLatch done=new CountDownLatch(1);boolean[] accepted={false};ArrayList<Integer> deleted=new ArrayList<>();
+        Runnable read=()->{try{
+            org.telegram.SQLite.SQLiteDatabase db=storage.getDatabase();
+            if(db.tableExists("vyrn_deleted_messages"))for(int i=0;i<messages.size();i++){
+                TLRPC.Message message=messages.get(i);org.telegram.SQLite.SQLiteCursor cursor=db.queryFinalized("SELECT 1 FROM vyrn_deleted_messages WHERE uid=? AND mid=?",-message.peer_id.chat_id,message.id);
+                try{if(cursor.next())deleted.add(i);}finally{cursor.dispose();}
+            }
+            accepted[0]=true;
+        }catch(Exception unavailable){/* Caller retries; never apply unverified live updates. */}finally{done.countDown();}};
+        if(Thread.currentThread()==storage.getStorageQueue())read.run();else storage.getStorageQueue().postRunnable(read);
+        try{if(!done.await(20,TimeUnit.SECONDS)||!accepted[0])return false;}catch(InterruptedException interrupted){Thread.currentThread().interrupt();return false;}
+        for(int i:deleted){TL_update.TL_updateDeleteMessages deletion=new TL_update.TL_updateDeleteMessages();deletion.messages.add(messages.get(i).id);updates.set(positions.get(i),deletion);}
+        return true;
+    }
     /** One SQLite statement records the whole confirmed batch and removes its cached rows.
      * Persistent triggers also reject history/edit responses fetched before deletion. */
     private void fenceDeleted(String user,long dialog,List<Integer> selected) throws Exception {

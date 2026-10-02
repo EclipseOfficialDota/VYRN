@@ -24,6 +24,7 @@ import java.security.KeyStore;
 import org.json.JSONArray;
 import org.json.JSONObject;
 import org.telegram.messenger.BuildConfig;
+import org.telegram.tgnet.tl.TL_update;
 import org.telegram.messenger.Utilities;
 import org.telegram.messenger.AndroidUtilities;
 import org.telegram.messenger.MessageObject;
@@ -458,6 +459,22 @@ public final class LocalIntegrationRunner extends Instrumentation {
         check(storage.getMessage(dialog,stale.id)==null,prefix+"_history_cannot_revive");passed.put(prefix+"_history_cannot_revive");
         storage.replaceMessageIfExists(stale,new ArrayList<>(),new ArrayList<>(),false);awaitStorage(storage);
         check(storage.getMessage(dialog,stale.id)==null,prefix+"_edit_cannot_revive");passed.put(prefix+"_edit_cannot_revive");
+        verifyDeletedNativeUpdate(dialog,stale,prefix,false);verifyDeletedNativeUpdate(dialog,stale,prefix,true);
+    }
+    private void verifyDeletedNativeUpdate(long dialog,TLRPC.Message stale,String prefix,boolean edit) throws Exception {
+        NotificationCenter center=NotificationCenter.getInstance(2);CompletableFuture<Boolean> deleted=new CompletableFuture<>();java.util.concurrent.atomic.AtomicBoolean appeared=new java.util.concurrent.atomic.AtomicBoolean();
+        NotificationCenter.NotificationCenterDelegate observer=(event,account,args)->{
+            if(event==NotificationCenter.messagesDeleted&&((ArrayList<Integer>)args[0]).contains(stale.id))deleted.complete(true);
+            if((event==NotificationCenter.didReceiveNewMessages||event==NotificationCenter.replaceMessagesObjects)&&((Long)args[0])==dialog)for(MessageObject object:(ArrayList<MessageObject>)args[1])if(object.getId()==stale.id)appeared.set(true);
+        };
+        CompletableFuture<Boolean> registered=new CompletableFuture<>();AndroidUtilities.runOnUIThread(()->{center.addObserver(observer,NotificationCenter.messagesDeleted);center.addObserver(observer,NotificationCenter.didReceiveNewMessages);center.addObserver(observer,NotificationCenter.replaceMessagesObjects);registered.complete(true);});registered.get(10,TimeUnit.SECONDS);
+        try{
+            ArrayList<TLRPC.Update> updates=new ArrayList<>();if(edit){TL_update.TL_updateEditMessage update=new TL_update.TL_updateEditMessage();update.message=stale;updates.add(update);}else{TL_update.TL_updateNewMessage update=new TL_update.TL_updateNewMessage();update.message=stale;updates.add(update);}
+            CompletableFuture<Boolean> applied=new CompletableFuture<>();Utilities.stageQueue.postRunnable(()->applied.complete(MessagesController.getInstance(2).processUpdateArray(updates,null,null,true,stale.date)));
+            check(applied.get(20,TimeUnit.SECONDS),"native_stale_update_processed");deleted.get(20,TimeUnit.SECONDS);awaitStorage(MessagesStorage.getInstance(2));
+            CompletableFuture<Boolean> displayed=new CompletableFuture<>();AndroidUtilities.runOnUIThread(()->displayed.complete(true));displayed.get(10,TimeUnit.SECONDS);
+            String name=prefix+(edit?"_native_edit_deleted":"_native_new_deleted");check(!appeared.get()&&MessagesStorage.getInstance(2).getMessage(dialog,stale.id)==null,name);passed.put(name);
+        }finally{AndroidUtilities.runOnUIThread(()->{center.removeObserver(observer,NotificationCenter.messagesDeleted);center.removeObserver(observer,NotificationCenter.didReceiveNewMessages);center.removeObserver(observer,NotificationCenter.replaceMessagesObjects);});}
     }
     private void awaitStorage(MessagesStorage storage) throws Exception {
         CompletableFuture<Boolean> done=new CompletableFuture<>();storage.getStorageQueue().postRunnable(()->done.complete(true));done.get(20,TimeUnit.SECONDS);
