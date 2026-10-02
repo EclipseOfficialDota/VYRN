@@ -169,6 +169,11 @@ public final class LocalIntegrationRunner extends Instrumentation {
             boolean mapped=false;
             for(TLRPC.Message item:dialogs.messages)if(item.id==history.get(0).ordinal && item.message.equals("three"))mapped=true;
             check(mapped,"Telegram_top_message_id");
+            Models.Message edited=a.message(messageId);check(edited.revision==2 && edited.editedDate>0,"repository_edit_revision_date");
+            TLRPC.Message nativeEdited=null;for(TLRPC.Message item:dialogs.messages)if(item.id==edited.ordinal)nativeEdited=item;
+            check(nativeEdited!=null && nativeEdited.edit_date==edited.editedDate && (nativeEdited.flags&TLRPC.MESSAGE_FLAG_EDITED)!=0,"native_edited_message_metadata");
+            try(IdMap observed=new IdMap(context,2)){check(observed.editRevision(ta.getString("user_id"),groupId,edited.ordinal,edited.text)==2,"native_observed_revision");}
+            verifyObservedMessageUpgrade();passed.put("repository_edit_revision_date").put("native_edited_message_metadata").put("native_observed_revision");
         } finally {bridge.repository.vault.clear();}
         passed.put("ordered_UI_identifiers").put("history_pagination").put("Telegram_dialog_adapter");
         stage="durable_realtime_inbox";
@@ -344,6 +349,22 @@ public final class LocalIntegrationRunner extends Instrumentation {
         passed.put("untrusted_certificate_rejected");
     }
 
+    private void verifyObservedMessageUpgrade() throws Exception {
+        stage="observed_message_upgrade";context.deleteDatabase("vyrn_ids_9014.db");String message=UUID.randomUUID().toString(),sender=UUID.randomUUID().toString(),group=UUID.randomUUID().toString();
+        android.database.sqlite.SQLiteDatabase legacy=android.database.sqlite.SQLiteDatabase.openOrCreateDatabase(context.getDatabasePath("vyrn_ids_9014.db"),null);
+        legacy.execSQL("CREATE TABLE ids(id INTEGER PRIMARY KEY AUTOINCREMENT,kind TEXT NOT NULL,uuid TEXT NOT NULL,UNIQUE(kind,uuid))");legacy.execSQL("CREATE TABLE message_ids(id INTEGER PRIMARY KEY CHECK(id>0),uuid TEXT NOT NULL UNIQUE)");legacy.execSQL("INSERT INTO message_ids VALUES(17,?)",new Object[]{message});legacy.setVersion(2);legacy.close();
+        Models.Message first=new Models.Message(message,sender,"نسخه اول",10,17,false,false,group,1,0),second=new Models.Message(message,sender,"نسخه دوم",10,17,false,false,group,2,11);
+        try(IdMap map=new IdMap(context,9014)){
+            check(map.remote("message",17).equals(message),"id_map_upgrade_preserves_identity");boolean missing=false;try{map.editRevision(sender,group,17,first.text);}catch(IllegalStateException expected){missing=true;}check(missing,"legacy_snapshot_requires_reload");
+            map.observe(first);map.observe(second);map.observe(first);check(map.editRevision(sender,group,17,second.text)==2,"snapshot_revision_never_regresses");
+            boolean stale=false,wrongUser=false,wrongGroup=false;try{map.editRevision(sender,group,17,first.text);}catch(IllegalStateException expected){stale=true;}try{map.editRevision(UUID.randomUUID().toString(),group,17,second.text);}catch(IllegalStateException expected){wrongUser=true;}try{map.editRevision(sender,UUID.randomUUID().toString(),17,second.text);}catch(IllegalStateException expected){wrongGroup=true;}check(stale&&wrongUser&&wrongGroup,"snapshot_edit_identity_and_body_bound");
+        }
+        try(IdMap map=new IdMap(context,9014)){
+            check(map.editRevision(sender,group,17,second.text)==2,"snapshot_revision_survives_reopen");map.observe(new Models.Message(message,sender,"",10,17,false,true,group,2,11));
+            boolean deleted=false,revived=false;try{map.editRevision(sender,group,17,second.text);}catch(IllegalStateException expected){deleted=true;}try{map.observe(second);}catch(IllegalStateException expected){revived=true;}check(deleted&&revived,"snapshot_expiry_tombstone_not_revived");
+        }finally{context.deleteDatabase("vyrn_ids_9014.db");}
+        passed.put("populated_id_map_v2_upgrade").put("observed_revision_monotonic").put("edit_snapshot_identity_body_binding").put("observed_revision_reopen").put("same_revision_expiry_tombstone");
+    }
     private CompletableFuture<TLObject> queueThroughUI(JSONObject state,long randomId,String text) throws Exception {
         IdMap map=new IdMap(context,2);
         TLRPC.TL_messages_sendMessage request=new TLRPC.TL_messages_sendMessage();

@@ -81,7 +81,8 @@ public final class RestRepository implements Models.Repository {
     }
     private Models.Message message(JSONObject m) throws Exception {
         boolean encrypted=m.getBoolean("encrypted");int ordinal=m.getInt("ordinal");if(ordinal<=0)throw new IllegalStateException("invalid_message_order");
-        return new Models.Message(m.getString("id"),m.getString("sender_id"),encrypted?"":m.getJSONObject("payload").optString("text"),(int)Instant.parse(m.getString("created_at")).getEpochSecond(),ordinal,encrypted,!m.isNull("deleted_at"));
+        int revision=m.getInt("revision");if(revision<1)throw new IllegalStateException("invalid_message_revision");
+        return new Models.Message(m.getString("id"),m.getString("sender_id"),encrypted?"":m.getJSONObject("payload").optString("text"),(int)Instant.parse(m.getString("created_at")).getEpochSecond(),ordinal,encrypted,!m.isNull("deleted_at"),m.getString("conversation_id"),revision,m.isNull("edited_at")?0:(int)Instant.parse(m.getString("edited_at")).getEpochSecond());
     }
     public Models.Message message(String id) throws Exception {return message((JSONObject)request("GET","/v1/messages/"+id,null,true));}
     public Models.Message messageForUser(String user,String id) throws Exception {return message((JSONObject)requestForUser(user,"GET","/v1/messages/"+id,null,true));}

@@ -14,10 +14,11 @@ public final class Models {
         public Conversation(String id,String kind,String title,String role,int members,int disappearingSeconds) { this.id=id;this.kind=kind;this.title=title;this.role=role;this.members=members;this.disappearingSeconds=disappearingSeconds; }
     }
     public static final class Message {
-        public final String id, sender, text;
-        public final int date, ordinal;
+        public final String id, sender, text, conversation;
+        public final int date, ordinal, revision, editedDate;
         public final boolean encrypted, deleted;
-        public Message(String id,String sender,String text,int date,int ordinal,boolean encrypted,boolean deleted){this.id=id;this.sender=sender;this.text=text;this.date=date;this.ordinal=ordinal;this.encrypted=encrypted;this.deleted=deleted;}
+        public Message(String id,String sender,String text,int date,int ordinal,boolean encrypted,boolean deleted){this(id,sender,text,date,ordinal,encrypted,deleted,null,0,0);}
+        public Message(String id,String sender,String text,int date,int ordinal,boolean encrypted,boolean deleted,String conversation,int revision,int editedDate){this.id=id;this.sender=sender;this.text=text;this.date=date;this.ordinal=ordinal;this.encrypted=encrypted;this.deleted=deleted;this.conversation=conversation;this.revision=revision;this.editedDate=editedDate;}
     }
     public static final class Member {
         public final User user;public final String role;public final int joinedDate;

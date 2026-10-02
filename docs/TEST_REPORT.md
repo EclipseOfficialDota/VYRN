@@ -166,6 +166,13 @@ Date: 2026-10-01. This records performed checks, not planned tests.
 - Nonzero forwarded-history count, current-account removal, history revocation, interactive screens/admin-rights rendering and complete two-device acceptance remain unfinished.
 - The running local WSL Core was replaced with the previously tested invitation-preserving binary after exact executable/PID validation. Backend source unchanged; fifteen API tests and go vet were verified at the preceding checkpoint. All three normal ARM Debug APKs built successfully; signature, package, API, ABI and manifest policy verification pass.
 
+## Observed message revision checkpoint — 2026-10-02
+
+- All117 named Android checks pass across first/offline/restart. Actual server edit revision/date reaches the repository and native edited flag; the observed sender/group/body revision matches the mapped message.
+- A populated schema2 ID database upgrades to schema3 without changing message IDs. Unknown old revisions require reload; newer observations survive reopen, older ones cannot downgrade them, wrong sender/group/old text is rejected, and a same-revision computed expiry tombstone is not revived.
+- Observations store SHA-256 rather than another plaintext copy and serialize read/validate/write in a SQLite transaction. Tests verify the populated upgrade and reopened state; concurrent-helper races remain to be exercised.
+- Native edit requests, immutable composer-entry revision capture (including equal-text ABA cases), conflict presentation and complete interactive editing remain unfinished. Backend unchanged; fifteen API tests and go vet retain their earlier verified checkpoint. All three normal ARM Debug APKs built successfully; signature, package, API, ABI and manifest policy verification pass.
+
 ## External checks
 
 - Dedicated SSH key authentication to port 3939 was rejected. No server commands ran.

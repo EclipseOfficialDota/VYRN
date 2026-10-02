@@ -159,7 +159,7 @@ public final class VyrnBridge {
                 synchronized(pending){pending.ready=true;}
                 delivery.whenComplete((sent,failure)->Utilities.stageQueue.postRunnable(()->{
                     if(failure!=null){pending.complete(null,failure);return;}
-                    try{TLRPC.TL_updateShortSentMessage out=new TLRPC.TL_updateShortSentMessage();out.id=bridge.ids.message(sent.id,sent.ordinal);out.date=sent.date;out.out=true;out.pts=out.id;out.pts_count=1;pending.complete(out,null);}catch(Exception error){pending.complete(null,error);}
+                    try{bridge.ids.observe(sent);TLRPC.TL_updateShortSentMessage out=new TLRPC.TL_updateShortSentMessage();out.id=bridge.ids.message(sent.id,sent.ordinal);out.date=sent.date;out.out=true;out.pts=out.id;out.pts_count=1;pending.complete(out,null);}catch(Exception error){pending.complete(null,error);}
                 }));
                 pending.startCancellation();
             }catch(Exception failure){pending.complete(null,failure);synchronized(pending){pending.startCancellation();}}});return true;
@@ -184,7 +184,8 @@ public final class VyrnBridge {
         String id=privateConversations.get(peer.user_id);if(id==null){dialogs();id=privateConversations.get(peer.user_id);}if(id==null)throw new UnsupportedOperationException();return id;
     }
     private TLRPC.Message message(Models.Message m,TLRPC.Peer peer){
-        TLRPC.TL_message out=new TLRPC.TL_message();out.id=ids.message(m.id,m.ordinal);out.peer_id=peer;TLRPC.TL_peerUser sender=new TLRPC.TL_peerUser();sender.user_id=ids.local("user",m.sender);out.from_id=sender;out.flags|=256;out.date=m.date;out.message=m.deleted?"":m.encrypted?(org.telegram.messenger.LocaleController.isRTL?"این پیام در این دستگاه قابل نمایش نیست.":"This message cannot be displayed on this device."):m.text;out.out=sender.user_id==UserConfig.getInstance(account).getClientUserId();out.media=new TLRPC.TL_messageMediaEmpty();return out;
+        ids.observe(m);
+        TLRPC.TL_message out=new TLRPC.TL_message();out.id=ids.message(m.id,m.ordinal);out.peer_id=peer;TLRPC.TL_peerUser sender=new TLRPC.TL_peerUser();sender.user_id=ids.local("user",m.sender);out.from_id=sender;out.flags|=256;out.date=m.date;out.message=m.deleted?"":m.encrypted?(org.telegram.messenger.LocaleController.isRTL?"این پیام در این دستگاه قابل نمایش نیست.":"This message cannot be displayed on this device."):m.text;out.out=sender.user_id==UserConfig.getInstance(account).getClientUserId();out.media=new TLRPC.TL_messageMediaEmpty();out.edit_date=m.editedDate;if(m.editedDate>0)out.flags|=TLRPC.MESSAGE_FLAG_EDITED;return out;
     }
     private TLRPC.TL_messages_dialogs dialogs() throws Exception {
         TLRPC.TL_messages_dialogs result=new TLRPC.TL_messages_dialogs();
