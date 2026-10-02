@@ -144,7 +144,7 @@ public final class VyrnBridge {
         final int deletedId;
         if(resolution.state==OutboxStore.SENT){
             Models.Message remote=repository.messageForUser(resolution.user,resolution.server);
-            if(remote.deleted){committed=null;deletedId=ids.message(remote.id,remote.ordinal);}
+            if(remote.deleted){committed=null;deletedId=ids.message(remote.id,remote.ordinal);fenceDeleted(resolution.user,resolution.dialogId,java.util.Collections.singletonList(deletedId));}
             else{deletedId=0;TLRPC.TL_peerChat peer=new TLRPC.TL_peerChat();peer.chat_id=-resolution.dialogId;
                 committed=message(remote,peer);committed.dialog_id=resolution.dialogId;committed.random_id=resolution.randomId;committed.out=true;committed.send_state=MessageObject.MESSAGE_SEND_STATE_SENT;}
         }else{committed=null;deletedId=0;}
@@ -178,6 +178,24 @@ public final class VyrnBridge {
     }
     public static synchronized VyrnBridge forAccount(int account){VyrnBridge bridge=INSTANCES.get(account);if(bridge==null){bridge=new VyrnBridge(account);INSTANCES.put(account,bridge);}return bridge;}
     public static void execute(Runnable task){IO.execute(task);}
+    /** One SQLite statement records the whole confirmed batch and removes its cached rows.
+     * Persistent triggers also reject history/edit responses fetched before deletion. */
+    private void fenceDeleted(String user,long dialog,List<Integer> selected) throws Exception {
+        MessagesStorage storage=MessagesStorage.getInstance(account);CountDownLatch done=new CountDownLatch(1);Exception[] failure={null};
+        storage.getStorageQueue().postRunnable(()->{try{
+            if(!repository.vault.isUser(user)||UserConfig.getInstance(account).getClientUserId()!=ids.local("user",user))throw new SecurityException("account_changed");
+            org.telegram.SQLite.SQLiteDatabase db=storage.getDatabase();
+            db.executeFast("CREATE TABLE IF NOT EXISTS vyrn_deleted_messages(uid INTEGER NOT NULL, mid INTEGER NOT NULL, PRIMARY KEY(uid,mid))").stepThis().dispose();
+            db.executeFast("CREATE TRIGGER IF NOT EXISTS vyrn_delete_cached AFTER INSERT ON vyrn_deleted_messages BEGIN DELETE FROM messages_v2 WHERE uid=NEW.uid AND mid=NEW.mid; END").stepThis().dispose();
+            for(String operation:new String[]{"INSERT","UPDATE"})db.executeFast("CREATE TRIGGER IF NOT EXISTS vyrn_block_"+operation+" BEFORE "+operation+" ON messages_v2 WHEN EXISTS(SELECT 1 FROM vyrn_deleted_messages WHERE uid=NEW.uid AND mid=NEW.mid) BEGIN SELECT RAISE(IGNORE); END").stepThis().dispose();
+            StringBuilder sql=new StringBuilder("INSERT OR REPLACE INTO vyrn_deleted_messages(uid,mid) VALUES ");
+            for(int i=0;i<selected.size();i++){int id=selected.get(i);if(id<=0)throw new IllegalArgumentException("invalid_deleted_id");if(i>0)sql.append(',');sql.append('(').append(dialog).append(',').append(id).append(')');}
+            if(selected.isEmpty())throw new IllegalArgumentException("empty_deleted_batch");
+            db.executeFast(sql.toString()).stepThis().dispose();
+        }catch(Exception error){failure[0]=error;}finally{done.countDown();}});
+        if(!done.await(20,TimeUnit.SECONDS))throw new IllegalStateException("deletion_cache_timeout");
+        if(failure[0]!=null)throw failure[0];
+    }
     /** Preserve selected native rows until the entire server deletion has been authorized and committed. */
     public static java.util.concurrent.CompletableFuture<Boolean> deleteMessages(int account,long dialog,ArrayList<Integer> messages,boolean forAll,int mode,int topic,boolean unsupported){
         java.util.concurrent.CompletableFuture<Boolean> result=new java.util.concurrent.CompletableFuture<>();
@@ -189,6 +207,7 @@ public final class VyrnBridge {
                 if(!bridge.repository.vault.isUser(user)||UserConfig.getInstance(account).getClientUserId()!=self)throw new SecurityException("account_changed");
                 bridge.repository.deleteGroupMessages(user,bridge.ids.remote("conversation",-dialog),ids);
             }
+            bridge.fenceDeleted(user,dialog,selected);
         }catch(Throwable error){failure=error;}
         String origin=user;Throwable error=failure;AndroidUtilities.runOnUIThread(()->{
             try{if(error==null){VyrnBridge bridge=forAccount(account);if(!bridge.repository.vault.isUser(origin)||UserConfig.getInstance(account).getClientUserId()!=self){result.complete(false);return;}
@@ -266,12 +285,14 @@ public final class VyrnBridge {
         if(kind.equals("conversation.updated")){applyConversationEvent(body.getString("id"),true);return;}
         if(kind.equals("member.updated")||kind.equals("member.removed")){applyConversationEvent(body.getString("conversation_id"),false);return;}
         if(!kind.startsWith("message."))return;
-        String conversation=body.getString("conversation_id"),messageId=body.getString("message_id");Models.Message value=repository.message(messageId);
+        String eventUser=repository.vault.load().getString("user_id");
+        String conversation=body.getString("conversation_id"),messageId=body.getString("message_id");Models.Message value=repository.messageForUser(eventUser,messageId);
         Models.Conversation model=conversationModel(conversation);List<Models.User> members=repository.members(conversation);TLRPC.Peer destination=peer(model,members);
         ArrayList<TLRPC.User> users=new ArrayList<>();for(Models.User user:members)users.add(mapUser(user));ArrayList<TLRPC.Chat> chats=new ArrayList<>();if(model.kind.equals("group"))chats.add(chat(model));
         ArrayList<TLRPC.Update> updates=new ArrayList<>();
         if(value.deleted||kind.equals("message.deleted")||kind.equals("message.expired")){
             ids.observe(value);
+            fenceDeleted(eventUser,destination.chat_id!=0?-destination.chat_id:destination.user_id,java.util.Collections.singletonList(ids.message(value.id,value.ordinal)));
             TL_update.TL_updateDeleteMessages update=new TL_update.TL_updateDeleteMessages();update.messages.add(ids.message(value.id,value.ordinal));update.pts=value.ordinal;update.pts_count=1;updates.add(update);
         }else{
             TLRPC.Message mapped=message(value,destination);

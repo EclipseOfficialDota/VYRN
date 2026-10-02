@@ -44,6 +44,9 @@ $rounds=@()
 try {
     foreach($phase in @('first','offline','restart')){
         & $adb -s $Serial shell am force-stop $package
+        # The full foreground suite shares the production 300-request/minute user
+        # limit with realtime reconciliation. Start recovery in a fresh window.
+        if($phase -eq 'restart'){Write-Output 'Waiting 60 seconds for the API rate-limit window before restart tests.';Start-Sleep -Seconds 60}
         if($phase -eq 'offline'){& $adb -s $Serial reverse --remove tcp:18443}else{& $adb -s $Serial reverse tcp:18443 tcp:18443}
         if($LASTEXITCODE -ne 0){throw 'Test network transition failed'}
         $result=(& $adb -s $Serial shell am instrument -w -e phase $phase "$package.test/xyz.eclipseofficial.vyrn.test.LocalIntegrationRunner") -join "`n"
@@ -52,6 +55,7 @@ try {
             $stage='instrumentation_start';$failure='unknown'
             if($result -match 'stage=([a-zA-Z0-9_]+)'){$stage=$Matches[1]}
             if($result -match 'failure_type=([a-zA-Z0-9_]+)'){$failure=$Matches[1]}
+            if($result -match 'failure_status=([0-9]+)'){$failure+=" HTTP $($Matches[1])"}
             throw "Android integration failed at $stage ($failure)"
         }
         if($result -notmatch 'checks=(\[[^\r\n]*\])'){throw 'Instrumentation report missing'}

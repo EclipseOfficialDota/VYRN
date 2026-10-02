@@ -1,6 +1,15 @@
 # Verification report
 
-Updated: 2026-10-02. This records performed checks, not planned tests.
+Updated: 2026-10-03. This records performed checks, not planned tests.
+
+## Durable native deletion cache checkpoint — 2026-10-03
+
+- All150 API35 Android checks pass:103 first,15 offline,32 restart. Evidence: artifacts/android-integration.json with the tested local TLS APK hash.
+- Confirmed batch deletion, authoritative realtime tombstones and deleted-send reconciliation persist a uid/mid fence in the native SQLite database before acknowledging cache cleanup. A single INSERT statement records the selected batch; an AFTER INSERT trigger removes matching messages_v2 rows. Persistent BEFORE INSERT/UPDATE triggers reject later stale writes without nesting native transactions.
+- A live native message fetched before deletion is submitted through the actual array, history and replacement storage APIs after confirmed deletion. All three leave its row absent. The same serialized prefetched message is submitted after real process restart; all three again leave it absent. A stale positive row is also rejected offline while negative pending rows remain available for cancellation reconciliation.
+- The initial offline fixture expected a deleted positive row to be stored again; it now explicitly asserts rejection. Later runs exposed HTTP429 at restart session verification. The harness now allows the existing 300-request/minute window to expire with the app stopped before recovery; the production limit is unchanged. Failure diagnostics expose only the numeric HTTP status, never exception bodies or credentials.
+- Local instrumentation and normal ARM debug builds pass. All three normal APKs pass signature/package/API/ABI/manifest checks. Backend source unchanged; the preceding18 PostgreSQL tests and go vet remain the backend evidence.
+- This verifies messages_v2 persistence, not every UI race: prefetched live update arrays, dialog metadata and visible history can still require filtering at their final application points. Full screen-driven deletion, account switches, unsupported deletion modes, media cache cleanup and durable offline deletion remain unfinished. The native table/triggers' behavior through database recovery/migration is not yet acceptance-tested.
 
 ## Authorized native group deletion checkpoint — 2026-10-02
 

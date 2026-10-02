@@ -71,6 +71,7 @@ public final class LocalIntegrationRunner extends Instrumentation {
             result.putString("vyrn_result", "failed");
             result.putString("stage", stage);
             result.putString("failure_type", failure.getClass().getSimpleName());
+            if(failure instanceof RestRepository.ApiException)result.putInt("failure_status",((RestRepository.ApiException)failure).status);
             StringBuilder trace=new StringBuilder();
             for(StackTraceElement frame:failure.getStackTrace()) if(frame.getClassName().startsWith("xyz.eclipseofficial")) trace.append(frame.toString()).append(";");
             result.putString("failure_location",trace.toString());
@@ -442,9 +443,24 @@ public final class LocalIntegrationRunner extends Instrumentation {
         deleteThroughController(dialog,mine.getId());check(a.message(own).deleted&&!a.message(other).deleted,"MessagesController_authorized_delete");passed.put("MessagesController_authorized_delete").put("confirmed_delete_native_cache");
         check(VyrnBridge.deleteMessages(2,dialog,ids,true,0,0,false).get(30,TimeUnit.SECONDS)&&a.message(own).revision==2,"native_delete_retry_idempotent");passed.put("native_delete_retry_idempotent");
         b.setMemberRole(group,user,true);deleteThroughController(dialog,theirs.getId());check(a.message(other).deleted,"native_admin_delete_other_sender");passed.put("native_admin_delete_other_sender");
+        verifyDeletedCacheWriters(dialog,mine.messageOwner,"prefetched");
         TLRPC.TL_messages_getHistory history=new TLRPC.TL_messages_getHistory();history.peer=MessagesController.getInstance(2).getInputPeer(dialog);history.limit=100;CompletableFuture<TLObject> historyResult=new CompletableFuture<>();ConnectionsManager.getInstance(2).sendRequest(history,(value,error)->{if(error==null)historyResult.complete(value);else historyResult.completeExceptionally(new AssertionError());});check(((TLRPC.messages_Messages)historyResult.get(30,TimeUnit.SECONDS)).messages.isEmpty(),"native_history_excludes_tombstones");passed.put("native_history_excludes_tombstones");
         CompletableFuture<TLObject> dialogsResult=new CompletableFuture<>();ConnectionsManager.getInstance(2).sendRequest(new TLRPC.TL_messages_getDialogs(),(value,error)->{if(error==null)dialogsResult.complete(value);else dialogsResult.completeExceptionally(new AssertionError());});TLRPC.TL_messages_dialogs dialogs=(TLRPC.TL_messages_dialogs)dialogsResult.get(30,TimeUnit.SECONDS);check(dialogs.dialogs.stream().anyMatch(item->item.id==dialog&&item.top_message==0)&&dialogs.messages.stream().noneMatch(item->item.id==mine.getId()||item.id==theirs.getId()),"native_deleted_dialog_no_blank_top");passed.put("native_deleted_dialog_no_blank_top");
-        write("vyrn-delete-test.json",new JSONObject().put("dialog",dialog).put("own",own).put("other",other).put("own_id",mine.getId()).put("other_id",theirs.getId()));
+        org.telegram.tgnet.SerializedData staleBytes=new org.telegram.tgnet.SerializedData();mine.messageOwner.serializeToStream(staleBytes);
+        write("vyrn-delete-test.json",new JSONObject().put("dialog",dialog).put("own",own).put("other",other).put("own_id",mine.getId()).put("other_id",theirs.getId()).put("prefetched",android.util.Base64.encodeToString(staleBytes.toByteArray(),android.util.Base64.NO_WRAP)));staleBytes.cleanup();
+    }
+    private void verifyDeletedCacheWriters(long dialog,TLRPC.Message stale,String prefix) throws Exception {
+        MessagesStorage storage=MessagesStorage.getInstance(2);ArrayList<TLRPC.Message> rows=new ArrayList<>();rows.add(stale);
+        storage.putMessages(rows,true,true,false,0,0,0);awaitStorage(storage);
+        check(storage.getMessage(dialog,stale.id)==null,prefix+"_array_cannot_revive");passed.put(prefix+"_array_cannot_revive");
+        TLRPC.TL_messages_messages history=new TLRPC.TL_messages_messages();history.messages.add(stale);
+        storage.putMessages(history,dialog,0,0,false,0,0);awaitStorage(storage);
+        check(storage.getMessage(dialog,stale.id)==null,prefix+"_history_cannot_revive");passed.put(prefix+"_history_cannot_revive");
+        storage.replaceMessageIfExists(stale,new ArrayList<>(),new ArrayList<>(),false);awaitStorage(storage);
+        check(storage.getMessage(dialog,stale.id)==null,prefix+"_edit_cannot_revive");passed.put(prefix+"_edit_cannot_revive");
+    }
+    private void awaitStorage(MessagesStorage storage) throws Exception {
+        CompletableFuture<Boolean> done=new CompletableFuture<>();storage.getStorageQueue().postRunnable(()->done.complete(true));done.get(20,TimeUnit.SECONDS);
     }
     private String createGroupThroughTelegram(RestRepository a,RestRepository b,String memberId) throws Exception {
         stage="Telegram_display_name_discovery";
@@ -569,12 +585,15 @@ public final class LocalIntegrationRunner extends Instrumentation {
         TokenSend send=new TokenSend();send.token=ConnectionsManager.getInstance(2).sendRequest(request,(value,error)->{if(error!=null)send.response.completeExceptionally(new AssertionError());else send.response.complete(value);});return send;
     }
     private MessageObject pendingUi(JSONObject state,int localId,long randomId,String text) throws Exception {
+        return pendingUi(state,localId,randomId,text,false);
+    }
+    private MessageObject pendingUi(JSONObject state,int localId,long randomId,String text,boolean deleted) throws Exception {
         long chatId;try(IdMap map=new IdMap(context,2)){chatId=map.local("conversation",state.getString("token_group"));}
         TLRPC.TL_message message=new TLRPC.TL_message();message.id=localId;message.random_id=randomId;message.dialog_id=-chatId;message.date=(int)(System.currentTimeMillis()/1000);message.out=true;message.message=text;message.send_state=MessageObject.MESSAGE_SEND_STATE_SENDING;
         TLRPC.TL_peerChat peer=new TLRPC.TL_peerChat();peer.chat_id=chatId;message.peer_id=peer;TLRPC.TL_peerUser sender=new TLRPC.TL_peerUser();sender.user_id=UserConfig.getInstance(2).getClientUserId();message.from_id=sender;message.flags|=256;message.media=new TLRPC.TL_messageMediaEmpty();
         ArrayList<TLRPC.Message> messages=new ArrayList<>();messages.add(message);MessagesStorage storage=MessagesStorage.getInstance(2);storage.putMessages(messages,true,true,false,0,0,0);
         CompletableFuture<Boolean> saved=new CompletableFuture<>();storage.getStorageQueue().postRunnable(()->saved.complete(true));saved.get(10,TimeUnit.SECONDS);
-        check(storage.getMessage(-chatId,localId)!=null,"pending_UI_cache_written");return new MessageObject(2,message,false,false);
+        check((storage.getMessage(-chatId,localId)==null)==deleted,deleted?"offline_deleted_cache_rejected":"pending_UI_cache_written");if(deleted)passed.put("offline_deleted_cache_rejected");return new MessageObject(2,message,false,false);
     }
     private void offline() throws Exception {
         stage="offline_UI_outbox";
@@ -645,7 +664,7 @@ public final class LocalIntegrationRunner extends Instrumentation {
         long uiRandom=UUID.randomUUID().getMostSignificantBits();String uiClient=clientId(state.getString("user"),uiRandom),uiCommittedClient=clientId(state.getString("user"),state.getLong("ui_committed_random"));
         MessageObject uiPending=pendingUi(state,-91001,uiRandom,"Pending UI cancellation"),uiCommitted=pendingUi(state,-91002,state.getLong("ui_committed_random"),"Committed UI cancellation");
         MessageObject uiDeleted=pendingUi(state,-91003,state.getLong("ui_deleted_random"),"Deleted UI cancellation");
-        pendingUi(state,state.getInt("ui_deleted_ordinal"),state.getLong("ui_deleted_random"),"Stale deleted cached body");
+        pendingUi(state,state.getInt("ui_deleted_ordinal"),state.getLong("ui_deleted_random"),"Stale deleted cached body",true);
         String uiDeletedClient=clientId(state.getString("user"),state.getLong("ui_deleted_random"));
         try(OutboxStore store=new OutboxStore(context,2)){
             store.enqueue(state.getString("user"),uiClient,state.getString("token_group"),"Pending UI cancellation");store.enqueue(state.getString("user"),uiCommittedClient,state.getString("token_group"),"Committed UI cancellation");
@@ -735,6 +754,7 @@ public final class LocalIntegrationRunner extends Instrumentation {
         check(editQueued.get(15,TimeUnit.SECONDS)!=0,"restored_edit_dispatched");long editDeadline=System.currentTimeMillis()+30000;Models.Message afterRestart=b.message(editState.getString("server"));while(afterRestart.revision==snapshot.getInt("revision")&&System.currentTimeMillis()<editDeadline){Thread.sleep(100);afterRestart=b.message(editState.getString("server"));}
         check(afterRestart.revision==snapshot.getInt("revision")+1&&afterRestart.text.equals("ویرایش پس از بازگشت"),"cached_native_edit_after_restart");passed.put("cached_native_edit_after_restart");
         JSONObject deletedState=read("vyrn-delete-test.json");check(b.message(deletedState.getString("own")).deleted&&b.message(deletedState.getString("other")).deleted&&MessagesStorage.getInstance(2).getMessage(deletedState.getLong("dialog"),deletedState.getInt("own_id"))==null&&MessagesStorage.getInstance(2).getMessage(deletedState.getLong("dialog"),deletedState.getInt("other_id"))==null,"native_deletion_survives_restart");passed.put("native_deletion_survives_restart");
+        org.telegram.tgnet.SerializedData prefetched=new org.telegram.tgnet.SerializedData(android.util.Base64.decode(deletedState.getString("prefetched"),android.util.Base64.NO_WRAP));TLRPC.Message stale=TLRPC.Message.TLdeserialize(prefetched,prefetched.readInt32(true),true);prefetched.cleanup();stale.dialog_id=deletedState.getLong("dialog");verifyDeletedCacheWriters(stale.dialog_id,stale,"restart_prefetched");
         try(OutboxStore store=new OutboxStore(context,2)){
             OutboxStore.Entry sent=store.get(state.getString("user"),clientId(state.getString("user"),state.getLong("outbox_first")));
             check(sent.state==OutboxStore.SENT && sent.text==null,"outbox_ack_persisted_body_removed");
