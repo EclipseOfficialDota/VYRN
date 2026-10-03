@@ -12,6 +12,8 @@ All production endpoints require HTTPS. JSON uses UTF-8. Authentication is `Auth
 | POST `/v1/auth/logout` | revokes current session |
 | GET/PATCH `/v1/me` | profile; partial first_name/last_name/about/owned avatar_id changes preserve omitted fields; avatar_id:null clears photo; legacy display_name resets separate names; mixing display_name with first_name/last_name is invalid |
 | GET `/v1/users/{id}` | profile by UUID, without email; actual viewer-scoped blocked state and common group count |
+| GET `/v1/users/{id}/avatar` | authenticated current-avatar metadata: actual media UUID, dimensions, size, detected content type and creation date; absent/disabled/unreadable pictures return404 |
+| DELETE `/v1/me/avatar/{id}` | remove only the caller's displayed current media UUID; newer replacement returns409, already empty is a repeatable204 |
 | GET `/v1/users/search?q=...&limit=50` | authenticated display-name discovery; maximum50 results, excludes self, disabled users and blocks in either direction; no email search or login fields |
 | GET `/v1/sessions` | active sessions for current user |
 | DELETE `/v1/sessions` | atomically revoke every other owned session, preserving the caller; repeatable204 response |
@@ -53,6 +55,8 @@ Send cancellation is bound to the authenticated sender and the original conversa
 WebSocket first returns `{"type":"ready",...}`. Each `events` frame has ordered events and `cursor`. Commit events locally, then send `{"type":"ack","cursor":N}`. Heartbeat is 20 seconds; an unacknowledged batch disconnects after 45 seconds. Reconnect with bounded exponential backoff and the last committed cursor. A revoked/expired session closes the stream; refresh authentication and reconnect. Android foreground consumption now journals raw batches and cursor before acknowledgement and adapts message events. Background execution, crash recovery at every boundary and complete mapping of conversation/member/typing/reaction/receipt events remain acceptance work.
 
 Uploads: file/video/image 250 MiB, avatar 10 MiB, voice 100 MiB, user quota 2 GiB. Low disk returns 507 while text sends stay available. An unbound upload is owner-only; other members can download only after attachment to a live authorized message.
+
+New avatar uploads require a fully decodable JPEG or PNG with dimensions1–4096 in each direction. Validation checks dimensions before decoding, rejects truncated/corrupt data and removes failed uploads without inserting a media row. The content type is detected from the image. Uploading alone does not change the profile: PATCH the owned media UUID into `avatar_id`. A current picture is readable by authenticated users; clearing/replacing its reference removes that public access while the uploader retains access to their orphaned media until collection. `/v1/media/{id}` supports authorized byte ranges; past-photo history and profile privacy controls remain unfinished.
 
 ## Blocked users
 

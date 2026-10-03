@@ -3,6 +3,10 @@ package api
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
+	"image"
+	_ "image/jpeg"
+	_ "image/png"
 	"io"
 	"mime"
 	"net/http"
@@ -10,6 +14,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/google/uuid"
@@ -147,6 +152,14 @@ func (s *Server) upload(w http.ResponseWriter, r *http.Request) {
 		conv = conversation
 	}
 	contentType := "application/octet-stream"
+	if kind == "avatar" {
+		config, format, imageErr := avatarImage(path, true)
+		if imageErr != nil || config.Width < 1 {
+			fail(w, 400, "invalid_avatar_image")
+			return
+		}
+		contentType = "image/" + format
+	}
 	_, err = tx.Exec(ctx, `INSERT INTO media(id,owner_id,conversation_id,kind,filename,content_type,size,sha256,storage_key,encrypted) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$10,$9)`, id, p.UserID, conv, kind, name, contentType, size, hex.EncodeToString(hash.Sum(nil)), encrypted, id)
 	if err != nil || tx.Commit(ctx) != nil {
 		s.internal(w)
@@ -154,6 +167,96 @@ func (s *Server) upload(w http.ResponseWriter, r *http.Request) {
 	}
 	keep = true
 	respond(w, 201, map[string]any{"id": id, "size": size, "sha256": hex.EncodeToString(hash.Sum(nil))})
+}
+
+// Bound decoded memory before fully validating a static profile image.
+func avatarImage(path string, validate bool) (image.Config, string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return image.Config{}, "", err
+	}
+	defer f.Close()
+	config, format, err := image.DecodeConfig(f)
+	if err != nil {
+		return config, format, err
+	}
+	if (format != "jpeg" && format != "png") || config.Width < 1 || config.Height < 1 || config.Width > 4096 || config.Height > 4096 {
+		return image.Config{}, "", errors.New("invalid_avatar_dimensions")
+	}
+	if validate {
+		if _, err = f.Seek(0, 0); err != nil {
+			return config, format, err
+		}
+		_, _, err = image.Decode(f)
+	}
+	return config, format, err
+}
+
+func (s *Server) avatar(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if !validID(id) {
+		fail(w, 404, "not_found")
+		return
+	}
+	var mediaID, key, contentType string
+	var size int64
+	var created time.Time
+	err := s.db.QueryRow(r.Context(), `SELECT f.id::text,f.storage_key,f.content_type,f.size,f.created_at FROM users u JOIN media f ON f.id=u.avatar_id WHERE u.id=$1 AND NOT u.disabled AND f.kind='avatar' AND NOT f.encrypted`, id).Scan(&mediaID, &key, &contentType, &size, &created)
+	if err == pgx.ErrNoRows {
+		fail(w, 404, "not_found")
+		return
+	}
+	if err != nil {
+		s.internal(w)
+		return
+	}
+	path, err := (storage.Local{Root: s.cfg.MediaDir}).Path(key)
+	if err != nil {
+		s.internal(w)
+		return
+	}
+	config, format, err := avatarImage(path, false)
+	if err != nil {
+		fail(w, 404, "not_found")
+		return
+	}
+	respond(w, 200, map[string]any{"id": mediaID, "size": size, "width": config.Width, "height": config.Height, "date": created, "content_type": "image/" + format})
+}
+
+func (s *Server) deleteAvatar(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if !validID(id) {
+		fail(w, 400, "invalid_request")
+		return
+	}
+	tx, err := s.db.Begin(r.Context())
+	if err != nil {
+		s.internal(w)
+		return
+	}
+	defer tx.Rollback(r.Context())
+	var avatar *string
+	if err = tx.QueryRow(r.Context(), `SELECT avatar_id::text FROM users WHERE id=$1 FOR UPDATE`, current(r).UserID).Scan(&avatar); err != nil {
+		s.internal(w)
+		return
+	}
+	if avatar == nil {
+		w.WriteHeader(204)
+		return
+	}
+	if *avatar != id {
+		fail(w, 409, "profile_changed")
+		return
+	}
+	if _, err = tx.Exec(r.Context(), `UPDATE users SET avatar_id=NULL WHERE id=$1`, current(r).UserID); err != nil {
+		s.internal(w)
+		return
+	}
+	if err = tx.Commit(r.Context()); err != nil {
+		s.internal(w)
+		return
+	}
+	w.WriteHeader(204)
 }
 func (s *Server) download(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")

@@ -2,6 +2,16 @@
 
 Updated: 2026-10-03. This records performed checks, not planned tests.
 
+## Static native profile-picture checkpoint — 2026-10-03
+
+- All265 API35 checks pass:93 first,34 mutations,67 profile,16 offline,55 restart. The tested local TLS APK SHA-256 is c217393584198dff80ec0ff7f89b1c6489d2cbff81a034a7da1d6c3131317fdf; artifacts/android-integration.json records the actual phases and named checks.
+- Instrumentation presents original SettingsActivity and sends a real320x320 bitmap through ImageUpdater's cropped-image entry. Holding the originating account's network guard proves that the native photo reference stays unchanged until server confirmation. The actual server metadata, native ImageLocation, current-photo listing, full-profile photo and Settings response agree. This does not test gallery/camera gestures.
+- Original FileLoader downloads the image through authenticated HTTPS ranges. The received bytes exactly match the authorized server download and BitmapFactory decodes the actual dimensions. The first run exposed native download rejection for datacenter identifier0; the single VYRN compatibility origin now uses1 and persists it in native photo structures. No Telegram network endpoint is selected.
+- Native unsupported video and wrong-account operations fail without changing the server photo. Native deletion waits for confirmation. A new image then remains in UserConfig and native SQLite, with the correct photo ID and routing identifier, after a real process restart.
+- All23 PostgreSQL API integration tests and go vet pass. New avatar coverage verifies valid PNG/JPEG, real dimensions/creation metadata, owner-only unbound uploads, authenticated current-photo access, foreign binding denial, exact partial ranges/EOF, malformed/truncated/oversized image rejection without media rows, and conditional removal. A stale UUID returns409 and preserves the newer replacement; repeated removal of an empty profile succeeds.
+- x86 instrumentation and all three normal ARM Debug APK builds pass. The verifier confirms signatures, package, API/ABI and manifest policy with no local test CA in normal APKs. Repository scanner passes123 tracked files.
+- Current-photo history is limited to the active photo. Profile realtime, thumbnail derivatives, full gallery/camera/gesture acceptance, adversarial late callbacks/account switches/local storage failures, physical devices and the full original production requirements remain unfinished.
+
 ## Native blocking and owned list checkpoint — 2026-10-03
 
 - All246 API35 checks pass:93 first,34 mutations,50 profile,16 offline,53 restart. The tested local TLS APK SHA-256 is1542a77ba6a0b04d5213563fa2eec6a179497a84245bb78f379ce75b67501a38; artifacts/android-integration.json records the actual phases and named checks.

@@ -147,3 +147,13 @@
 - Update the original MessagesController block set, known count and loaded full-profile cache only after server confirmation. Preserve cached rows on list failure and offer actual Retry in the original PrivacyUsersActivity.
 - Read authoritative current state for incoming block events and verify loaded native full-profile persistence before considering the event processed. Complete offline block-list persistence and adversarial late callback/paging races remain acceptance work.
 - Capture specialized request identity and primitive fields at the public ConnectionsManager send entry, before stage-queue deferral. A caller must not mutate the queued input peer, flags or native account into a different operation. Broader generic request immutability remains unfinished.
+
+## 2026-10-03 — static native profile pictures
+- Keep the original ImageUpdater picker/crop/preview and SettingsActivity response flow. Upload a static JPEG through the repository, then bind its owned media UUID through the original photos.uploadProfilePhoto request; uploading alone must not change the profile.
+- Validate JPEG/PNG dimensions before full decoding on the server and discard corrupt or oversized images without a media row. Expose actual current-photo metadata; do not invent sizes or creation dates.
+- Share the existing IdMap in a dedicated application-wide slot(-1) for avatar UUIDs. Telegram's image cache is shared across native accounts, so per-account integer sequences would make unrelated photos collide. Native locations use the normal negative photo ID and a/c suffixes; both variants currently serve the same validated original image.
+- Adapt original upload.getFile requests to authenticated, bounded HTTPS ranges with refresh and explicit EOF. Release unused native byte buffers when cancelled or rejected by the account guard.
+- Use native datacenter identifier1 for the single VYRN origin, preserving it in Photo/UserProfilePhoto and UserConfig. The original downloader rejects0 before dispatch; identifier1 is local compatibility routing and never selects a Telegram endpoint.
+- Preserve the picker account/origin, suppress completion after cancellation, and leave abandoned uploads unbound for existing orphan collection. Static profile pictures do not enable video, bot, fallback or contact-photo variants.
+- Delete the observed current media UUID under the owner row lock. A newer replacement returns409; repeated removal of an already empty profile is a no-op. Native caches change after acceptance and UserConfig persistence precedes success.
+- Current-photo listing is connected; past-photo history, profile realtime propagation, thumbnail derivatives, full gallery/camera gestures and adversarial late callbacks/storage failures remain unfinished.

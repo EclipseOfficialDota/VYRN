@@ -5,9 +5,14 @@ import java.util.List;
 public final class Models {
     private Models() {}
     public static final class User {
-        public final String id, name, firstName, lastName, about;
+        public final String id, name, firstName, lastName, about, avatarId;
         public User(String id, String name) { this(id,name,name,"",""); }
-        public User(String id,String name,String firstName,String lastName,String about){this.id=id;this.name=name;this.firstName=firstName;this.lastName=lastName;this.about=about;}
+        public User(String id,String name,String firstName,String lastName,String about){this(id,name,firstName,lastName,about,null);}
+        public User(String id,String name,String firstName,String lastName,String about,String avatarId){this.id=id;this.name=name;this.firstName=firstName;this.lastName=lastName;this.about=about;this.avatarId=avatarId;}
+    }
+    public static final class Avatar {
+        public final String id,contentType;public final int width,height,size,date;
+        public Avatar(String id,String contentType,int width,int height,int size,int date){this.id=id;this.contentType=contentType;this.width=width;this.height=height;this.size=size;this.date=date;}
     }
     public static final class Profile {
         public final User user;public final boolean blocked;public final int commonGroups;

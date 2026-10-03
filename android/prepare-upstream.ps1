@@ -299,6 +299,30 @@ public void blockPeer(long id) { vyrnSetPeerBlocked(id, true, null); }
  if(!$blockSection.Contains($callback)){throw 'Pinned blocked-list callback missing'}
  $blockSection=$blockSection.Replace($callback,$callback+"`n            if (getUserConfig().getClientUserId() != vyrnOrigin) return;`n            loadingBlockedPeers = false; vyrnBlockedLoadFailed = response == null;`n            if (response == null) { getNotificationCenter().postNotificationName(NotificationCenter.blockedUsersDidLoad); return; }")
  $t=$t.Substring(0,$blockStart)+$blockSection+$t.Substring($blockEnd)
+ $photoDelete=@'
+public void deleteUserPhoto(TLRPC.InputPhoto photo) {
+        final long origin = getUserConfig().getClientUserId();
+        TLRPC.User current = getUserConfig().getCurrentUser();
+        if (origin == 0 || current == null || photo != null && (current.photo == null || current.photo.photo_id != photo.id)) return;
+        TLRPC.TL_photos_updateProfilePhoto request = new TLRPC.TL_photos_updateProfilePhoto(); request.id = new TLRPC.TL_inputPhotoEmpty();
+        getConnectionsManager().sendRequest(request, (response, error) -> AndroidUtilities.runOnUIThread(() -> {
+            if (getUserConfig().getClientUserId() != origin) return;
+            if (error != null || !(response instanceof TLRPC.TL_photos_photo)) {
+                android.widget.Toast.makeText(ApplicationLoader.applicationContext, LocaleController.isRTL ? "حذف عکس انجام نشد. دوباره تلاش کنید." : "Photo removal failed. Try again.", android.widget.Toast.LENGTH_LONG).show(); return;
+            }
+            TLRPC.User user = getUserConfig().getCurrentUser(); if (user == null || user.id != origin) return;
+            TLRPC.UserProfilePhoto previous = user.photo; user.photo = new TLRPC.TL_userProfilePhotoEmpty();
+            if (!getUserConfig().vyrnSaveCurrentUser(user)) { user.photo = previous; return; }
+            putUser(user, false); java.util.ArrayList<TLRPC.User> users = new java.util.ArrayList<>(); users.add(user);
+            getMessagesStorage().putUsersAndChats(users, null, true, true);
+            TLRPC.UserFull full = getUserFull(origin); if (full != null) { full.profile_photo = null; full.flags &= ~4; getMessagesStorage().updateUserInfo(full, false); }
+            getNotificationCenter().postNotificationName(NotificationCenter.updateInterfaces, UPDATE_MASK_AVATAR);
+            getNotificationCenter().postNotificationName(NotificationCenter.mainUserInfoChanged);
+        }));
+    }
+'@
+ if(!$t.Contains('public void deleteUserPhoto(TLRPC.InputPhoto photo) {')){throw 'Pinned profile-photo deletion marker missing'}
+ $t=[regex]::Replace($t,'(?s)public void deleteUserPhoto\(TLRPC.InputPhoto photo\) \{.*?\n    \}',$photoDelete)
  if(!$t.Contains('public boolean loadingBlockedPeers = false;')){throw 'Pinned blocked-list state missing'}
  $t=$t.Replace('public boolean loadingBlockedPeers = false;', 'public boolean loadingBlockedPeers = false; public boolean vyrnBlockedLoadFailed;')
  $t=$t.Replace('        totalBlockedCount = -1;', '        totalBlockedCount = -1; vyrnBlockedLoadFailed = false;')
@@ -491,6 +515,53 @@ Edit 'TMessagesProj/src/main/java/org/telegram/messenger/ApplicationLoader.java'
  $t=$t.Replace('BillingController.getInstance().startConnection();','// VYRN: Telegram billing disabled.')
  $t=$t.Replace('LauncherIconController.tryFixLauncherIconIfNeeded();','// VYRN: fixed placeholder icon until final assets supplied.')
  $t=$t.Replace('ProxyRotationController.init();','// VYRN: Telegram proxy rotation disabled.')
+ $t
+}
+Edit 'TMessagesProj/src/main/java/org/telegram/ui/Components/ImageUpdater.java' {
+ param($t)
+ $t=(& git -c "safe.directory=$($upstream.Replace('\','/'))" -C $upstream show "${pin}:TMessagesProj/src/main/java/org/telegram/ui/Components/ImageUpdater.java") -join "`n"
+ $t=$t.Replace('private boolean canceled;',"private boolean canceled; private java.util.concurrent.atomic.AtomicBoolean vyrnAvatarUpload; private long vyrnAvatarOrigin;")
+ $t=$t.Replace('canSelectVideo = allowVideo;','canSelectVideo = allowVideo && setForType != FOR_TYPE_USER; vyrnAvatarOrigin = UserConfig.getInstance(currentAccount).getClientUserId();')
+ $t=$t.Replace('this.supportEmojiMarkup = supportEmojiMarkup;','this.supportEmojiMarkup = supportEmojiMarkup && setForType != FOR_TYPE_USER;')
+ $t=$t.Replace('public void setDelegate(ImageUpdaterDelegate imageUpdaterDelegate) {',"public void setDelegate(ImageUpdaterDelegate imageUpdaterDelegate) {`n        if (parentFragment != null) { currentAccount = parentFragment.getCurrentAccount(); vyrnAvatarOrigin = UserConfig.getInstance(currentAccount).getClientUserId(); }")
+ $t=$t.Replace('public void cancel() {',"public void cancel() {`n        if (vyrnAvatarUpload != null) vyrnAvatarUpload.set(true);")
+ $t=$t.Replace('private void processBitmap(boolean fromAvatarConstructor, Bitmap bitmap, MessageObject avatarObject) {',"private void processBitmap(boolean fromAvatarConstructor, Bitmap bitmap, MessageObject avatarObject) {`n        if (vyrnAvatarUpload != null) vyrnAvatarUpload.set(true);")
+ $upload='FileLoader.getInstance(currentAccount).uploadFile(uploadingImage, false, true, ConnectionsManager.FileTypePhoto);'
+ if(!$t.Contains($upload)){throw 'Pinned profile image-upload marker missing'}
+ $t=$t.Replace($upload,"if (setForType == FOR_TYPE_USER && type == TYPE_DEFAULT) vyrnAvatarUpload = xyz.eclipseofficial.vyrn.compat.VyrnBridge.uploadAvatar(currentAccount, uploadingImage, vyrnAvatarOrigin);`n                    else $upload")
+ $failed="delegate.didUploadPhoto(uploadedPhoto, uploadedVideo, videoTimestamp, videoPath, bigPhoto, smallPhoto, isVideo, vectorMarkup);`n                    }`n                }`n                cleanup();"
+ if(!$t.Contains($failed)){throw 'Pinned image-upload completion marker missing'}
+ $t=$t.Replace($failed,"delegate.didUploadPhoto(uploadedPhoto, uploadedVideo, videoTimestamp, videoPath, bigPhoto, smallPhoto, isVideo, vectorMarkup);`n                    }`n                } else if (delegate != null) { delegate.didUploadFailed(); }`n                cleanup();")
+ $t
+}
+Edit 'TMessagesProj/src/main/java/org/telegram/ui/SettingsActivity.java' {
+ param($t)
+ $t=(& git -c "safe.directory=$($upstream.Replace('\','/'))" -C $upstream show "${pin}:TMessagesProj/src/main/java/org/telegram/ui/SettingsActivity.java") -join "`n"
+ $marker='    public void didUploadPhoto(final TLRPC.InputFile photo, final TLRPC.InputFile video, double videoStartTimestamp, String videoPath, TLRPC.PhotoSize bigSize, final TLRPC.PhotoSize smallSize, boolean isVideo, TLRPC.VideoSize emojiMarkup) {'
+ if(!$t.Contains($marker)){throw 'Pinned settings avatar callback missing'}
+ $failed=@'
+    @Override
+    public void didUploadFailed() {
+        avatar = null; avatarBig = null; showAvatarProgress(false, true);
+        TLRPC.User current = getUserConfig().getCurrentUser(); if (current != null) setInfo(current);
+        android.widget.Toast.makeText(ApplicationLoader.applicationContext, LocaleController.isRTL ? "بارگذاری عکس انجام نشد. دوباره تلاش کنید." : "Photo upload failed. Try again.", android.widget.Toast.LENGTH_LONG).show();
+    }
+
+'@
+ $t=$t.Replace('    @Override'+"`n"+$marker,$failed+'    @Override'+"`n"+$marker)
+ if(!$t.Contains('public void didUploadFailed()')){throw 'Settings photo error handler not inserted'}
+ $begin=$t.IndexOf($marker);$end=$t.IndexOf('    private void showAvatarProgress(', $begin)
+ if($begin -lt 0 -or $end -lt 0){throw 'Pinned settings photo response section missing'}
+ $section=$t.Substring($begin,$end-$begin)
+ $section=$section.Replace('final TLRPC.TL_photos_uploadProfilePhoto req =',"final long vyrnOrigin = getUserConfig().getClientUserId();`n                final TLRPC.TL_photos_uploadProfilePhoto req =")
+ $section=$section.Replace('                    avatarUploadingRequest = -1;',"                    if (getUserConfig().getClientUserId() != vyrnOrigin) return;`n                    avatarUploadingRequest = -1;")
+ $section=$section.Replace('                        user.photo = new TLRPC.TL_userProfilePhoto();',"                        TLRPC.UserProfilePhoto vyrnPreviousPhoto = user.photo;`n                        user.photo = new TLRPC.TL_userProfilePhoto();")
+ $section=$section.Replace('                        user.photo.photo_id = photos_photo.photo.id;',"                        user.photo.photo_id = photos_photo.photo.id; user.photo.dc_id = photos_photo.photo.dc_id;")
+ $section=$section.Replace('                        if (small != null && avatar != null) {',"                        if (!getUserConfig().vyrnSaveCurrentUser(user)) { user.photo = vyrnPreviousPhoto; didUploadFailed(); return; }`n                        if (small != null && avatar != null) {")
+ $section=$section.Replace('                            userFull.profile_photo = photos_photo.photo;',"                            userFull.profile_photo = photos_photo.photo; userFull.flags |= 4;")
+ $section=$section.Replace('                    getUserConfig().saveConfig(true);','')
+ $t=$t.Substring(0,$begin)+$section+$t.Substring($end)
+ $t=$t.Replace('                    avatar = null;',"                    if (error != null) didUploadFailed();`n                    avatar = null;")
  $t
 }
 Edit 'TMessagesProj/src/main/java/org/telegram/messenger/BuildVars.java' {

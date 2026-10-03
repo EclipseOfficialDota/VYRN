@@ -69,7 +69,44 @@ public final class RestRepository implements Models.Repository {
         JSONObject group=(JSONObject)request("POST","/v1/conversations",new JSONObject().put("kind","group").put("title",title).put("members",new JSONArray(members)).put("disappearing_seconds",disappearingSeconds),true);
         return new Models.Conversation(group.getString("id"),"group",group.getString("title"),"owner",group.getJSONArray("members").length(),group.getInt("disappearing_seconds"));
     }
-    private Models.User user(JSONObject data) throws Exception{return new Models.User(data.getString("id"),data.getString("display_name"),data.optString("first_name",data.getString("display_name")),data.optString("last_name",""),data.optString("about",""));}
+    private Models.User user(JSONObject data) throws Exception{return new Models.User(data.getString("id"),data.getString("display_name"),data.optString("first_name",data.getString("display_name")),data.optString("last_name",""),data.optString("about",""),data.isNull("avatar_id")?null:data.optString("avatar_id",null));}
+    public Models.Avatar avatarForUser(String owner,String target) throws Exception {
+        JSONObject value=(JSONObject)requestForUser(owner,"GET","/v1/users/"+target+"/avatar",null,true);
+        return new Models.Avatar(value.getString("id"),value.getString("content_type"),value.getInt("width"),value.getInt("height"),value.getInt("size"),Math.toIntExact(Instant.parse(value.getString("date")).getEpochSecond()));
+    }
+    public void deleteAvatarForUser(String owner,String id) throws Exception {requestForUser(owner,"DELETE","/v1/me/avatar/"+id,null,true);}
+    public String uploadAvatarForUser(String owner,byte[] image) throws Exception {
+        if(image.length<1||image.length>10*1024*1024)throw new IllegalArgumentException("avatar_size");
+        return new JSONObject(new String(binaryForUser(owner,"POST","/v1/media?kind=avatar",image,0,65536),StandardCharsets.UTF_8)).getString("id");
+    }
+    public byte[] avatarBytesForUser(String owner,String id,long offset,int limit) throws Exception {
+        if(offset<0||offset>10*1024*1024||limit<1||limit>1024*1024)throw new IllegalArgumentException("avatar_range");
+        return binaryForUser(owner,"GET","/v1/media/"+id,null,offset,limit);
+    }
+    private byte[] binaryForUser(String owner,String method,String path,byte[] body,long offset,int limit) throws Exception {synchronized(vault.guard()){
+        JSONObject session=vault.load();if(!owner.equals(session.optString("user_id")))throw new SecurityException("account_changed");
+        try{return exchangeBinary(method,path,body,offset,limit,session.getString("access_token"));}catch(ApiException failure){
+            if(failure.status!=401)throw failure;
+            JSONObject renewed=(JSONObject)exchange("POST","/v1/auth/refresh",new JSONObject().put("refresh_token",session.getString("refresh_token")),"");
+            vault.save(renewed);return exchangeBinary(method,path,body,offset,limit,renewed.getString("access_token"));
+        }
+    }}
+    private byte[] exchangeBinary(String method,String path,byte[] body,long offset,int limit,String access) throws Exception {
+        URL endpoint=new URL(BuildConfig.VYRN_API_URL+path);if(!"https".equals(endpoint.getProtocol())||endpoint.getHost().matches("[0-9.]+"))throw new SecurityException("https_hostname_required");
+        HttpsURLConnection connection=(HttpsURLConnection)endpoint.openConnection();connection.setInstanceFollowRedirects(false);connection.setConnectTimeout(15000);connection.setReadTimeout(20000);connection.setRequestMethod(method);connection.setRequestProperty("Authorization","Bearer "+access);
+        try{
+            if(body!=null){connection.setRequestProperty("Content-Type","application/octet-stream");connection.setRequestProperty("X-Filename","avatar.jpg");connection.setFixedLengthStreamingMode(body.length);connection.setDoOutput(true);try(java.io.OutputStream output=connection.getOutputStream()){output.write(body);}}
+            else connection.setRequestProperty("Range","bytes="+offset+"-"+(offset+limit-1));
+            int status=connection.getResponseCode();String range=connection.getHeaderField("Content-Range");
+            if(status==416 && range!=null && range.matches("bytes \\*/[0-9]+") && offset>=Long.parseLong(range.substring(8)))return new byte[0];
+            if(body==null && status>=200 && status<300 && status!=206)throw new IllegalStateException("range_response_required");
+            try(InputStream input=status>=400?connection.getErrorStream():connection.getInputStream();ByteArrayOutputStream output=new ByteArrayOutputStream()){
+                if(input!=null){byte[] buffer=new byte[8192];int n;while((n=input.read(buffer))!=-1){if(output.size()+n>Math.max(limit,65536))throw new IllegalStateException("response_too_large");output.write(buffer,0,n);}}
+                byte[] value=output.toByteArray();if(status<200||status>=300){String code="request_failed";try{code=new JSONObject(new String(value,StandardCharsets.UTF_8)).optString("error",code);}catch(Exception ignored){}throw new ApiException(status,code);}
+                if(body==null && value.length>limit)throw new IllegalStateException("range_too_large");return value;
+            }
+        }finally{connection.disconnect();}
+    }
     public Models.User updateProfileForUser(String user,JSONObject changes) throws Exception{return user((JSONObject)requestForUser(user,"PATCH","/v1/me",changes,true));}
     public Models.Profile profileForUser(String expected,String target) throws Exception{JSONObject data=(JSONObject)requestForUser(expected,"GET",target.equals(expected)?"/v1/me":"/v1/users/"+target,null,true);return new Models.Profile(user(data),data.getBoolean("blocked"),data.getInt("common_group_count"));}
     public void setBlockedForUser(String owner,String target,boolean blocked) throws Exception{requestForUser(owner,blocked?"PUT":"DELETE","/v1/blocks/"+target,null,true);}

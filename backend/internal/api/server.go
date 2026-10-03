@@ -92,6 +92,8 @@ func (s *Server) Handler() http.Handler {
 	secure("POST /v1/auth/logout", s.logout)
 	secure("POST /v1/auth/recovery-code", s.newRecoveryCode)
 	secure("GET /v1/users/{id}", s.profile)
+	secure("GET /v1/users/{id}/avatar", s.avatar)
+	secure("DELETE /v1/me/avatar/{id}", s.deleteAvatar)
 	secure("GET /v1/users/search", s.searchUsers)
 	secure("GET /v1/blocks", s.blocks)
 	secure("GET /v1/blocks/{id}", s.blockState)

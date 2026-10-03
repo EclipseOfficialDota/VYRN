@@ -15,6 +15,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import org.json.JSONObject;
 import org.telegram.messenger.ApplicationLoader;
 import org.telegram.messenger.MessagesController;
+import org.telegram.messenger.NotificationCenter;
 import org.telegram.messenger.MessagesStorage;
 import org.telegram.messenger.MessageObject;
 import org.telegram.messenger.SendMessagesHelper;
@@ -85,7 +86,7 @@ public final class VyrnBridge {
         final ArrayList<Runnable> cancelledCallbacks=new ArrayList<>();
         PendingRequest(int account,int token,boolean send,RequestDelegate callback,RequestDelegateTimestamp timestamp){this.account=account;this.token=token;this.send=send;this.callback=callback;this.timestamp=timestamp;}
         synchronized void complete(TLObject result,Throwable failure){
-            if(finished)return;this.result=result;this.failure=failure;resultReady=true;
+            if(finished){if(result instanceof TLRPC.TL_upload_file)result.freeResources();return;}this.result=result;this.failure=failure;resultReady=true;
             if(cancellationRequested && send && !ready)cancellationResult=bridge==null;
             Utilities.stageQueue.postRunnable(this::deliver);
         }
@@ -109,8 +110,8 @@ public final class VyrnBridge {
                 else{if(!resultReady)return;cancelled=null;response=result;error=failure;}
                 finished=true;if(token!=0)REQUESTS.remove(requestKey(account,token),this);
             }
-            if(cancelled!=null){for(Runnable task:cancelled)task.run();return;}
-            if(sessionOrigin!=0 && (bridge==null || !bridge.repository.vault.isUser(user) || UserConfig.getInstance(account).getClientUserId()!=sessionOrigin)){response=null;error=new SecurityException("account_changed");}
+            if(cancelled!=null){if(result instanceof TLRPC.TL_upload_file)result.freeResources();for(Runnable task:cancelled)task.run();return;}
+            if(sessionOrigin!=0 && (bridge==null || !bridge.repository.vault.isUser(user) || UserConfig.getInstance(account).getClientUserId()!=sessionOrigin)){if(response instanceof TLRPC.TL_upload_file)response.freeResources();response=null;error=new SecurityException("account_changed");}
             TLRPC.TL_error problem=problem(error);if(callback!=null)callback.run(response,problem);if(timestamp!=null)timestamp.run(response,problem,System.currentTimeMillis());
         }
     }
@@ -294,6 +295,44 @@ public final class VyrnBridge {
     public static boolean dispatch(int account,TLObject request,RequestDelegate callback,RequestDelegateTimestamp timestamp,int token){
         PendingRequest pending=new PendingRequest(account,token,request instanceof TLRPC.TL_messages_sendMessage,callback,timestamp);
         if(token!=0 && REQUESTS.putIfAbsent(requestKey(account,token),pending)!=null)throw new IllegalStateException("duplicate_request_token");
+        if(request instanceof TLRPC.TL_photos_uploadProfilePhoto || request instanceof TLRPC.TL_photos_updateProfilePhoto || request instanceof TLRPC.TL_photos_getUserPhotos || request instanceof TLRPC.TL_upload_getFile){
+            pending.sessionOrigin=UserConfig.getInstance(account).getClientUserId();
+            final boolean upload=request instanceof TLRPC.TL_photos_uploadProfilePhoto,change=request instanceof TLRPC.TL_photos_updateProfilePhoto,list=request instanceof TLRPC.TL_photos_getUserPhotos;
+            TLRPC.User current=UserConfig.getInstance(account).getCurrentUser();final long observedPhoto=change&&current!=null&&current.photo!=null?current.photo.photo_id:0;
+            TLRPC.TL_photos_uploadProfilePhoto photo=upload?(TLRPC.TL_photos_uploadProfilePhoto)request:null;
+            TLRPC.TL_photos_updateProfilePhoto update=change?(TLRPC.TL_photos_updateProfilePhoto)request:null;
+            TLRPC.TL_photos_getUserPhotos photos=list?(TLRPC.TL_photos_getUserPhotos)request:null;
+            TLRPC.TL_upload_getFile file=!upload&&!change&&!list?(TLRPC.TL_upload_getFile)request:null;
+            final long uploaded=photo!=null&&photo.file!=null?photo.file.id:0;
+            final boolean unsupported=photo!=null&&(photo.flags!=1||photo.fallback||photo.bot!=null||photo.video!=null||photo.video_emoji_markup!=null)||update!=null&&(update.flags!=0||update.fallback||update.bot!=null||!(update.id instanceof TLRPC.TL_inputPhotoEmpty));
+            final boolean self=photos!=null&&photos.user_id instanceof TLRPC.TL_inputUserSelf;
+            final long target=photos!=null&&photos.user_id instanceof TLRPC.TL_inputUser?photos.user_id.user_id:0;
+            final int offset=photos!=null?photos.offset:0,limit=photos!=null?photos.limit:file!=null?file.limit:0;
+            final long max=photos!=null?photos.max_id:0,start=file!=null?file.offset:0;
+            final long image=file!=null&&file.location instanceof TLRPC.TL_inputPeerPhotoFileLocation?((TLRPC.TL_inputPeerPhotoFileLocation)file.location).photo_id:file!=null&&file.location instanceof TLRPC.TL_inputPhotoFileLocation?file.location.id:0;
+            execute(()->{try{
+                VyrnBridge bridge=forAccount(account);pending.bridge=bridge;
+                synchronized(bridge.repository.vault.guard()){
+                    String owner=bridge.repository.vault.load().getString("user_id");pending.user=owner;
+                    if(pending.sessionOrigin==0||bridge.ids.local("user",owner)!=pending.sessionOrigin||UserConfig.getInstance(account).getClientUserId()!=pending.sessionOrigin)throw new SecurityException("account_changed");
+                    if(unsupported)throw new UnsupportedOperationException("avatar_variant_unavailable");
+                    if(file!=null){
+                        if(image<=0)throw new UnsupportedOperationException("file_location_unavailable");
+                        byte[] bytes=bridge.repository.avatarBytesForUser(owner,avatarIds().remote("avatar",image),start,limit);TLRPC.TL_upload_file result=new TLRPC.TL_upload_file();result.type=new TLRPC.TL_storage_fileUnknown();result.bytes=new org.telegram.tgnet.NativeByteBuffer(Math.max(1,bytes.length));result.bytes.writeBytes(bytes);result.bytes.limit(bytes.length);result.bytes.position(0);pending.complete(result,null);
+                    }else if(list){
+                        if(!self&&target<=0||offset<0||limit<1||limit>100||max<0)throw new IllegalArgumentException("invalid_avatar_page");
+                        String peer=self?owner:bridge.ids.remote("user",target);Models.User user=bridge.repository.profileForUser(owner,peer).user;TLRPC.TL_photos_photos result=new TLRPC.TL_photos_photos();result.users.add(bridge.mapUser(user));
+                        if(user.avatarId!=null&&offset==0){Models.Avatar value=bridge.repository.avatarForUser(owner,peer);TLRPC.Photo mapped=avatarPhoto(value);if(max==0||mapped.id<max)result.photos.add(mapped);}pending.complete(result,null);
+                    }else{
+                        if(upload&&uploaded<=0)throw new IllegalArgumentException("missing_avatar_file");
+                        Models.User user;
+                        if(upload)user=bridge.repository.updateProfileForUser(owner,new JSONObject().put("avatar_id",avatarIds().remote("avatar",uploaded)));
+                        else{if(observedPhoto>0)bridge.repository.deleteAvatarForUser(owner,avatarIds().remote("avatar",observedPhoto));user=bridge.repository.profileForUser(owner,owner).user;if(user.avatarId!=null)throw new IllegalStateException("avatar_changed");}
+                        TLRPC.TL_photos_photo result=new TLRPC.TL_photos_photo();result.users.add(bridge.mapUser(user));result.photo=user.avatarId==null?new TLRPC.TL_photoEmpty():avatarPhoto(bridge.repository.avatarForUser(owner,owner));pending.complete(result,null);
+                    }
+                }
+            }catch(Exception failure){pending.complete(null,failure);}});return true;
+        }
         if(request instanceof TL_account.getAuthorizations || request instanceof TL_account.resetAuthorization || request instanceof TLRPC.TL_auth_resetAuthorizations || request instanceof TL_account.updateProfile || request instanceof TLRPC.TL_users_getFullUser || request instanceof TLRPC.TL_contacts_block || request instanceof TLRPC.TL_contacts_unblock || request instanceof TLRPC.TL_contacts_getBlocked){
             pending.sessionOrigin=UserConfig.getInstance(account).getClientUserId();
             final long hash=request instanceof TL_account.resetAuthorization?((TL_account.resetAuthorization)request).hash:0;
@@ -333,6 +372,7 @@ public final class VyrnBridge {
                         Models.Profile value=bridge.repository.profileForUser(user,selfProfile?user:bridge.ids.remote("user",profileTarget));
                         TLRPC.User mapped=bridge.mapUser(value.user);TLRPC.TL_userFull full=new TLRPC.TL_userFull();full.id=mapped.id;full.user=mapped;full.about=value.user.about;full.blocked=value.blocked;full.common_chats_count=value.commonGroups;
                         full.voice_messages_forbidden=true;full.flags=2|1048576|(full.blocked?1:0);full.settings=new TLRPC.TL_peerSettings();full.notify_settings=new TLRPC.TL_peerNotifySettings();
+                        if(value.user.avatarId!=null){try{full.profile_photo=avatarPhoto(bridge.repository.avatarForUser(user,value.user.id));full.flags|=4;}catch(RestRepository.ApiException unavailable){if(unavailable.status!=404)throw unavailable;mapped.photo=new TLRPC.TL_userProfilePhotoEmpty();}}
                         TLRPC.TL_users_userFull result=new TLRPC.TL_users_userFull();result.full_user=full;result.users.add(mapped);pending.complete(result,null);
                     }
                     else if(profile){
@@ -396,7 +436,24 @@ public final class VyrnBridge {
         if("VYRN_EDIT_CONFLICT".equals(error.text)||"VYRN_EDIT_RELOAD_REQUIRED".equals(error.text))org.telegram.ui.Components.AlertsCreator.showSimpleAlert(fragment,rtl?"پیام تغییر کرده یا نسخهٔ آن مشخص نیست. پیام را دوباره بارگیری کنید و ویرایش را تکرار کنید.":"The message changed or its version is unknown. Reload the message and edit again.");
         else org.telegram.ui.Components.AlertsCreator.processError(account,error,fragment,request);
     }
-    public TLRPC.User mapUser(Models.User value){TLRPC.TL_user u=new TLRPC.TL_user();u.id=ids.local("user",value.id);u.flags=2|4|32|64;u.first_name=value.firstName;u.last_name=value.lastName;u.phone="";u.self=u.id==UserConfig.getInstance(account).getClientUserId();u.photo=new TLRPC.TL_userProfilePhotoEmpty();u.status=new TLRPC.TL_userStatusOffline();return u;}
+    private static IdMap avatarMap;
+    private static synchronized IdMap avatarIds(){if(avatarMap==null)avatarMap=new IdMap(ApplicationLoader.applicationContext,-1);return avatarMap;}
+    private static TLRPC.TL_fileLocationToBeDeprecated avatarLocation(long id,int local){TLRPC.TL_fileLocationToBeDeprecated value=new TLRPC.TL_fileLocationToBeDeprecated();value.volume_id=-id;value.local_id=local;value.dc_id=1;return value;}
+    private static TLRPC.Photo avatarPhoto(Models.Avatar value){
+        TLRPC.TL_photo photo=new TLRPC.TL_photo();photo.id=avatarIds().local("avatar",value.id);photo.date=value.date;photo.dc_id=1;photo.file_reference=new byte[0];
+        for(String type:new String[]{"a","c"}){TLRPC.TL_photoSize size=new TLRPC.TL_photoSize();size.type=type;size.w=value.width;size.h=value.height;size.size=value.size;size.location=avatarLocation(photo.id,type.charAt(0));photo.sizes.add(size);}return photo;
+    }
+    public static java.util.concurrent.atomic.AtomicBoolean uploadAvatar(int account,String path,long origin){
+        java.util.concurrent.atomic.AtomicBoolean cancelled=new java.util.concurrent.atomic.AtomicBoolean();execute(()->{TLRPC.InputFile uploaded=null;Exception failure=null;VyrnBridge bridge=forAccount(account);String owner=null;try{
+            owner=bridge.ids.remote("user",origin);java.io.File source=new java.io.File(path);long size=source.length();if(size<1||size>10*1024*1024)throw new IllegalArgumentException("avatar_size");byte[] bytes=java.nio.file.Files.readAllBytes(source.toPath());
+            synchronized(bridge.repository.vault.guard()){if(cancelled.get())return;if(UserConfig.getInstance(account).getClientUserId()!=origin)throw new SecurityException("account_changed");String id=bridge.repository.uploadAvatarForUser(owner,bytes);TLRPC.TL_inputFile file=new TLRPC.TL_inputFile();file.id=avatarIds().local("avatar",id);file.name="avatar.jpg";file.parts=1;file.md5_checksum="";uploaded=file;}
+        }catch(Exception error){failure=error;}TLRPC.InputFile accepted=uploaded;String user=owner;Exception problem=failure;AndroidUtilities.runOnUIThread(()->{
+            if(cancelled.get()||origin==0||UserConfig.getInstance(account).getClientUserId()!=origin||!bridge.repository.vault.isUser(user))return;
+            if(problem==null)NotificationCenter.getInstance(account).postNotificationName(NotificationCenter.fileUploaded,path,accepted,null,null,null,0L);
+            else NotificationCenter.getInstance(account).postNotificationName(NotificationCenter.fileUploadFailed,path,false);
+        });});return cancelled;
+    }
+    public TLRPC.User mapUser(Models.User value){TLRPC.TL_user u=new TLRPC.TL_user();u.id=ids.local("user",value.id);u.flags=1|2|4|32|64;u.access_hash=u.id;u.first_name=value.firstName;u.last_name=value.lastName;u.phone="";u.self=u.id==UserConfig.getInstance(account).getClientUserId();u.photo=new TLRPC.TL_userProfilePhotoEmpty();if(value.avatarId!=null){TLRPC.TL_userProfilePhoto photo=new TLRPC.TL_userProfilePhoto();photo.photo_id=avatarIds().local("avatar",value.avatarId);photo.dc_id=1;photo.photo_small=avatarLocation(photo.photo_id,'a');photo.photo_big=avatarLocation(photo.photo_id,'c');u.photo=photo;}u.status=new TLRPC.TL_userStatusOffline();return u;}
     private TLRPC.Peer peer(Models.Conversation conversation,List<Models.User> members) throws Exception{
         if(conversation.kind.equals("group")){TLRPC.TL_peerChat peer=new TLRPC.TL_peerChat();peer.chat_id=ids.local("conversation",conversation.id);return peer;}
         String self=repository.vault.load().getString("user_id");for(Models.User user:members){if(!user.id.equals(self)){TLRPC.TL_peerUser peer=new TLRPC.TL_peerUser();peer.user_id=ids.local("user",user.id);privateConversations.put(peer.user_id,conversation.id);return peer;}}throw new IllegalStateException("private_member_missing");

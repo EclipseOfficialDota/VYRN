@@ -1,6 +1,8 @@
 # Local Android integration
 
-Latest verified checkpoint:246 named API35 checks pass:93 first,34 mutations,50 profile,16 offline,53 restart. The tested APK hash is recorded in artifacts/android-integration.json.
+Latest verified checkpoint:265 named API35 checks pass:93 first,34 mutations,67 profile,16 offline,55 restart. The tested APK hash is recorded in artifacts/android-integration.json.
+
+Static profile-picture checks present original SettingsActivity and use ImageUpdater's actual cropped-bitmap entry. They verify no local confirmation before the server, actual JPEG dimensions/current-photo metadata, native full-profile and ImageLocation mapping, original FileLoader authenticated range download/byte equality/bitmap decoding, empty EOF, unsupported video/account rejection and confirmed deletion. UserConfig and native SQLite photo IDs/routing identifier1 survive actual process restart. This does not exercise gallery/camera gestures, old-photo history, derivatives, realtime photo propagation or adversarial lifecycle/disk failures.
 
 The latest profile phase also exercises native blocking/unblocking, immutable target/flag capture at public send entry, server-confirmed block sets/counts/UserFull, paginated block-list metadata and the original PrivacyUsersActivity's actual row/load-error/Retry. A separate authenticated device session changes block state; foreground WebSocket reconciliation updates the receiving controller and native full-profile cache. Restart verifies final unblocked SQLite flags and reloads the server list. Complete offline block-list persistence, concurrent page/late-callback races and popup/gesture acceptance remain unfinished. Slot9025 is reserved for that disposable second-device session.
 
