@@ -129,8 +129,32 @@ func (s *Server) block(w http.ResponseWriter, r *http.Request) {
 		fail(w, 400, "invalid_request")
 		return
 	}
-	_, err := s.db.Exec(r.Context(), `INSERT INTO blocks(user_id,blocked_id) SELECT $1,id FROM users WHERE id=$2 ON CONFLICT DO NOTHING`, current(r).UserID, id)
+	tx, err := s.db.Begin(r.Context())
 	if err != nil {
+		s.internal(w)
+		return
+	}
+	defer tx.Rollback(r.Context())
+	tag, err := tx.Exec(r.Context(), `INSERT INTO blocks(user_id,blocked_id) SELECT $1,id FROM users WHERE id=$2 AND NOT disabled ON CONFLICT DO NOTHING`, current(r).UserID, id)
+	if err != nil {
+		s.internal(w)
+		return
+	}
+	if tag.RowsAffected() == 0 {
+		var exists bool
+		if err = tx.QueryRow(r.Context(), `SELECT EXISTS(SELECT 1 FROM blocks WHERE user_id=$1 AND blocked_id=$2)`, current(r).UserID, id).Scan(&exists); err != nil {
+			s.internal(w)
+			return
+		}
+		if !exists {
+			fail(w, 404, "not_found")
+			return
+		}
+	} else if err = emit(r.Context(), tx, []string{current(r).UserID}, "block.updated", map[string]any{"user_id": id, "blocked": true}); err != nil {
+		s.internal(w)
+		return
+	}
+	if err = tx.Commit(r.Context()); err != nil {
 		s.internal(w)
 		return
 	}
@@ -138,12 +162,28 @@ func (s *Server) block(w http.ResponseWriter, r *http.Request) {
 }
 func (s *Server) unblock(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	if !validID(id) {
+	if !validID(id) || id == current(r).UserID {
 		fail(w, 400, "invalid_request")
 		return
 	}
-	_, err := s.db.Exec(r.Context(), `DELETE FROM blocks WHERE user_id=$1 AND blocked_id=$2`, current(r).UserID, id)
+	tx, err := s.db.Begin(r.Context())
 	if err != nil {
+		s.internal(w)
+		return
+	}
+	defer tx.Rollback(r.Context())
+	tag, err := tx.Exec(r.Context(), `DELETE FROM blocks WHERE user_id=$1 AND blocked_id=$2`, current(r).UserID, id)
+	if err != nil {
+		s.internal(w)
+		return
+	}
+	if tag.RowsAffected() > 0 {
+		if err = emit(r.Context(), tx, []string{current(r).UserID}, "block.updated", map[string]any{"user_id": id, "blocked": false}); err != nil {
+			s.internal(w)
+			return
+		}
+	}
+	if err = tx.Commit(r.Context()); err != nil {
 		s.internal(w)
 		return
 	}

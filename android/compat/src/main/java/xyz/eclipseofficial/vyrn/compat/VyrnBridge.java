@@ -294,13 +294,19 @@ public final class VyrnBridge {
     public static boolean dispatch(int account,TLObject request,RequestDelegate callback,RequestDelegateTimestamp timestamp,int token){
         PendingRequest pending=new PendingRequest(account,token,request instanceof TLRPC.TL_messages_sendMessage,callback,timestamp);
         if(token!=0 && REQUESTS.putIfAbsent(requestKey(account,token),pending)!=null)throw new IllegalStateException("duplicate_request_token");
-        if(request instanceof TL_account.getAuthorizations || request instanceof TL_account.resetAuthorization || request instanceof TLRPC.TL_auth_resetAuthorizations || request instanceof TL_account.updateProfile || request instanceof TLRPC.TL_users_getFullUser){
+        if(request instanceof TL_account.getAuthorizations || request instanceof TL_account.resetAuthorization || request instanceof TLRPC.TL_auth_resetAuthorizations || request instanceof TL_account.updateProfile || request instanceof TLRPC.TL_users_getFullUser || request instanceof TLRPC.TL_contacts_block || request instanceof TLRPC.TL_contacts_unblock || request instanceof TLRPC.TL_contacts_getBlocked){
             pending.sessionOrigin=UserConfig.getInstance(account).getClientUserId();
             final long hash=request instanceof TL_account.resetAuthorization?((TL_account.resetAuthorization)request).hash:0;
             final boolean revoke=request instanceof TL_account.resetAuthorization;
             final boolean revokeOthers=request instanceof TLRPC.TL_auth_resetAuthorizations;
             final boolean profile=request instanceof TL_account.updateProfile;
             final boolean fullProfile=request instanceof TLRPC.TL_users_getFullUser;
+            final boolean block=request instanceof TLRPC.TL_contacts_block,unblock=request instanceof TLRPC.TL_contacts_unblock,blocks=request instanceof TLRPC.TL_contacts_getBlocked;
+            TLRPC.InputPeer blockPeer=block?((TLRPC.TL_contacts_block)request).id:unblock?((TLRPC.TL_contacts_unblock)request).id:null;
+            final long blockTarget=blockPeer instanceof TLRPC.TL_inputPeerUser?blockPeer.user_id:0;
+            final int blockFlags=block?((TLRPC.TL_contacts_block)request).flags:unblock?((TLRPC.TL_contacts_unblock)request).flags:blocks?((TLRPC.TL_contacts_getBlocked)request).flags:0;
+            final boolean stories=block?((TLRPC.TL_contacts_block)request).my_stories_from:unblock?((TLRPC.TL_contacts_unblock)request).my_stories_from:blocks&&((TLRPC.TL_contacts_getBlocked)request).my_stories_from;
+            final int blockOffset=blocks?((TLRPC.TL_contacts_getBlocked)request).offset:0,blockLimit=blocks?((TLRPC.TL_contacts_getBlocked)request).limit:0;
             TLRPC.InputUser input=fullProfile?((TLRPC.TL_users_getFullUser)request).id:null;
             final boolean selfProfile=input instanceof TLRPC.TL_inputUserSelf;
             final long profileTarget=input instanceof TLRPC.TL_inputUser?input.user_id:0;
@@ -311,7 +317,18 @@ public final class VyrnBridge {
                 synchronized(bridge.repository.vault.guard()){
                     String user=bridge.repository.vault.load().getString("user_id");pending.user=user;
                     if(pending.sessionOrigin==0 || UserConfig.getInstance(account).getClientUserId()!=pending.sessionOrigin || bridge.ids.local("user",user)!=pending.sessionOrigin)throw new SecurityException("account_changed");
-                    if(fullProfile){
+                    if(block||unblock||blocks){
+                        if(stories||blockFlags!=0)throw new UnsupportedOperationException("story_blocking_unavailable");
+                        if(blocks){
+                            if(blockOffset<0||blockLimit<1||blockLimit>100)throw new IllegalArgumentException("invalid_block_page");
+                            Models.BlockedPage page=bridge.repository.blockedForUser(user,blockOffset,blockLimit);TLRPC.TL_contacts_blockedSlice result=new TLRPC.TL_contacts_blockedSlice();result.count=page.count;
+                            for(Models.BlockedUser item:page.users){TLRPC.User mapped=bridge.mapUser(item.user);result.users.add(mapped);TLRPC.TL_peerBlocked entry=new TLRPC.TL_peerBlocked();TLRPC.TL_peerUser peer=new TLRPC.TL_peerUser();peer.user_id=mapped.id;entry.peer_id=peer;entry.date=item.date;result.blocked.add(entry);}pending.complete(result,null);
+                        }else{
+                            if(blockTarget<=0||blockTarget==pending.sessionOrigin)throw new UnsupportedOperationException("block_target_unavailable");
+                            bridge.repository.setBlockedForUser(user,bridge.ids.remote("user",blockTarget),block);pending.complete(new TLRPC.TL_boolTrue(),null);
+                        }
+                    }
+                    else if(fullProfile){
                         if(!selfProfile && profileTarget<=0)throw new UnsupportedOperationException("profile_target_unavailable");
                         Models.Profile value=bridge.repository.profileForUser(user,selfProfile?user:bridge.ids.remote("user",profileTarget));
                         TLRPC.User mapped=bridge.mapUser(value.user);TLRPC.TL_userFull full=new TLRPC.TL_userFull();full.id=mapped.id;full.user=mapped;full.about=value.user.about;full.blocked=value.blocked;full.common_chats_count=value.commonGroups;
@@ -404,6 +421,7 @@ public final class VyrnBridge {
     }
     private Models.Conversation conversationModel(String id) throws Exception{return repository.conversationDetails(id).conversation;}
     private void applyEvent(String kind,JSONObject body) throws Exception {
+        if(kind.equals("block.updated")){applyBlockEvent(body.getString("user_id"));return;}
         if(kind.equals("conversation.updated")){applyConversationEvent(body.getString("id"),true);return;}
         if(kind.equals("member.updated")||kind.equals("member.removed")){applyConversationEvent(body.getString("conversation_id"),false);return;}
         if(!kind.startsWith("message."))return;
@@ -424,6 +442,18 @@ public final class VyrnBridge {
         CountDownLatch complete=new CountDownLatch(1);boolean[] accepted={false};
         Utilities.stageQueue.postRunnable(()->{try{accepted[0]=MessagesController.getInstance(account).processUpdateArray(updates,users,chats,true,value.date);}finally{complete.countDown();}});
         if(!complete.await(20,TimeUnit.SECONDS)||!accepted[0])throw new IllegalStateException("telegram_update_rejected");
+    }
+    private void applyBlockEvent(String target) throws Exception {
+        String owner;boolean blocked;
+        synchronized(repository.vault.guard()){owner=repository.vault.load().getString("user_id");blocked=repository.blockedForUser(owner,target);}
+        long origin=ids.local("user",owner),peer=ids.local("user",target);CountDownLatch applied=new CountDownLatch(1);boolean[] accepted={false},cached={false};
+        AndroidUtilities.runOnUIThread(()->{try{if(!repository.vault.isUser(owner)||UserConfig.getInstance(account).getClientUserId()!=origin)return;MessagesController controller=MessagesController.getInstance(account);controller.vyrnApplyPeerBlocked(origin,peer,blocked);cached[0]=controller.getUserFull(peer)!=null;accepted[0]=true;}finally{applied.countDown();}});
+        if(!applied.await(20,TimeUnit.SECONDS)||!accepted[0])throw new IllegalStateException("block_update_rejected");
+        if(cached[0]){
+            CountDownLatch stored=new CountDownLatch(1);boolean[] confirmed={false};MessagesStorage storage=MessagesStorage.getInstance(account);
+            storage.getStorageQueue().postRunnable(()->{try{java.util.HashSet<Long> peers=new java.util.HashSet<>();peers.add(peer);for(TLRPC.UserFull full:storage.loadUserInfos(peers))if(full.id==peer && full.blocked==blocked)confirmed[0]=repository.vault.isUser(owner)&&UserConfig.getInstance(account).getClientUserId()==origin;}finally{stored.countDown();}});
+            if(!stored.await(20,TimeUnit.SECONDS)||!confirmed[0])throw new IllegalStateException("block_profile_not_saved");
+        }
     }
     private void applyConversationEvent(String id,boolean refresh) throws Exception {
         String user;Models.ConversationDetails details;

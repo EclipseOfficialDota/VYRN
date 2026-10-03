@@ -223,6 +223,13 @@ Edit 'TMessagesProj/src/main/java/org/telegram/tgnet/ConnectionsManager.java' {
  $marker='private void sendRequestInternal(TLObject object, RequestDelegate onComplete, RequestDelegateTimestamp onCompleteTimestamp, QuickAckDelegate onQuickAck, WriteToSocketDelegate onWriteToSocket, int flags, int datacenterId, int connectionType, boolean immediate, int requestToken) {'
  if(!$t.Contains($marker)){throw 'Pinned request dispatch marker missing'}
  $t=$t.Replace($marker,$marker+"`n        if (xyz.eclipseofficial.vyrn.compat.VyrnBridge.dispatch(currentAccount, object, onComplete, onCompleteTimestamp, requestToken)) return;")
+ $publicRequest='public int sendRequest(final TLObject object, final RequestDelegate onComplete, final RequestDelegateTimestamp onCompleteTimestamp, final QuickAckDelegate onQuickAck, final WriteToSocketDelegate onWriteToSocket, final int flags, final int datacenterId, final int connectionType, final boolean immediate) {'
+ $publicStart=$t.IndexOf($publicRequest);$publicEnd=$t.IndexOf('    private void sendRequestInternal(', $publicStart)
+ if($publicStart -lt 0 -or $publicEnd -lt 0){throw 'Pinned public request entry missing'}
+ $publicSection=$t.Substring($publicStart,$publicEnd-$publicStart)
+ $token='final int requestToken = lastRequestToken.getAndIncrement();'
+ $publicSection=$publicSection.Replace($token,$token+"`n        if (xyz.eclipseofficial.vyrn.compat.VyrnBridge.dispatch(currentAccount, object, onComplete, onCompleteTimestamp, requestToken)) return requestToken;")
+ $t=$t.Substring(0,$publicStart)+$publicSection+$t.Substring($publicEnd)
  $t=$t -replace '(?s)public void cancelRequest\(int token, boolean notifyServer, Runnable onCancelled\) \{.*?\n    \}', 'public void cancelRequest(int token, boolean notifyServer, Runnable onCancelled) { Utilities.stageQueue.postRunnable(() -> xyz.eclipseofficial.vyrn.compat.VyrnBridge.cancelRequest(currentAccount, token, onCancelled)); }'
  $t=$t.Replace('native_cancelRequestsForGuid(currentAccount, guid);','xyz.eclipseofficial.vyrn.compat.VyrnBridge.cancelRequestsForGuid(currentAccount, guid);')
  $t=$t.Replace('native_bindRequestToGuid(currentAccount, requestToken, guid);','Utilities.stageQueue.postRunnable(() -> xyz.eclipseofficial.vyrn.compat.VyrnBridge.bindRequestToGuid(currentAccount, requestToken, guid));')
@@ -250,6 +257,51 @@ public void loadFullUser(final TLRPC.User user, int classGuid, boolean force, Ut
  if(!$fullSection.Contains($fullError)){throw 'Pinned full-profile error marker missing'}
  $fullSection=$fullSection.Replace($fullError,'AndroidUtilities.runOnUIThread(() -> { loadingFullUsers.remove(user.id); if (whenFailed != null) whenFailed.run(error); });')
  $t=$t.Substring(0,$fullStart)+$fullSection+$t.Substring($fullEnd)
+ $blocked=@'
+public void blockPeer(long id) { vyrnSetPeerBlocked(id, true, null); }
+    public void vyrnApplyPeerBlocked(long origin, long id, boolean blocked) {
+        if (origin == 0 || getUserConfig().getClientUserId() != origin || id <= 0 || id == origin) return;
+        boolean previous = blockePeers.indexOfKey(id) >= 0;
+        if (blocked) blockePeers.put(id, 1); else blockePeers.delete(id);
+        if (previous != blocked && totalBlockedCount >= 0) totalBlockedCount = Math.max(0, totalBlockedCount + (blocked ? 1 : -1));
+        TLRPC.UserFull full = getUserFull(id);
+        if (full != null && full.blocked != blocked) {
+            full.blocked = blocked; full.flags = blocked ? full.flags | 1 : full.flags & ~1;
+            getMessagesStorage().updateUserInfo(full, false);
+        }
+        getNotificationCenter().postNotificationName(NotificationCenter.blockedUsersDidLoad);
+    }
+    private void vyrnSetPeerBlocked(long id, boolean blocked, Runnable callback) {
+        final long origin = getUserConfig().getClientUserId();
+        if (origin == 0 || id <= 0 || id == origin || getUser(id) == null) return;
+        TLObject request;
+        if (blocked) { TLRPC.TL_contacts_block req = new TLRPC.TL_contacts_block(); req.id = getInputPeer(getUser(id)); request = req; }
+        else { TLRPC.TL_contacts_unblock req = new TLRPC.TL_contacts_unblock(); req.id = getInputPeer(getUser(id)); request = req; }
+        getConnectionsManager().sendRequest(request, (response, error) -> AndroidUtilities.runOnUIThread(() -> {
+            if (getUserConfig().getClientUserId() != origin) return;
+            if (error != null || !(response instanceof TLRPC.TL_boolTrue)) {
+                android.widget.Toast.makeText(ApplicationLoader.applicationContext, LocaleController.isRTL ? "عملیات انجام نشد. دوباره تلاش کنید." : "The operation failed. Try again.", android.widget.Toast.LENGTH_LONG).show(); return;
+            }
+            vyrnApplyPeerBlocked(origin, id, blocked);
+            if (callback != null) callback.run();
+        }));
+    }
+'@
+ if(!$t.Contains('    public void blockPeer(long id) {')){throw 'Pinned block-peer method missing'}
+ $t=[regex]::Replace($t,'(?s)public void blockPeer\(long id\) \{.*?\n    \}',$blocked)
+ $t=[regex]::Replace($t,'(?s)public void unblockPeer\(long id, Runnable callback\) \{.*?\n    \}','public void unblockPeer(long id, Runnable callback) { vyrnSetPeerBlocked(id, false, callback); }')
+ $blockStart=$t.IndexOf('    public void getBlockedPeers(boolean reset) {')
+ $blockEnd=$t.IndexOf('    public void deleteUserPhoto(', $blockStart)
+ if($blockStart -lt 0 -or $blockEnd -lt 0){throw 'Pinned blocked-list section missing'}
+ $blockSection=$t.Substring($blockStart,$blockEnd-$blockStart)
+ $blockSection=$blockSection.Replace('loadingBlockedPeers = true;',"loadingBlockedPeers = true; vyrnBlockedLoadFailed = false;`n        final long vyrnOrigin = getUserConfig().getClientUserId();")
+ $callback='getConnectionsManager().sendRequest(req, (response, error) -> AndroidUtilities.runOnUIThread(() -> {'
+ if(!$blockSection.Contains($callback)){throw 'Pinned blocked-list callback missing'}
+ $blockSection=$blockSection.Replace($callback,$callback+"`n            if (getUserConfig().getClientUserId() != vyrnOrigin) return;`n            loadingBlockedPeers = false; vyrnBlockedLoadFailed = response == null;`n            if (response == null) { getNotificationCenter().postNotificationName(NotificationCenter.blockedUsersDidLoad); return; }")
+ $t=$t.Substring(0,$blockStart)+$blockSection+$t.Substring($blockEnd)
+ if(!$t.Contains('public boolean loadingBlockedPeers = false;')){throw 'Pinned blocked-list state missing'}
+ $t=$t.Replace('public boolean loadingBlockedPeers = false;', 'public boolean loadingBlockedPeers = false; public boolean vyrnBlockedLoadFailed;')
+ $t=$t.Replace('        totalBlockedCount = -1;', '        totalBlockedCount = -1; vyrnBlockedLoadFailed = false;')
  $deletion='public void deleteMessages(ArrayList<Integer> messages, ArrayList<Long> randoms, TLRPC.EncryptedChat encryptedChat, long dialogId, boolean forAll, int mode, boolean cacheOnly, long taskId, TLObject taskRequest, int topicId, boolean movedToScheduled, int movedToScheduledMessageId) {'
  if(!$t.Contains($deletion)){throw 'Pinned message deletion marker missing'}
  $t=$t.Replace($deletion,$deletion+"`n        if (!cacheOnly) { xyz.eclipseofficial.vyrn.compat.VyrnBridge.deleteMessages(currentAccount, dialogId, messages, forAll, mode, topicId, encryptedChat != null || taskId != 0); return; }")
@@ -287,6 +339,28 @@ public void setDialogHistoryTTL(long did, int ttl) {
     }
 '@
  $t -replace '(?s)public void setDialogHistoryTTL\(long did, int ttl\) \{.*?\n    \}', $replacement
+}
+Edit 'TMessagesProj/src/main/java/org/telegram/ui/PrivacyUsersActivity.java' {
+ param($t)
+ $t=(& git -c "safe.directory=$($upstream.Replace('\','/'))" -C $upstream show "${pin}:TMessagesProj/src/main/java/org/telegram/ui/PrivacyUsersActivity.java") -join "`n"
+ $t=$t.Replace('emptyView.setText(LocaleController.getString(R.string.NoBlocked));',"emptyView.setText(getMessagesController().vyrnBlockedLoadFailed ? vyrnBlockLoadError() : LocaleController.getString(R.string.NoBlocked));`n            emptyView.setOnClickListener(v -> { if (getMessagesController().vyrnBlockedLoadFailed) getMessagesController().getBlockedPeers(true); });")
+ $t=$t.Replace('if (getMessagesController().totalBlockedCount < 0) {','if (getMessagesController().totalBlockedCount < 0 && !getMessagesController().vyrnBlockedLoadFailed) {')
+ $notification='} else if (id == NotificationCenter.blockedUsersDidLoad) {'
+ if(!$t.Contains($notification)){throw 'Pinned blocked-list screen notification missing'}
+ $t=$t.Replace($notification,$notification+"`n            emptyView.setText(getMessagesController().vyrnBlockedLoadFailed ? vyrnBlockLoadError() : LocaleController.getString(R.string.NoBlocked));`n            if (getMessagesController().vyrnBlockedLoadFailed) vyrnShowBlockLoadError();")
+ $retry=@'
+    private void vyrnShowBlockLoadError() {
+        if (getParentActivity() == null || getVisibleDialog() != null) return;
+        showDialog(new AlertDialog.Builder(getParentActivity()).setMessage(vyrnBlockLoadError())
+            .setPositiveButton(LocaleController.getString(R.string.Retry), (dialog, which) -> getMessagesController().getBlockedPeers(true))
+            .setNegativeButton(LocaleController.getString(R.string.Cancel), null).create());
+    }
+
+'@
+ $t=$t.Replace('    public PrivacyUsersActivity() {',$retry+'    public PrivacyUsersActivity() {')
+ $t=$t.Replace('        return fragmentView;',"        if (currentType == TYPE_BLOCKED && getMessagesController().vyrnBlockedLoadFailed) org.telegram.messenger.AndroidUtilities.runOnUIThread(this::vyrnShowBlockLoadError);`n        return fragmentView;")
+ $t=$t.Replace('    public PrivacyUsersActivity() {',"    private String vyrnBlockLoadError() { return LocaleController.isRTL ? `"بارگیری انجام نشد. برای تلاش دوباره لمس کنید.`" : `"Could not load. Tap to retry.`"; }`n    public PrivacyUsersActivity() {")
+ $t
 }
 Edit 'TMessagesProj/src/main/java/org/telegram/messenger/SendMessagesHelper.java' {
  param($t)

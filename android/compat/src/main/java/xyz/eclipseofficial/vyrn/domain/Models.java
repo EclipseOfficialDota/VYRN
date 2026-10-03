@@ -13,6 +13,14 @@ public final class Models {
         public final User user;public final boolean blocked;public final int commonGroups;
         public Profile(User user,boolean blocked,int commonGroups){this.user=user;this.blocked=blocked;this.commonGroups=commonGroups;}
     }
+    public static final class BlockedUser {
+        public final User user;public final int date;
+        public BlockedUser(User user,int date){this.user=user;this.date=date;}
+    }
+    public static final class BlockedPage {
+        public final List<BlockedUser> users;public final int count;
+        public BlockedPage(List<BlockedUser> users,int count){this.users=users;this.count=count;}
+    }
     public static final class Conversation {
         public final String id, kind, title, role;
         public final int members,disappearingSeconds;

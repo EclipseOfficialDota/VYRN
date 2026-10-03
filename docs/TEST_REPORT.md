@@ -2,6 +2,17 @@
 
 Updated: 2026-10-03. This records performed checks, not planned tests.
 
+## Native blocking and owned list checkpoint — 2026-10-03
+
+- All246 API35 checks pass:93 first,34 mutations,50 profile,16 offline,53 restart. The tested local TLS APK SHA-256 is1542a77ba6a0b04d5213563fa2eec6a179497a84245bb78f379ce75b67501a38; artifacts/android-integration.json records the actual phases and named checks.
+- Original MessagesController blocking and unblocking leave block sets, counts and loaded UserFull unchanged while the account network guard is held. Actual server success changes the native state; repeated blocking preserves the known total. Native block-list slices retain the total on an empty subsequent page and carry real names/dates. Unsupported story/self/page variants and a mismatched account fail before mutation.
+- Instrumentation presents the original PrivacyUsersActivity and verifies its blocked-user row. A real native/vault mismatch causes a visible load-error dialog while preserving the cached row. Restoring the vault and clicking the actual Retry reloads successfully. Controller unblocking waits for server confirmation before invoking its completion callback.
+- The immutable-request check sends through original public ConnectionsManager, then changes the same request's input peer, flags and story option. The operation still uses captured values. Capturing inside deferred sendRequestInternal was too late; the reproducible source overlay now dispatches at public entry.
+- A second distinct authenticated session blocks and unblocks the same peer. The receiving foreground Android instance applies both states through WebSocket reconciliation. Loaded full-profile blocked flags are verified in native SQLite, and the final unblocked cache/list state survives a real process restart.
+- Earlier backend verification passed all22 PostgreSQL API integration tests and go vet. The added test reconstructs a populated pre006 block table, repeats migration, preserves unknown old dates, checks owned page/state privacy and bounds, actual new dates, repeat no-ops, directionality and owner-only transactional events.
+- Final x86 instrumentation build and all three normal ARM debug builds pass. Signature/package/API/ABI/manifest checks verify all three normal APKs; the local CA is absent from them. Repository scanner passes122 tracked files.
+- Complete offline block-list persistence, stale/concurrent pagination, adversarial late UI callbacks/account switches, full popup/gesture acceptance, physical devices and production acceptance remain unfinished. These checks do not establish complete privacy settings or full UI E2E.
+
 ## Biography loading, retry and Unicode checkpoint — 2026-10-03
 
 - Original ChangeBioActivity now loads a missing full profile through the original controller. It disables text/Done until the originating user's real biography arrives, displays loading status and shows a localized error with actual Retry/Cancel controls on failure. The controller gains an optional UI-thread failure callback while preserving existing overloads. Fragment destruction removes its observer and cancels its bound requests; view recreation retains the original identity.

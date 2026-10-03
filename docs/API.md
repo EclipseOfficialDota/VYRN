@@ -16,7 +16,9 @@ All production endpoints require HTTPS. JSON uses UTF-8. Authentication is `Auth
 | GET `/v1/sessions` | active sessions for current user |
 | DELETE `/v1/sessions` | atomically revoke every other owned session, preserving the caller; repeatable204 response |
 | DELETE `/v1/sessions/{id}` | revoke an owned session |
-| PUT/DELETE `/v1/blocks/{id}` | block/unblock another user |
+| GET `/v1/blocks?offset=0&limit=20` | owned blocked users; limit1–100, nonnegative offset, total count retained on empty pages; public names/photo reference and actual or unknown creation date |
+| GET `/v1/blocks/{id}` | authenticated owner's current blocked state for the target UUID |
+| PUT/DELETE `/v1/blocks/{id}` | block/unblock another user after commit; repeats are no-ops, self changes are rejected |
 | GET/POST `/v1/conversations` | list or create private/group conversation with members and title; groups accept optional disappearing_seconds from0 to31536000, committed atomically with members/events |
 | GET `/v1/conversations/{id}` | member-authorized snapshot of conversation metadata and members with roles/joined_at; independent of the bounded conversation list; removed members and outsiders receive404 |
 | PATCH `/v1/conversations/{id}` | title and/or disappearing_seconds; omitted fields are preserved atomically; an empty patch is invalid; zero explicitly disables auto-delete |
@@ -51,6 +53,12 @@ Send cancellation is bound to the authenticated sender and the original conversa
 WebSocket first returns `{"type":"ready",...}`. Each `events` frame has ordered events and `cursor`. Commit events locally, then send `{"type":"ack","cursor":N}`. Heartbeat is 20 seconds; an unacknowledged batch disconnects after 45 seconds. Reconnect with bounded exponential backoff and the last committed cursor. A revoked/expired session closes the stream; refresh authentication and reconnect. Android foreground consumption now journals raw batches and cursor before acknowledgement and adapts message events. Background execution, crash recovery at every boundary and complete mapping of conversation/member/typing/reaction/receipt events remain acceptance work.
 
 Uploads: file/video/image 250 MiB, avatar 10 MiB, voice 100 MiB, user quota 2 GiB. Low disk returns 507 while text sends stay available. An unbound upload is owner-only; other members can download only after attachment to a live authorized message.
+
+## Blocked users
+
+Block-list rows omit email, administrator status and biography. Existing blocks retain an unknown `created_at`; migration006 assigns a real timestamp only to newly inserted blocks. Pages sort newest first with stable UUID ordering and place unknown dates last. A disabled target can remain in an existing list and can be unblocked; creating a new block of an absent or disabled target returns404.
+
+Actual block/unblock changes emit `block.updated` with `user_id` and `blocked` in the same transaction, only to the owner's devices. Repeated requests do not change dates or add duplicate events. Receivers read current owner-scoped state instead of replaying a stale event boolean. Original Android blocking and list requests are connected; complete offline list persistence, adversarial paging/account-switch races and all privacy settings remain unfinished.
 
 ## Group batch deletion
 

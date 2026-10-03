@@ -140,3 +140,10 @@
 - Intercept the original MessagesController remote deletion before optimistic native removal. Bind requests to the originating account/group; apply the original cache-only removal only after the entire server request succeeds. Permission errors preserve every selected native row.
 - Native history/dialog feeds use server-side live_only filtering before LIMIT, preserving stable ordinal cursors across deleted rows. Resolve replayed message events against current deletion state; a tombstone can never map to a live blank message.
 - Delete-for-me, private/scheduled/channel deletion, legacy pending-task replay, durable offline deletion intent and full screen/account-switch acceptance remain unfinished. Unsupported modes fail before local deletion; never reinterpret delete-for-me as delete-for-everyone.
+
+## 2026-10-03 — native blocking and owned block lists
+- Commit block/unblock and owner-only device events atomically. Repeat operations preserve the actual creation date and emit no duplicate events; self and unsupported story variants fail before mutation.
+- Paginate owned public user metadata with a consistent total, including an empty page beyond the end. Preserve legacy unknown dates rather than inventing a migration timestamp; disabled targets remain manageable when already blocked.
+- Update the original MessagesController block set, known count and loaded full-profile cache only after server confirmation. Preserve cached rows on list failure and offer actual Retry in the original PrivacyUsersActivity.
+- Read authoritative current state for incoming block events and verify loaded native full-profile persistence before considering the event processed. Complete offline block-list persistence and adversarial late callback/paging races remain acceptance work.
+- Capture specialized request identity and primitive fields at the public ConnectionsManager send entry, before stage-queue deferral. A caller must not mutate the queued input peer, flags or native account into a different operation. Broader generic request immutability remains unfinished.
