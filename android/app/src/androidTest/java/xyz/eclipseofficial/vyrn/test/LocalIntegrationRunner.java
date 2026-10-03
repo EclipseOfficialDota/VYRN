@@ -165,6 +165,7 @@ public final class LocalIntegrationRunner extends Instrumentation {
         stage="Telegram_dialog_adapter";
         VyrnBridge bridge=VyrnBridge.forAccount(2);
         bridge.repository.vault.save(a.vault.load());
+        TLRPC.User authenticatedUser=bridge.mapUser(a.me());onUi(()->{UserConfig.getInstance(2).setCurrentUser(authenticatedUser);MessagesController.getInstance(2).putUser(authenticatedUser,false);return UserConfig.getInstance(2).vyrnSaveCurrentUser(authenticatedUser);});
         try {
             CompletableFuture<TLObject> response=new CompletableFuture<>();
             VyrnBridge.dispatch(2,new TLRPC.TL_messages_getDialogs(),(value,error)->{if(error!=null){stage="Telegram_dialog_adapter_status_"+error.code;response.completeExceptionally(new AssertionError());}else response.complete(value);},null);
@@ -391,7 +392,7 @@ public final class LocalIntegrationRunner extends Instrumentation {
         verifyNativeTextEdit(a,state.getString("native_created_group"),state.getString("user"));verifyNativeDeletion(a,b,state.getString("native_created_group"),state.getString("user"));
     }
     private void profile() throws Exception {
-        RestRepository a=repo(9001),b=repo(9002);check(a.me().id.equals(read("vyrn-test-state.json").getString("user")),"profile_process_identity");verifyNativeProfile(a,b);verifyNameEditor(a);verifyBioEditor(a,b);verifyNativeBlocking(a,b);verifyAvatar(a,b);
+        RestRepository a=repo(9001),b=repo(9002);check(a.me().id.equals(read("vyrn-test-state.json").getString("user")),"profile_process_identity");verifyNativeProfile(a,b);verifyNameEditor(a);verifyBioEditor(a,b);verifyNativeBlocking(a,b);verifyAvatar(a,b);verifyProfileRealtime(a,b);
     }
     private <T> T onUi(java.util.concurrent.Callable<T> action) throws Exception {
         CompletableFuture<T> result=new CompletableFuture<>();AndroidUtilities.runOnUIThread(()->{try{result.complete(action.call());}catch(Throwable failure){result.completeExceptionally(failure);}});return result.get(15,TimeUnit.SECONDS);
@@ -424,12 +425,38 @@ public final class LocalIntegrationRunner extends Instrumentation {
         onUi(()->{center.addObserver(observer,NotificationCenter.fileLoaded);center.addObserver(observer,NotificationCenter.fileLoadFailed);org.telegram.messenger.FileLoader.getInstance(2).loadFile(org.telegram.messenger.ImageLocation.getForUser(2,mapped,org.telegram.messenger.ImageLocation.TYPE_BIG),mapped,"jpg",org.telegram.messenger.FileLoader.PRIORITY_NORMAL,1);return true;});
         try{File loaded=download.get(30,TimeUnit.SECONDS);byte[] raw=a.avatarBytesForUser(owner,accepted.avatarId,0,1024*1024);check(java.util.Arrays.equals(Files.readAllBytes(loaded.toPath()),raw),"native_avatar_file_download");android.graphics.Bitmap image=android.graphics.BitmapFactory.decodeFile(loaded.getAbsolutePath());check(image!=null&&image.getWidth()==320&&image.getHeight()==320,"native_avatar_bitmap_decode");image.recycle();}finally{onUi(()->{center.removeObserver(observer,NotificationCenter.fileLoaded);center.removeObserver(observer,NotificationCenter.fileLoadFailed);return true;});}
         check(a.avatarBytesForUser(owner,accepted.avatarId,metadata.size,32).length==0,"avatar_range_EOF");
+        TLRPC.TL_upload_getFile chunk=new TLRPC.TL_upload_getFile();TLRPC.TL_inputPeerPhotoFileLocation location=new TLRPC.TL_inputPeerPhotoFileLocation();location.peer=new TLRPC.TL_inputPeerSelf();location.photo_id=mapped.photo.photo_id;chunk.location=location;chunk.limit=1024;
+        CompletableFuture<Boolean> released=new CompletableFuture<>();ConnectionsManager.getInstance(2).sendRequest(chunk,(response,error)->{if(error!=null||!(response instanceof TLRPC.TL_upload_file)){released.complete(false);return;}TLRPC.TL_upload_file file=(TLRPC.TL_upload_file)response;boolean usable=file.bytes!=null&&file.bytes.limit()>0;Utilities.stageQueue.postRunnable(()->released.complete(usable&&file.bytes==null));});check(released.get(30,TimeUnit.SECONDS),"native_avatar_response_released");passed.put("native_avatar_response_released");
         TLRPC.TL_photos_uploadProfilePhoto unsupported=new TLRPC.TL_photos_uploadProfilePhoto();unsupported.flags=2;unsupported.video=new TLRPC.TL_inputFile();check(editFailure(unsupported)!=null&&a.me().avatarId.equals(accepted.avatarId),"native_avatar_video_rejected");
         JSONObject saved=bridge.repository.vault.load();try{bridge.repository.vault.save(b.vault.load());TLRPC.TL_photos_updateProfilePhoto remove=new TLRPC.TL_photos_updateProfilePhoto();remove.id=new TLRPC.TL_inputPhotoEmpty();check(editFailure(remove)!=null,"native_avatar_account_guard");}finally{bridge.repository.vault.save(saved);}check(a.me().avatarId.equals(accepted.avatarId),"avatar_failed_change_preserves_server");
         synchronized(bridge.repository.vault.guard()){onUi(()->{MessagesController.getInstance(2).deleteUserPhoto(null);return true;});check(onUi(()->UserConfig.getInstance(2).getCurrentUser().photo.photo_id==mapped.photo.photo_id),"avatar_delete_waits_for_server");}
         waitAvatar(false);check(a.me().avatarId==null,"avatar_delete_confirmed");selectAvatar(updater,android.graphics.Color.rgb(30,170,110));waitNewAvatar(0);Models.User finalUser=a.me();TLRPC.User finalMapped=bridge.mapUser(finalUser);awaitStorage(MessagesStorage.getInstance(2));TLRPC.User cached=MessagesStorage.getInstance(2).getUserSync(origin);check(cached!=null&&cached.photo.photo_id==finalMapped.photo.photo_id,"avatar_native_cache_confirmed");write("vyrn-avatar-ui.json",new JSONObject().put("user",origin).put("id",finalUser.avatarId).put("photo",finalMapped.photo.photo_id));
         onUi(()->{screen.finishFragment();return true;});
         for(String name:new String[]{"original_settings_avatar_screen","avatar_waits_for_server","avatar_server_confirmed","avatar_native_image_location","avatar_actual_dimensions","avatar_settings_native_confirmation","native_current_avatar_page","native_full_profile_avatar","native_avatar_file_download","native_avatar_bitmap_decode","avatar_range_EOF","native_avatar_video_rejected","native_avatar_account_guard","avatar_failed_change_preserves_server","avatar_delete_waits_for_server","avatar_delete_confirmed","avatar_native_cache_confirmed"})passed.put(name);
+    }
+    private void verifyProfileRealtime(RestRepository a,RestRepository b) throws Exception {
+        stage="profile_realtime";RestRepository other=repo(9025);Models.User original=a.me();String owner=original.id;
+        check(other.vault.load().getString("user_id").equals(owner)&&!other.vault.load().getString("session_id").equals(a.vault.load().getString("session_id")),"profile_distinct_device");passed.put("profile_distinct_device");
+        realtimeProfileChange(a,other,owner,new JSONObject().put("first_name","نام دستگاه دوم").put("last_name","زنده").put("about","بیو دستگاه دوم"),"other_device_profile_text");
+        android.graphics.Bitmap bitmap=android.graphics.Bitmap.createBitmap(48,48,android.graphics.Bitmap.Config.ARGB_8888);bitmap.eraseColor(android.graphics.Color.BLUE);java.io.ByteArrayOutputStream encoded=new java.io.ByteArrayOutputStream();bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG,100,encoded);bitmap.recycle();
+        String photo=other.uploadAvatarForUser(owner,encoded.toByteArray());realtimeProfileChange(a,other,owner,new JSONObject().put("avatar_id",photo),"other_device_avatar_replace");
+        realtimeProfileChange(a,other,owner,new JSONObject().put("avatar_id",JSONObject.NULL),"other_device_avatar_clear");
+        realtimeProfileChange(a,other,owner,new JSONObject().put("first_name",original.firstName).put("last_name",original.lastName).put("about",original.about).put("avatar_id",original.avatarId),"other_device_profile_restore");
+        Models.User peer=b.me();realtimeProfileChange(a,b,peer.id,new JSONObject().put("first_name","نام عضو زنده").put("about","بیو عضو زنده"),"peer_profile_text_realtime");
+        String peerPhoto=b.uploadAvatarForUser(peer.id,encoded.toByteArray());realtimeProfileChange(a,b,peer.id,new JSONObject().put("avatar_id",peerPhoto),"peer_avatar_realtime");
+        TLRPC.User mapped=VyrnBridge.forAccount(2).mapUser(a.profileForUser(owner,peer.id).user);check(mapped.photo.photo_id!=UserConfig.getInstance(2).getCurrentUser().photo.photo_id,"different_users_avatar_cache_identity");passed.put("different_users_avatar_cache_identity");
+        write("vyrn-profile-realtime.json",new JSONObject().put("peer",mapped.id).put("first",mapped.first_name).put("photo",mapped.photo.photo_id).put("about","بیو عضو زنده"));
+        other.request("POST","/v1/auth/logout",new JSONObject(),true);other.vault.clear();
+    }
+    private void realtimeProfileChange(RestRepository viewer,RestRepository writer,String target,JSONObject changes,String name) throws Exception {
+        VyrnBridge bridge=VyrnBridge.forAccount(2);long before=bridge.syncCursor();writer.updateProfileForUser(target,changes);
+        JSONObject batch=(JSONObject)viewer.request("GET","/v1/sync?cursor="+before,null,true);long cursor=0;JSONArray events=batch.getJSONArray("events");
+        for(int i=0;i<events.length();i++){JSONObject event=events.getJSONObject(i);if(event.getString("kind").equals("user.updated")&&event.getJSONObject("body").optString("user_id").equals(target))cursor=event.getLong("sequence");}
+        check(cursor>before,"profile_event_emitted");long deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(45);while(System.nanoTime()<deadline&&(bridge.syncCursor()<cursor||bridge.syncPending()!=0))Thread.sleep(100);
+        check(bridge.syncCursor()>=cursor&&bridge.syncPending()==0&&bridge.syncDead()==0,"profile_event_processed");Models.User expected=viewer.profileForUser(viewer.vault.load().getString("user_id"),target).user;TLRPC.User mapped=bridge.mapUser(expected);
+        check(onUi(()->{TLRPC.User nativeUser=MessagesController.getInstance(2).getUser(mapped.id);TLRPC.UserFull full=MessagesController.getInstance(2).getUserFull(mapped.id);return nativeUser!=null&&nativeUser.first_name.equals(expected.firstName)&&nativeUser.last_name.equals(expected.lastName)&&nativeUser.photo.photo_id==mapped.photo.photo_id&&full!=null&&full.about.equals(expected.about)&&(mapped.photo.photo_id==0?full.profile_photo==null:full.profile_photo!=null&&full.profile_photo.id==mapped.photo.photo_id);}),"profile_event_native_values");
+        if(mapped.id==UserConfig.getInstance(2).getClientUserId())check(UserConfig.getInstance(2).getCurrentUser().first_name.equals(expected.firstName)&&UserConfig.getInstance(2).getCurrentUser().photo.photo_id==mapped.photo.photo_id,"profile_event_self_config");
+        CompletableFuture<Boolean> cached=new CompletableFuture<>();MessagesStorage storage=MessagesStorage.getInstance(2);storage.getStorageQueue().postRunnable(()->{java.util.HashSet<Long> peers=new java.util.HashSet<>();peers.add(mapped.id);TLRPC.User saved=storage.getUser(mapped.id);cached.complete(saved!=null&&saved.first_name.equals(expected.firstName)&&saved.last_name.equals(expected.lastName)&&saved.photo.photo_id==mapped.photo.photo_id&&storage.loadUserInfos(peers).stream().anyMatch(full->full.id==mapped.id&&full.about.equals(expected.about)&&(mapped.photo.photo_id==0?full.profile_photo==null:full.profile_photo!=null&&full.profile_photo.id==mapped.photo.photo_id)));});check(cached.get(10,TimeUnit.SECONDS),"profile_event_native_persistence");passed.put(name);
     }
     private void waitBlocked(long peer,boolean expected) throws Exception {
         long deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(30);while(!onUi(()->(MessagesController.getInstance(2).blockePeers.indexOfKey(peer)>=0)==expected) && System.nanoTime()<deadline)Thread.sleep(50);
@@ -461,7 +488,7 @@ public final class LocalIntegrationRunner extends Instrumentation {
         repeat.id=MessagesController.getInstance(2).getInputPeer(peer.id);repeat.flags=0;repeat.my_stories_from=true;check(editFailure(repeat)!=null && !a.blockedForUser(owner,target),"native_story_block_rejected");TLRPC.TL_contacts_block self=new TLRPC.TL_contacts_block();self.id=new TLRPC.TL_inputPeerSelf();check(editFailure(self)!=null,"native_self_block_rejected");
         list.limit=101;check(editFailure(list)!=null,"native_block_page_bounds");
         RestRepository other=repo(9025);check(!other.vault.load().getString("session_id").equals(a.vault.load().getString("session_id")),"block_sync_distinct_session");other.setBlockedForUser(owner,target,true);waitBlocked(peer.id,true);check(onUi(()->MessagesController.getInstance(2).getUserFull(peer.id).blocked && MessagesController.getInstance(2).totalBlockedCount==1),"other_device_block_realtime");
-        other.setBlockedForUser(owner,target,false);waitBlocked(peer.id,false);check(onUi(()->!MessagesController.getInstance(2).getUserFull(peer.id).blocked && MessagesController.getInstance(2).totalBlockedCount==0),"other_device_unblock_realtime");other.request("POST","/v1/auth/logout",new JSONObject(),true);other.vault.clear();
+        other.setBlockedForUser(owner,target,false);waitBlocked(peer.id,false);check(onUi(()->!MessagesController.getInstance(2).getUserFull(peer.id).blocked && MessagesController.getInstance(2).totalBlockedCount==0),"other_device_unblock_realtime");
         check(blockedCache(peer.id,false),"native_unblock_profile_cache");write("vyrn-blocking-ui.json",new JSONObject().put("peer",peer.id).put("target",target));
         onUi(()->{screen.finishFragment();return true;});
         for(String name:new String[]{"native_empty_block_list","native_block_waits_for_server","native_block_confirmed","native_block_list_real_metadata","native_block_list_empty_page_count","native_block_repeat_preserves_count","original_block_list_screen_rows","native_block_load_failure_preserves_cache","original_block_list_retry","native_unblock_waits_for_server","native_unblock_callback_waits","native_unblock_confirmed","native_story_block_rejected","native_self_block_rejected","native_block_page_bounds","block_sync_distinct_session","other_device_block_realtime","other_device_unblock_realtime","native_unblock_profile_cache"})passed.put(name);
@@ -477,6 +504,7 @@ public final class LocalIntegrationRunner extends Instrumentation {
     }
     private void verifyBioEditor(RestRepository a,RestRepository b) throws Exception {
         stage="original_bio_editor";long self=UserConfig.getInstance(2).getClientUserId();
+        waitProfileEvents(a);
         TLRPC.TL_users_getFullUser request=new TLRPC.TL_users_getFullUser();request.id=new TLRPC.TL_inputUserSelf();
         TLRPC.TL_users_userFull response=(TLRPC.TL_users_userFull)nativeResponse(request);
         check(response.full_user.id==self && response.full_user.about.equals(a.me().about) && (response.full_user.flags&2)!=0 && !response.full_user.phone_calls_available && !response.full_user.video_calls_available,"native_full_profile_bio_caps");passed.put("native_full_profile_bio_caps");
@@ -505,7 +533,7 @@ public final class LocalIntegrationRunner extends Instrumentation {
         verifyBioLoadRetry(a,b,target);
     }
     private void verifyBioLoadRetry(RestRepository a,RestRepository b,String previous) throws Exception {
-        stage="bio_load_retry";long self=UserConfig.getInstance(2).getClientUserId();clearFullProfile(self);VyrnBridge bridge=VyrnBridge.forAccount(2);JSONObject original=bridge.repository.vault.load();org.telegram.ui.ChangeBioActivity editor;
+        stage="bio_load_retry";waitProfileEvents(a);long self=UserConfig.getInstance(2).getClientUserId();clearFullProfile(self);VyrnBridge bridge=VyrnBridge.forAccount(2);JSONObject original=bridge.repository.vault.load();org.telegram.ui.ChangeBioActivity editor;
         try{
             bridge.repository.vault.save(b.vault.load());editor=openBioEditor();long deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(30);
             while(!onUi(()->editor.getVisibleDialog()!=null) && System.nanoTime()<deadline)Thread.sleep(50);
@@ -561,6 +589,7 @@ public final class LocalIntegrationRunner extends Instrumentation {
     }
     private void verifyNativeProfile(RestRepository a,RestRepository b) throws Exception {
         stage="native_profile";
+        long beforeCursor=VyrnBridge.forAccount(2).syncCursor();
         TL_account.updateProfile names=new TL_account.updateProfile();names.flags=3;names.first_name="نام";names.last_name="خانوادگی";
         TLRPC.User result=(TLRPC.User)nativeResponse(names);check(result.first_name.equals("نام") && result.last_name.equals("خانوادگی") && result.id==UserConfig.getInstance(2).getClientUserId(),"native_profile_separate_names");
         TL_account.updateProfile first=new TL_account.updateProfile();first.flags=1;first.first_name="نام جدید";
@@ -569,10 +598,16 @@ public final class LocalIntegrationRunner extends Instrumentation {
         Models.User current=a.me();check(current.firstName.equals("نام جدید") && current.lastName.equals("خانوادگی") && current.about.equals("دربارهٔ VYRN"),"native_profile_bio_preserves_names");
         TL_account.updateProfile invalid=new TL_account.updateProfile();invalid.flags=3;invalid.first_name=" ";invalid.last_name="bad";check(editFailure(invalid)!=null && a.me().lastName.equals("خانوادگی"),"native_invalid_profile_preserves_server");
         VyrnBridge bridge=VyrnBridge.forAccount(2);JSONObject saved=bridge.repository.vault.load();try{bridge.repository.vault.save(b.vault.load());check(editFailure(names)!=null,"native_profile_origin_guard");}finally{bridge.repository.vault.save(saved);}
+        long target=((JSONObject)a.request("GET","/v1/sync?cursor="+beforeCursor,null,true)).getLong("cursor");long deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(45);while(System.nanoTime()<deadline&&(bridge.syncCursor()<target||bridge.syncPending()!=0))Thread.sleep(100);check(bridge.syncCursor()>=target&&bridge.syncPending()==0&&bridge.syncDead()==0,"prior_profile_events_applied");
         passed.put("native_profile_separate_names").put("native_profile_partial_name").put("native_profile_bio_preserves_names").put("native_invalid_profile_preserves_server").put("native_profile_origin_guard");
     }
     private TLObject nativeResponse(TLObject request) throws Exception {
         CompletableFuture<TLObject> result=new CompletableFuture<>();ConnectionsManager.getInstance(2).sendRequest(request,(value,error)->{if(error!=null){stage="native_request_status_"+error.code;result.completeExceptionally(new AssertionError());}else result.complete(value);});return result.get(30,TimeUnit.SECONDS);
+    }
+    private void waitProfileEvents(RestRepository viewer) throws Exception {
+        VyrnBridge bridge=VyrnBridge.forAccount(2);long target=((JSONObject)viewer.request("GET","/v1/sync?cursor="+bridge.syncCursor(),null,true)).getLong("cursor");long deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(45);
+        while(System.nanoTime()<deadline&&(bridge.syncCursor()<target||bridge.syncPending()!=0))Thread.sleep(100);
+        check(bridge.syncCursor()>=target&&bridge.syncPending()==0&&bridge.syncDead()==0,"prior_profile_events_applied");
     }
     private void verifyNativeSessions(RestRepository a,RestRepository b,JSONObject fixture) throws Exception {
         stage="native_sessions";RestRepository other=repo(9020);other.vault.clear();
@@ -1013,6 +1048,7 @@ public final class LocalIntegrationRunner extends Instrumentation {
         check(a.me().id.equals(state.getString("user")),"persisted_session");
         JSONObject blocking=read("vyrn-blocking-ui.json");check(blockedCache(blocking.getLong("peer"),false),"native_unblock_cache_after_restart");onUi(()->{MessagesController.getInstance(2).getBlockedPeers(true);return true;});waitBlockedList();check(!a.blockedForUser(state.getString("user"),blocking.getString("target")) && onUi(()->MessagesController.getInstance(2).totalBlockedCount==0 && !MessagesController.getInstance(2).vyrnBlockedLoadFailed),"native_block_list_after_restart");passed.put("native_unblock_cache_after_restart").put("native_block_list_after_restart");
         Models.User restoredProfile=a.me();JSONObject avatar=read("vyrn-avatar-ui.json");check(restoredProfile.avatarId.equals(avatar.getString("id"))&&UserConfig.getInstance(2).getCurrentUser().photo.photo_id==avatar.getLong("photo")&&UserConfig.getInstance(2).getCurrentUser().photo.dc_id==1,"avatar_user_config_after_restart");TLRPC.User avatarCached=MessagesStorage.getInstance(2).getUserSync(avatar.getLong("user"));check(avatarCached!=null&&avatarCached.photo.photo_id==avatar.getLong("photo")&&avatarCached.photo.dc_id==1,"avatar_native_cache_after_restart");passed.put("avatar_user_config_after_restart").put("avatar_native_cache_after_restart");
+        JSONObject realtimeProfile=read("vyrn-profile-realtime.json");TLRPC.User peerCached=MessagesStorage.getInstance(2).getUserSync(realtimeProfile.getLong("peer"));CompletableFuture<Boolean> peerFullCached=new CompletableFuture<>();MessagesStorage.getInstance(2).getStorageQueue().postRunnable(()->{java.util.HashSet<Long> peers=new java.util.HashSet<>();peers.add(realtimeProfile.optLong("peer"));peerFullCached.complete(MessagesStorage.getInstance(2).loadUserInfos(peers).stream().anyMatch(full->full.id==realtimeProfile.optLong("peer")&&realtimeProfile.optString("about").equals(full.about)&&full.profile_photo!=null&&full.profile_photo.id==realtimeProfile.optLong("photo")));});check(peerCached!=null&&peerCached.first_name.equals(realtimeProfile.getString("first"))&&peerCached.photo.photo_id==realtimeProfile.getLong("photo")&&peerFullCached.get(10,TimeUnit.SECONDS),"peer_profile_realtime_after_restart");passed.put("peer_profile_realtime_after_restart");
         JSONObject profile=read("vyrn-profile-ui.json");check(restoredProfile.firstName.equals(profile.getString("first")) && restoredProfile.lastName.equals(profile.getString("last")) && restoredProfile.about.equals(profile.getString("about")),"profile_names_bio_after_restart");passed.put("profile_names_bio_after_restart");
         CompletableFuture<Boolean> restoredBio=new CompletableFuture<>();MessagesStorage.getInstance(2).getStorageQueue().postRunnable(()->{java.util.HashSet<Long> ids=new java.util.HashSet<>();try{ids.add(profile.getLong("user"));restoredBio.complete(MessagesStorage.getInstance(2).loadUserInfos(ids).stream().anyMatch(info->profile.optString("about").equals(info.about)));}catch(Exception failure){restoredBio.completeExceptionally(failure);}});check(restoredBio.get(10,TimeUnit.SECONDS),"bio_editor_native_cache_after_restart");passed.put("bio_editor_native_cache_after_restart");
         TLRPC.User restoredNative=UserConfig.getInstance(2).getCurrentUser(),restoredCached=MessagesStorage.getInstance(2).getUserSync(profile.getLong("user"));

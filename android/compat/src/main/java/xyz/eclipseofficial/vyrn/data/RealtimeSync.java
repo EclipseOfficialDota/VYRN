@@ -17,7 +17,7 @@ import org.telegram.messenger.BuildConfig;
 
 /** Authenticated active-mode stream. Events and cursor are committed before acknowledgement. */
 public final class RealtimeSync implements AutoCloseable {
-    public interface Handler { void apply(String kind,JSONObject body) throws Exception; }
+    public interface Handler { void apply(String user,String kind,JSONObject body) throws Exception; }
     private final RestRepository repository;
     private final InboxStore inbox;
     private final Handler handler;
@@ -53,7 +53,7 @@ public final class RealtimeSync implements AutoCloseable {
         while(!closed){
             try{if(!user.equals(repository.vault.load().optString("user_id")))return;}catch(Exception unavailable){return;}
             InboxStore.Entry event=inbox.next(user);if(event==null)return;
-            try{handler.apply(event.kind,new JSONObject(event.body));inbox.processed(user,event.sequence);}
+            try{handler.apply(user,event.kind,new JSONObject(event.body));inbox.processed(user,event.sequence);}
             catch(Exception failure){if(inbox.retry(user,event)){scheduleProcess(user,event.attempts+1);return;}continue;}
         }
     }

@@ -112,7 +112,7 @@ public final class VyrnBridge {
             }
             if(cancelled!=null){if(result instanceof TLRPC.TL_upload_file)result.freeResources();for(Runnable task:cancelled)task.run();return;}
             if(sessionOrigin!=0 && (bridge==null || !bridge.repository.vault.isUser(user) || UserConfig.getInstance(account).getClientUserId()!=sessionOrigin)){if(response instanceof TLRPC.TL_upload_file)response.freeResources();response=null;error=new SecurityException("account_changed");}
-            TLRPC.TL_error problem=problem(error);if(callback!=null)callback.run(response,problem);if(timestamp!=null)timestamp.run(response,problem,System.currentTimeMillis());
+            TLRPC.TL_error problem=problem(error);try{if(callback!=null)callback.run(response,problem);if(timestamp!=null)timestamp.run(response,problem,System.currentTimeMillis());}finally{if(response instanceof TLRPC.TL_upload_file)response.freeResources();}
         }
     }
     public final RestRepository repository;
@@ -477,12 +477,13 @@ public final class VyrnBridge {
         }return result;
     }
     private Models.Conversation conversationModel(String id) throws Exception{return repository.conversationDetails(id).conversation;}
-    private void applyEvent(String kind,JSONObject body) throws Exception {
-        if(kind.equals("block.updated")){applyBlockEvent(body.getString("user_id"));return;}
-        if(kind.equals("conversation.updated")){applyConversationEvent(body.getString("id"),true);return;}
-        if(kind.equals("member.updated")||kind.equals("member.removed")){applyConversationEvent(body.getString("conversation_id"),false);return;}
+    private void applyEvent(String eventUser,String kind,JSONObject body) throws Exception {
+        if(!repository.vault.isUser(eventUser)||UserConfig.getInstance(account).getClientUserId()!=ids.local("user",eventUser))throw new SecurityException("event_account_changed");
+        if(kind.equals("user.updated")){applyProfileEvent(eventUser,body.getString("user_id"));return;}
+        if(kind.equals("block.updated")){applyBlockEvent(eventUser,body.getString("user_id"));return;}
+        if(kind.equals("conversation.updated")){applyConversationEvent(eventUser,body.getString("id"),true);return;}
+        if(kind.equals("member.updated")||kind.equals("member.removed")){applyConversationEvent(eventUser,body.getString("conversation_id"),false);return;}
         if(!kind.startsWith("message."))return;
-        String eventUser=repository.vault.load().getString("user_id");
         String conversation=body.getString("conversation_id"),messageId=body.getString("message_id");Models.Message value=repository.messageForUser(eventUser,messageId);
         Models.Conversation model=conversationModel(conversation);List<Models.User> members=repository.members(conversation);TLRPC.Peer destination=peer(model,members);
         ArrayList<TLRPC.User> users=new ArrayList<>();for(Models.User user:members)users.add(mapUser(user));ArrayList<TLRPC.Chat> chats=new ArrayList<>();if(model.kind.equals("group"))chats.add(chat(model));
@@ -500,9 +501,29 @@ public final class VyrnBridge {
         Utilities.stageQueue.postRunnable(()->{try{accepted[0]=MessagesController.getInstance(account).processUpdateArray(updates,users,chats,true,value.date);}finally{complete.countDown();}});
         if(!complete.await(20,TimeUnit.SECONDS)||!accepted[0])throw new IllegalStateException("telegram_update_rejected");
     }
-    private void applyBlockEvent(String target) throws Exception {
-        String owner;boolean blocked;
-        synchronized(repository.vault.guard()){owner=repository.vault.load().getString("user_id");blocked=repository.blockedForUser(owner,target);}
+    private void applyProfileEvent(String owner,String target) throws Exception {
+        long origin=ids.local("user",owner),peer=ids.local("user",target);
+        java.util.concurrent.CompletableFuture<TLRPC.UserFull> loaded=new java.util.concurrent.CompletableFuture<>();
+        TLRPC.TL_users_getFullUser request=new TLRPC.TL_users_getFullUser();
+        if(peer==origin)request.id=new TLRPC.TL_inputUserSelf();else{TLRPC.TL_inputUser input=new TLRPC.TL_inputUser();input.user_id=peer;input.access_hash=peer;request.id=input;}
+        dispatch(account,request,(response,error)->{if(error!=null||!(response instanceof TLRPC.TL_users_userFull))loaded.completeExceptionally(new IllegalStateException("profile_reload_failed"));else loaded.complete(((TLRPC.TL_users_userFull)response).full_user);},null);
+        TLRPC.UserFull full=loaded.get(30,TimeUnit.SECONDS);TLRPC.User user=full.user;
+        if(full.id!=peer)throw new SecurityException("profile_identity_changed");
+        CountDownLatch applied=new CountDownLatch(1);boolean[] accepted={false};
+        AndroidUtilities.runOnUIThread(()->{try{if(repository.vault.isUser(owner))accepted[0]=MessagesController.getInstance(account).vyrnApplyProfile(origin,full);}finally{applied.countDown();}});
+        if(!applied.await(20,TimeUnit.SECONDS)||!accepted[0])throw new IllegalStateException("profile_update_rejected");
+        CountDownLatch stored=new CountDownLatch(1);boolean[] confirmed={false};MessagesStorage storage=MessagesStorage.getInstance(account);
+        storage.getStorageQueue().postRunnable(()->{try{
+            TLRPC.User saved=storage.getUser(peer);java.util.HashSet<Long> peers=new java.util.HashSet<>();peers.add(peer);
+            for(TLRPC.UserFull info:storage.loadUserInfos(peers))if(info.id==peer&&java.util.Objects.equals(info.about,full.about)&&photoId(info.profile_photo)==photoId(full.profile_photo))confirmed[0]=saved!=null&&java.util.Objects.equals(saved.first_name,user.first_name)&&java.util.Objects.equals(saved.last_name,user.last_name)&&userPhotoId(saved)==userPhotoId(user)&&repository.vault.isUser(owner)&&UserConfig.getInstance(account).getClientUserId()==origin;
+        }finally{stored.countDown();}});
+        if(!stored.await(20,TimeUnit.SECONDS)||!confirmed[0])throw new IllegalStateException("profile_update_not_saved");
+    }
+    private static long photoId(TLRPC.Photo photo){return photo==null?0:photo.id;}
+    private static long userPhotoId(TLRPC.User user){return user.photo==null?0:user.photo.photo_id;}
+    private void applyBlockEvent(String owner,String target) throws Exception {
+        boolean blocked;
+        synchronized(repository.vault.guard()){blocked=repository.blockedForUser(owner,target);}
         long origin=ids.local("user",owner),peer=ids.local("user",target);CountDownLatch applied=new CountDownLatch(1);boolean[] accepted={false},cached={false};
         AndroidUtilities.runOnUIThread(()->{try{if(!repository.vault.isUser(owner)||UserConfig.getInstance(account).getClientUserId()!=origin)return;MessagesController controller=MessagesController.getInstance(account);controller.vyrnApplyPeerBlocked(origin,peer,blocked);cached[0]=controller.getUserFull(peer)!=null;accepted[0]=true;}finally{applied.countDown();}});
         if(!applied.await(20,TimeUnit.SECONDS)||!accepted[0])throw new IllegalStateException("block_update_rejected");
@@ -512,9 +533,9 @@ public final class VyrnBridge {
             if(!stored.await(20,TimeUnit.SECONDS)||!confirmed[0])throw new IllegalStateException("block_profile_not_saved");
         }
     }
-    private void applyConversationEvent(String id,boolean refresh) throws Exception {
-        String user;Models.ConversationDetails details;
-        synchronized(repository.vault.guard()){user=repository.vault.load().getString("user_id");details=repository.conversationDetails(id);}
+    private void applyConversationEvent(String user,String id,boolean refresh) throws Exception {
+        Models.ConversationDetails details;
+        synchronized(repository.vault.guard()){if(!repository.vault.isUser(user))throw new SecurityException("event_account_changed");details=repository.conversationDetails(id);}
         if(!details.conversation.kind.equals("group"))return;
         TLRPC.Chat group=chat(details.conversation);group.date=details.createdDate;
         ArrayList<TLRPC.Chat> chats=new ArrayList<>();chats.add(group);ArrayList<TLRPC.User> users=new ArrayList<>();for(Models.Member member:details.members)users.add(mapUser(member.user));

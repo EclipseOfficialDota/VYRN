@@ -157,3 +157,10 @@
 - Preserve the picker account/origin, suppress completion after cancellation, and leave abandoned uploads unbound for existing orphan collection. Static profile pictures do not enable video, bot, fallback or contact-photo variants.
 - Delete the observed current media UUID under the owner row lock. A newer replacement returns409; repeated removal of an already empty profile is a no-op. Native caches change after acceptance and UserConfig persistence precedes success.
 - Current-photo listing is connected; past-photo history, profile realtime propagation, thumbnail derivatives, full gallery/camera gestures and adversarial late callbacks/storage failures remain unfinished.
+
+## 2026-10-03 — foreground profile synchronization
+- Commit actual profile changes and owner/current conversation-peer events together. Transmit only the changed public user identity and reload the authorized current profile; avoid global broadcast, duplicate recipients and events for unchanged or rejected mutations.
+- Reuse the original full-profile request adapter and apply accepted fields through MessagesController's existing user/full-user caches, storage and notifications. Preserve the current user object and unchanged photo object so realtime reloads cannot replace an editor's active references. Save self UserConfig synchronously, roll back user fields if that save fails, and verify SQLite before considering the event processed.
+- Carry the immutable journal owner's identity into the event handler and recheck native/vault identity. Keep bounded retry/dead-letter behavior on application failures; do not acknowledge failed native persistence as processed.
+- Match the native download response resource contract: free unused byte buffers after callbacks while respecting disableFree when FileLoader retains a delayed chunk. Preserve cancellation and identity-rejection cleanup.
+- Discovery-only profile subscriptions, adversarial concurrent edits/account-switch/lifecycle/disk failures, background execution and complete physical-device/UI acceptance remain unfinished.

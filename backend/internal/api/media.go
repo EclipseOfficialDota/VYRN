@@ -252,6 +252,10 @@ func (s *Server) deleteAvatar(w http.ResponseWriter, r *http.Request) {
 		s.internal(w)
 		return
 	}
+	if err = emitProfileUpdate(r.Context(), tx, current(r).UserID); err != nil {
+		s.internal(w)
+		return
+	}
 	if err = tx.Commit(r.Context()); err != nil {
 		s.internal(w)
 		return

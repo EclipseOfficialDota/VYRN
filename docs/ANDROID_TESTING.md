@@ -1,6 +1,8 @@
 # Local Android integration
 
-Latest verified checkpoint:265 named API35 checks pass:93 first,34 mutations,67 profile,16 offline,55 restart. The tested APK hash is recorded in artifacts/android-integration.json.
+Latest verified checkpoint:275 named API35 checks pass:93 first,34 mutations,76 profile,16 offline,56 restart. The tested APK hash is recorded in artifacts/android-integration.json.
+
+Foreground profile checks use the real distinct session in slot9025 for other-device name/bio edits, avatar replacement, clearing and restoration, then verify a shared-group peer's name/bio/avatar. Actual receiving controller, UserConfig and native SQLite data match; peer profile data survives process restart. The controller preserves existing user and unchanged photo references while applying accepted data. Completed events are drained before controlled empty-cache bio fixtures, preserving all loading/error/Retry assertions. The second device logs out after profile checks. One receiving emulator and API writers are not complete two-Android-device UI acceptance. A native download callback also verifies byte-buffer release after delivery; normal FileLoader download/decoding still passes.
 
 Static profile-picture checks present original SettingsActivity and use ImageUpdater's actual cropped-bitmap entry. They verify no local confirmation before the server, actual JPEG dimensions/current-photo metadata, native full-profile and ImageLocation mapping, original FileLoader authenticated range download/byte equality/bitmap decoding, empty EOF, unsupported video/account rejection and confirmed deletion. UserConfig and native SQLite photo IDs/routing identifier1 survive actual process restart. This does not exercise gallery/camera gestures, old-photo history, derivatives, realtime photo propagation or adversarial lifecycle/disk failures.
 

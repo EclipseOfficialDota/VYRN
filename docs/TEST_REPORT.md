@@ -2,6 +2,17 @@
 
 Updated: 2026-10-03. This records performed checks, not planned tests.
 
+## Foreground profile synchronization checkpoint — 2026-10-03
+
+- All275 API35 checks pass:93 first,34 mutations,76 profile,16 offline,56 restart. Tested local TLS APK SHA-256 is5b81e2d2eda19e8842944d60a7f23202ee95665b584d1d466e7326b64ba93307. The actual final report is artifacts/android-integration.json, dated2026-10-03T19:32:03.4872815Z; full_ui_e2e remains not tested.
+- All24 PostgreSQL API tests and go vet pass. New coverage verifies owner/current-conversation-peer fanout, duplicate membership deduplication, unrelated/disabled/former-peer exclusion, identity-only event bodies, unchanged/rejected mutation no-ops, replacement and conditional clear events, and rollback of both biography and avatar clearing when event persistence fails.
+- A distinct real authenticated device session changes the receiving account's names/biography, replaces its image, clears it and restores the prior values. A current group peer changes name/biography and uploads a different image. Actual WebSocket/journal cursors, controller user/full-profile data, self UserConfig and native SQLite match the server. Different users receive distinct native avatar cache IDs. The peer's name, biography and photo survive real process restart.
+- The first native-profile implementation replaced UserConfig's active user through full-profile reload. An original name-editor assertion exposed the interference. The final controller application updates the existing user/full-profile objects, preserves an unchanged photo object, saves self UserConfig synchronously with rollback on failure and verifies storage before marking the event processed. Existing name/bio save, failure, loading and Retry assertions all pass.
+- Tests now initialize native identity before foreground sync and wait for preceding accepted profile events before deliberately clearing the biography cache. The distinct session created in the first phase is retained for block and profile testing and logged out afterward; no later phase needs the removed credential fixture.
+- Native download callbacks now release unused byte buffers in finally while respecting disableFree for delayed FileLoader ownership. A real native chunk callback verifies usable bytes during delivery and release on the following stage callback; original full-image download/decoding checks still pass.
+- x86 instrumentation and all three normal ARM Debug builds pass. Signature/package/API/ABI/manifest verification passes for the normal APKs; no local CA is included. Repository scanner passes124 tracked files. Physical installation and release/R8 acceptance remain untested.
+- These checks use one receiving emulator and authenticated API writer sessions. They do not establish two physical Android clients, full rendered UI/gesture acceptance, discovery-only live subscriptions, profile history/derivatives, background execution or adversarial concurrent edits/account switches/local storage failures. The complete original production scope remains unfinished.
+
 ## Static native profile-picture checkpoint — 2026-10-03
 
 - All265 API35 checks pass:93 first,34 mutations,67 profile,16 offline,55 restart. The tested local TLS APK SHA-256 is c217393584198dff80ec0ff7f89b1c6489d2cbff81a034a7da1d6c3131317fdf; artifacts/android-integration.json records the actual phases and named checks.

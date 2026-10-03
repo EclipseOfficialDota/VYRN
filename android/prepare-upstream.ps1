@@ -259,6 +259,32 @@ public void loadFullUser(final TLRPC.User user, int classGuid, boolean force, Ut
  $t=$t.Substring(0,$fullStart)+$fullSection+$t.Substring($fullEnd)
  $blocked=@'
 public void blockPeer(long id) { vyrnSetPeerBlocked(id, true, null); }
+    public boolean vyrnApplyProfile(long origin, TLRPC.UserFull incoming) {
+        if (origin == 0 || getUserConfig().getClientUserId() != origin || incoming.user == null || incoming.id != incoming.user.id) return false;
+        TLRPC.User source = incoming.user;
+        TLRPC.User user = source.id == origin ? getUserConfig().getCurrentUser() : getUser(source.id);
+        if (user == null) user = source;
+        String first = user.first_name, last = user.last_name; int flags = user.flags;
+        TLRPC.UserProfilePhoto photo = user.photo;
+        boolean changed = !java.util.Objects.equals(first, source.first_name) || !java.util.Objects.equals(last, source.last_name) || (photo == null ? 0 : photo.photo_id) != (source.photo == null ? 0 : source.photo.photo_id);
+        user.first_name = source.first_name; user.last_name = source.last_name; user.flags = (flags & ~(2 | 4 | 32)) | (source.flags & (2 | 4 | 32));
+        if ((photo == null ? 0 : photo.photo_id) != (source.photo == null ? 0 : source.photo.photo_id) || photo == null) user.photo = source.photo;
+        if (source.id == origin && !getUserConfig().vyrnSaveCurrentUser(user)) { user.first_name = first; user.last_name = last; user.flags = flags; user.photo = photo; return false; }
+        putUser(user, false);
+        TLRPC.UserFull full = getUserFull(source.id);
+        if (full == null) full = incoming;
+        full.user = user; full.about = incoming.about; full.blocked = incoming.blocked; full.common_chats_count = incoming.common_chats_count; full.profile_photo = incoming.profile_photo;
+        full.flags = (full.flags & ~(1 | 2 | 4)) | (incoming.flags & (1 | 2 | 4));
+        fullUsers.put(user.id, full);
+        ArrayList<TLRPC.User> users = new ArrayList<>(); users.add(user); getMessagesStorage().putUsersAndChats(users, null, false, true);
+        getMessagesStorage().updateUserInfo(full, false);
+        getNotificationCenter().postNotificationName(NotificationCenter.userInfoDidLoad, user.id, full);
+        if (changed) {
+            getNotificationCenter().postNotificationName(NotificationCenter.updateInterfaces, UPDATE_MASK_NAME | UPDATE_MASK_AVATAR);
+            if (user.id == origin) getNotificationCenter().postNotificationName(NotificationCenter.mainUserInfoChanged);
+        }
+        return true;
+    }
     public void vyrnApplyPeerBlocked(long origin, long id, boolean blocked) {
         if (origin == 0 || getUserConfig().getClientUserId() != origin || id <= 0 || id == origin) return;
         boolean previous = blockePeers.indexOfKey(id) >= 0;

@@ -79,6 +79,11 @@ func (s *Server) updateProfile(w http.ResponseWriter, r *http.Request) {
 		s.internal(w)
 		return
 	}
+	previousName, previousFirst, previousLast, previousAbout := name, first, last, about
+	previousAvatar := ""
+	if avatar != nil {
+		previousAvatar = *avatar
+	}
 	if in.Name != nil {
 		first = strings.TrimSpace(*in.Name)
 		last = ""
@@ -117,11 +122,28 @@ func (s *Server) updateProfile(w http.ResponseWriter, r *http.Request) {
 		s.internal(w)
 		return
 	}
+	avatarChanged := avatar == nil && previousAvatar != "" || avatar != nil && *avatar != previousAvatar
+	if (name != previousName || first != previousFirst || last != previousLast || about != previousAbout || avatarChanged) && emitProfileUpdate(r.Context(), tx, current(r).UserID) != nil {
+		s.internal(w)
+		return
+	}
 	if err = tx.Commit(r.Context()); err != nil {
 		s.internal(w)
 		return
 	}
 	s.me(w, r)
+}
+
+func emitProfileUpdate(ctx context.Context, tx pgx.Tx, user string) error {
+	rows, err := tx.Query(ctx, `SELECT DISTINCT peer.user_id::text FROM members mine JOIN members peer ON peer.conversation_id=mine.conversation_id JOIN users u ON u.id=peer.user_id WHERE mine.user_id=$1 AND NOT u.disabled UNION SELECT $1::text`, user)
+	if err != nil {
+		return err
+	}
+	users, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		return err
+	}
+	return emit(ctx, tx, users, "user.updated", map[string]string{"user_id": user})
 }
 func (s *Server) block(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
