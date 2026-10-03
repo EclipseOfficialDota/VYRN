@@ -9,6 +9,10 @@ public final class Models {
         public User(String id, String name) { this(id,name,name,"",""); }
         public User(String id,String name,String firstName,String lastName,String about){this.id=id;this.name=name;this.firstName=firstName;this.lastName=lastName;this.about=about;}
     }
+    public static final class Profile {
+        public final User user;public final boolean blocked;public final int commonGroups;
+        public Profile(User user,boolean blocked,int commonGroups){this.user=user;this.blocked=blocked;this.commonGroups=commonGroups;}
+    }
     public static final class Conversation {
         public final String id, kind, title, role;
         public final int members,disappearingSeconds;

@@ -71,6 +71,7 @@ public final class RestRepository implements Models.Repository {
     }
     private Models.User user(JSONObject data) throws Exception{return new Models.User(data.getString("id"),data.getString("display_name"),data.optString("first_name",data.getString("display_name")),data.optString("last_name",""),data.optString("about",""));}
     public Models.User updateProfileForUser(String user,JSONObject changes) throws Exception{return user((JSONObject)requestForUser(user,"PATCH","/v1/me",changes,true));}
+    public Models.Profile profileForUser(String expected,String target) throws Exception{JSONObject data=(JSONObject)requestForUser(expected,"GET",target.equals(expected)?"/v1/me":"/v1/users/"+target,null,true);return new Models.Profile(user(data),data.getBoolean("blocked"),data.getInt("common_group_count"));}
     public List<Models.User> members(String conversation) throws Exception {
         JSONArray data=(JSONArray)request("GET","/v1/conversations/"+conversation+"/members",null,true);List<Models.User> result=new ArrayList<>();for(int i=0;i<data.length();i++)result.add(user(data.getJSONObject(i)));return result;
     }

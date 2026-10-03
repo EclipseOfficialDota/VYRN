@@ -2,6 +2,15 @@
 
 Updated: 2026-10-03. This records performed checks, not planned tests.
 
+## Original biography-editor persistence checkpoint — 2026-10-03
+
+- Authenticated profile reads now return actual viewer-specific blocked state and current common-group count. The new PostgreSQL test proves directional blocking, unrelated-viewer isolation and membership removal, without exposing public login fields. All21 API tests and go vet pass.
+- Original users.getFullUser maps immutable self/target identity through the existing origin-bound vault guard to a standard users.userFull response. Biography, blocked state and common-chat count come from the server; call capabilities remain disabled. Mandatory peer/notification structures allow the original MessagesController to load and persist the full profile.
+- Instrumentation opens the actual original ChangeBioActivity after the native controller loads the real full profile, edits its actual field and clicks Done. Holding the network guard proves unchanged cached biography and disabled Done before server confirmation. Success preserves separate names, writes the native UserFull and verifies its stored value before posting userInfoDidLoad or closing. Actual process reopen confirms the saved biography in both server and native SQLite.
+- All212 API35 checks pass:92 first,34 mutations,19 profile,16 offline,51 restart. artifacts/android-integration.json identifies the tested local TLS APK by hash. All three normal ARM Debug APKs build and pass signature/package/API/ABI/manifest verification. Scanner passes119 tracked files.
+- The earlier automatic approval review rejected starting the Android build because of account usage limits. Current account limits subsequently allowed execution, and both builds/tests actually completed. The stopped local Core, TLS proxy and emulator were restarted; Core now uses the profile-metadata binary. No production operation occurred.
+- Full visual/gesture acceptance, opening the biography editor without an already loaded full profile, disk-failure injection, adversarial account switches/late profile callbacks, profile photos/realtime and the remaining production requirements are unfinished. Physical ARM devices and release signing have not been verified.
+
 ## Original name-editor persistence checkpoint — 2026-10-03
 
 - Instrumentation presents the actual original ChangeNameActivity, edits its real fields and clicks its original Done view. A combined overlong name produces its visible error dialog, re-enables retry and preserves local/server names. A valid save while the vault's network guard is held leaves names unchanged and Done disabled; success arrives only after releasing the guard and receiving the server response.

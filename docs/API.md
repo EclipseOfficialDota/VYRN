@@ -11,7 +11,7 @@ All production endpoints require HTTPS. JSON uses UTF-8. Authentication is `Auth
 | POST `/v1/auth/recovery-code` | authenticated password recheck; replaces recovery code |
 | POST `/v1/auth/logout` | revokes current session |
 | GET/PATCH `/v1/me` | profile; partial first_name/last_name/about/owned avatar_id changes preserve omitted fields; avatar_id:null clears photo; legacy display_name resets separate names; mixing display_name with first_name/last_name is invalid |
-| GET `/v1/users/{id}` | profile by UUID, without email |
+| GET `/v1/users/{id}` | profile by UUID, without email; actual viewer-scoped blocked state and common group count |
 | GET `/v1/users/search?q=...&limit=50` | authenticated display-name discovery; maximum50 results, excludes self, disabled users and blocks in either direction; no email search or login fields |
 | GET `/v1/sessions` | active sessions for current user |
 | DELETE `/v1/sessions` | atomically revoke every other owned session, preserving the caller; repeatable204 response |
@@ -39,6 +39,8 @@ All production endpoints require HTTPS. JSON uses UTF-8. Authentication is `Auth
 | POST `/v1/media?kind=file&conversation_id=...` | raw bytes, Content-Length, optional X-Filename; encrypted=true for private attachments |
 | GET `/v1/media/{id}` | authorized download with range support |
 | GET `/health/live`, `/health/ready` | process and PostgreSQL readiness |
+
+Profile reads include `first_name`, `last_name`, `about`, `blocked` and `common_group_count`. `blocked` means the authenticated viewer has blocked the target; it does not disclose the target's block list. Common groups count current memberships shared with that viewer, excluding private conversations; self profiles return zero. Public profiles omit email and administrator status. Profile edits preserve omitted fields and validate a combined name of at most100 Unicode characters and a biography of at most280.
 
 Plaintext group payload: `{"text":"Hello"}` (optional caption). Maximum combined text/caption length: 16,384 characters. Private plaintext returns `e2ee_required`; a ciphertext-envelope schema exists, but device-key endpoints and client cryptography remain incomplete. Cross-conversation forwarding is not yet implemented; current reference validation only accepts visible messages in the same conversation.
 

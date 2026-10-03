@@ -294,12 +294,16 @@ public final class VyrnBridge {
     public static boolean dispatch(int account,TLObject request,RequestDelegate callback,RequestDelegateTimestamp timestamp,int token){
         PendingRequest pending=new PendingRequest(account,token,request instanceof TLRPC.TL_messages_sendMessage,callback,timestamp);
         if(token!=0 && REQUESTS.putIfAbsent(requestKey(account,token),pending)!=null)throw new IllegalStateException("duplicate_request_token");
-        if(request instanceof TL_account.getAuthorizations || request instanceof TL_account.resetAuthorization || request instanceof TLRPC.TL_auth_resetAuthorizations || request instanceof TL_account.updateProfile){
+        if(request instanceof TL_account.getAuthorizations || request instanceof TL_account.resetAuthorization || request instanceof TLRPC.TL_auth_resetAuthorizations || request instanceof TL_account.updateProfile || request instanceof TLRPC.TL_users_getFullUser){
             pending.sessionOrigin=UserConfig.getInstance(account).getClientUserId();
             final long hash=request instanceof TL_account.resetAuthorization?((TL_account.resetAuthorization)request).hash:0;
             final boolean revoke=request instanceof TL_account.resetAuthorization;
             final boolean revokeOthers=request instanceof TLRPC.TL_auth_resetAuthorizations;
             final boolean profile=request instanceof TL_account.updateProfile;
+            final boolean fullProfile=request instanceof TLRPC.TL_users_getFullUser;
+            TLRPC.InputUser input=fullProfile?((TLRPC.TL_users_getFullUser)request).id:null;
+            final boolean selfProfile=input instanceof TLRPC.TL_inputUserSelf;
+            final long profileTarget=input instanceof TLRPC.TL_inputUser?input.user_id:0;
             final int profileFlags=profile?((TL_account.updateProfile)request).flags:0;
             final String first=profile?((TL_account.updateProfile)request).first_name:null,last=profile?((TL_account.updateProfile)request).last_name:null,about=profile?((TL_account.updateProfile)request).about:null;
             execute(()->{try{
@@ -307,7 +311,14 @@ public final class VyrnBridge {
                 synchronized(bridge.repository.vault.guard()){
                     String user=bridge.repository.vault.load().getString("user_id");pending.user=user;
                     if(pending.sessionOrigin==0 || UserConfig.getInstance(account).getClientUserId()!=pending.sessionOrigin || bridge.ids.local("user",user)!=pending.sessionOrigin)throw new SecurityException("account_changed");
-                    if(profile){
+                    if(fullProfile){
+                        if(!selfProfile && profileTarget<=0)throw new UnsupportedOperationException("profile_target_unavailable");
+                        Models.Profile value=bridge.repository.profileForUser(user,selfProfile?user:bridge.ids.remote("user",profileTarget));
+                        TLRPC.User mapped=bridge.mapUser(value.user);TLRPC.TL_userFull full=new TLRPC.TL_userFull();full.id=mapped.id;full.user=mapped;full.about=value.user.about;full.blocked=value.blocked;full.common_chats_count=value.commonGroups;
+                        full.voice_messages_forbidden=true;full.flags=2|1048576|(full.blocked?1:0);full.settings=new TLRPC.TL_peerSettings();full.notify_settings=new TLRPC.TL_peerNotifySettings();
+                        TLRPC.TL_users_userFull result=new TLRPC.TL_users_userFull();result.full_user=full;result.users.add(mapped);pending.complete(result,null);
+                    }
+                    else if(profile){
                         if(profileFlags==0 || (profileFlags&~7)!=0 || (profileFlags&1)!=0 && first==null || (profileFlags&2)!=0 && last==null || (profileFlags&4)!=0 && about==null)throw new IllegalArgumentException("invalid_profile");
                         JSONObject changes=new JSONObject();if((profileFlags&1)!=0)changes.put("first_name",first);if((profileFlags&2)!=0)changes.put("last_name",last);if((profileFlags&4)!=0)changes.put("about",about);
                         pending.complete(bridge.mapUser(bridge.repository.updateProfileForUser(user,changes)),null);

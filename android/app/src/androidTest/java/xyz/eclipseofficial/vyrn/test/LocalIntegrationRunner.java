@@ -390,12 +390,36 @@ public final class LocalIntegrationRunner extends Instrumentation {
         verifyNativeTextEdit(a,state.getString("native_created_group"),state.getString("user"));verifyNativeDeletion(a,b,state.getString("native_created_group"),state.getString("user"));
     }
     private void profile() throws Exception {
-        RestRepository a=repo(9001),b=repo(9002);check(a.me().id.equals(read("vyrn-test-state.json").getString("user")),"profile_process_identity");verifyNativeProfile(a,b);verifyNameEditor(a);
+        RestRepository a=repo(9001),b=repo(9002);check(a.me().id.equals(read("vyrn-test-state.json").getString("user")),"profile_process_identity");verifyNativeProfile(a,b);verifyNameEditor(a);verifyBioEditor(a);
     }
     private <T> T onUi(java.util.concurrent.Callable<T> action) throws Exception {
         CompletableFuture<T> result=new CompletableFuture<>();AndroidUtilities.runOnUIThread(()->{try{result.complete(action.call());}catch(Throwable failure){result.completeExceptionally(failure);}});return result.get(15,TimeUnit.SECONDS);
     }
-    private Object editorField(org.telegram.ui.ChangeNameActivity editor,String name) throws Exception {java.lang.reflect.Field field=editor.getClass().getDeclaredField(name);field.setAccessible(true);return field.get(editor);}
+    private Object editorField(Object editor,String name) throws Exception {java.lang.reflect.Field field=editor.getClass().getDeclaredField(name);field.setAccessible(true);return field.get(editor);}
+    private void verifyBioEditor(RestRepository a) throws Exception {
+        stage="original_bio_editor";long self=UserConfig.getInstance(2).getClientUserId();
+        TLRPC.TL_users_getFullUser request=new TLRPC.TL_users_getFullUser();request.id=new TLRPC.TL_inputUserSelf();
+        TLRPC.TL_users_userFull response=(TLRPC.TL_users_userFull)nativeResponse(request);
+        check(response.full_user.id==self && response.full_user.about.equals(a.me().about) && (response.full_user.flags&2)!=0 && !response.full_user.phone_calls_available && !response.full_user.video_calls_available,"native_full_profile_bio_caps");passed.put("native_full_profile_bio_caps");
+        CompletableFuture<Boolean> loaded=new CompletableFuture<>();NotificationCenter.NotificationCenterDelegate loading=(id,account,args)->{if(((Long)args[0])==self)loaded.complete(true);};
+        onUi(()->{NotificationCenter.getInstance(2).addObserver(loading,NotificationCenter.userInfoDidLoad);MessagesController.getInstance(2).loadFullUser(UserConfig.getInstance(2).getCurrentUser(),0,true);return true;});
+        try{loaded.get(30,TimeUnit.SECONDS);}finally{onUi(()->{NotificationCenter.getInstance(2).removeObserver(loading,NotificationCenter.userInfoDidLoad);return true;});}
+        org.telegram.ui.ChangeBioActivity editor=new org.telegram.ui.ChangeBioActivity();editor.setCurrentAccount(2);boolean opened=false;long deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(5);
+        while(!opened && System.nanoTime()<deadline){opened=onUi(()->{org.telegram.ui.ActionBar.BaseFragment parent=(org.telegram.ui.ActionBar.BaseFragment)org.telegram.ui.LaunchActivity.class.getMethod("getSafeLastFragment").invoke(null);return parent!=null && parent.presentFragment(editor,false,true);});if(!opened)Thread.sleep(50);}
+        check(opened && onUi(()->((android.widget.EditText)editorField(editor,"firstNameField")).getText().toString().equals("دربارهٔ VYRN")),"bio_editor_loads_actual_profile");passed.put("bio_editor_loads_actual_profile");
+        String target="توضیحات پایدار VYRN";CompletableFuture<Boolean> saved=new CompletableFuture<>();NotificationCenter.NotificationCenterDelegate saving=(id,account,args)->{if(((Long)args[0])==self && target.equals(((TLRPC.UserFull)args[1]).about))saved.complete(true);};
+        onUi(()->{NotificationCenter.getInstance(2).addObserver(saving,NotificationCenter.userInfoDidLoad);((android.widget.EditText)editorField(editor,"firstNameField")).setText(target);return true;});
+        try{
+            synchronized(VyrnBridge.forAccount(2).repository.vault.guard()){
+                onUi(()->{((android.view.View)editorField(editor,"doneButton")).performClick();check(!((android.view.View)editorField(editor,"doneButton")).isEnabled() && MessagesController.getInstance(2).getUserFull(self).about.equals("دربارهٔ VYRN"),"bio_editor_waits_for_server");return true;});check(!saved.isDone(),"bio_editor_no_premature_confirmation");
+            }
+            saved.get(30,TimeUnit.SECONDS);
+        }finally{onUi(()->{NotificationCenter.getInstance(2).removeObserver(saving,NotificationCenter.userInfoDidLoad);return true;});}
+        Models.User profile=a.me();check(profile.about.equals(target) && profile.firstName.equals("نام نهایی") && profile.lastName.equals("آزمایش"),"bio_editor_preserves_names");
+        CompletableFuture<Boolean> cached=new CompletableFuture<>();MessagesStorage storage=MessagesStorage.getInstance(2);storage.getStorageQueue().postRunnable(()->{java.util.HashSet<Long> ids=new java.util.HashSet<>();ids.add(self);cached.complete(storage.loadUserInfos(ids).stream().anyMatch(info->info.id==self && target.equals(info.about)));});check(cached.get(10,TimeUnit.SECONDS),"bio_editor_native_cache_confirmed");
+        JSONObject fixture=read("vyrn-profile-ui.json");fixture.put("about",target);write("vyrn-profile-ui.json",fixture);
+        passed.put("bio_editor_waits_for_server").put("bio_editor_no_premature_confirmation").put("bio_editor_preserves_names").put("bio_editor_native_cache_confirmed");
+    }
     private void enterName(org.telegram.ui.ChangeNameActivity editor,String first,String last) throws Exception {
         onUi(()->{((android.widget.EditText)editorField(editor,"firstNameField")).setText(first);((android.widget.EditText)editorField(editor,"lastNameField")).setText(last);return true;});
     }
@@ -885,7 +909,8 @@ public final class LocalIntegrationRunner extends Instrumentation {
         verifyLegacyDeletionCache();
         RestRepository a=repo(9001), b=repo(9002);
         check(a.me().id.equals(state.getString("user")),"persisted_session");
-        Models.User restoredProfile=a.me();JSONObject profile=read("vyrn-profile-ui.json");check(restoredProfile.firstName.equals(profile.getString("first")) && restoredProfile.lastName.equals(profile.getString("last")) && restoredProfile.about.equals("دربارهٔ VYRN"),"profile_names_bio_after_restart");passed.put("profile_names_bio_after_restart");
+        Models.User restoredProfile=a.me();JSONObject profile=read("vyrn-profile-ui.json");check(restoredProfile.firstName.equals(profile.getString("first")) && restoredProfile.lastName.equals(profile.getString("last")) && restoredProfile.about.equals(profile.getString("about")),"profile_names_bio_after_restart");passed.put("profile_names_bio_after_restart");
+        CompletableFuture<Boolean> restoredBio=new CompletableFuture<>();MessagesStorage.getInstance(2).getStorageQueue().postRunnable(()->{java.util.HashSet<Long> ids=new java.util.HashSet<>();try{ids.add(profile.getLong("user"));restoredBio.complete(MessagesStorage.getInstance(2).loadUserInfos(ids).stream().anyMatch(info->profile.optString("about").equals(info.about)));}catch(Exception failure){restoredBio.completeExceptionally(failure);}});check(restoredBio.get(10,TimeUnit.SECONDS),"bio_editor_native_cache_after_restart");passed.put("bio_editor_native_cache_after_restart");
         TLRPC.User restoredNative=UserConfig.getInstance(2).getCurrentUser(),restoredCached=MessagesStorage.getInstance(2).getUserSync(profile.getLong("user"));
         check(restoredNative!=null && restoredNative.id==profile.getLong("user"),"name_editor_restarted_config_identity");
         check(restoredNative.first_name.equals(profile.getString("first")),"name_editor_restarted_config_first");check(restoredNative.last_name.equals(profile.getString("last")),"name_editor_restarted_config_last");

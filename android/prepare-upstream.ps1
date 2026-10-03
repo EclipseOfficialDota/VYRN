@@ -115,6 +115,42 @@ private void saveName() {
  $t=[regex]::Replace($t,'(?s)private void saveName\(\) \{.*?\n    \}',$body)
  $t
 }
+Edit 'TMessagesProj/src/main/java/org/telegram/ui/ChangeBioActivity.java' {
+ param($t)
+ $t=(& git -c "safe.directory=$($upstream.Replace('\','/'))" -C $upstream show "${pin}:TMessagesProj/src/main/java/org/telegram/ui/ChangeBioActivity.java") -join "`n"
+ $t=$t.Replace('private View doneButton;','private View doneButton; private long vyrnProfileOrigin; private boolean vyrnSaving;')
+ $t=$t.Replace('public View createView(Context context) {',"public View createView(Context context) {`n        vyrnProfileOrigin = UserConfig.getInstance(currentAccount).getClientUserId();")
+ $t=$t.Replace('private void saveName() {',"private void saveName() {`n        final long origin = vyrnProfileOrigin;`n        if (vyrnSaving || origin == 0 || UserConfig.getInstance(currentAccount).getClientUserId() != origin) return;")
+ $t=$t.Replace('final AlertDialog progressDialog = new AlertDialog',"final String previousAbout = userFull.about; final int previousFlags = userFull.flags;`n        vyrnSaving = true; doneButton.setEnabled(false);`n        final AlertDialog progressDialog = new AlertDialog")
+ $marker="userFull.about = newName;`n                    NotificationCenter.getInstance(currentAccount).postNotificationName(NotificationCenter.userInfoDidLoad, user.id, userFull);`n                    finishFragment();"
+ if(!$t.Contains($marker)){throw 'Pinned biography confirmation marker missing'}
+ $body=@'
+if (UserConfig.getInstance(currentAccount).getClientUserId() != origin || user.id != origin) { vyrnSaving = false; doneButton.setEnabled(true); return; }
+                    userFull.about = newName; userFull.flags |= 2;
+                    org.telegram.messenger.MessagesStorage storage = org.telegram.messenger.MessagesStorage.getInstance(currentAccount);
+                    storage.updateUserInfo(userFull, false);
+                    storage.getStorageQueue().postRunnable(() -> {
+                        java.util.HashSet<Long> ids = new java.util.HashSet<>(); ids.add(origin);
+                        boolean persisted = false;
+                        for (TLRPC.UserFull saved : storage.loadUserInfos(ids)) if (saved.id == origin && newName.equals(saved.about)) persisted = true;
+                        final boolean confirmed = persisted;
+                        AndroidUtilities.runOnUIThread(() -> {
+                            vyrnSaving = false; doneButton.setEnabled(true);
+                            if (UserConfig.getInstance(currentAccount).getClientUserId() != origin) return;
+                            if (!confirmed) {
+                                userFull.about = previousAbout; userFull.flags = previousFlags;
+                                AlertsCreator.showSimpleAlert(this, LocaleController.isRTL ? "توضیحات روی سرور ذخیره شد، اما ذخیرهٔ محلی انجام نشد. دوباره تلاش کنید." : "Your bio was saved on the server, but local storage failed. Try again."); return;
+                            }
+                            NotificationCenter.getInstance(currentAccount).postNotificationName(NotificationCenter.userInfoDidLoad, origin, userFull);
+                            finishFragment();
+                        });
+                    });
+'@
+ $t=$t.Replace($marker,$body)
+ $t=$t.Replace('AlertsCreator.processError(currentAccount, error, ChangeBioActivity.this, req);',"vyrnSaving = false; doneButton.setEnabled(true);`n                    if (UserConfig.getInstance(currentAccount).getClientUserId() == origin) AlertsCreator.processError(currentAccount, error, ChangeBioActivity.this, req);")
+ $t=$t.Replace('progressDialog.setOnCancelListener(dialog -> ConnectionsManager.getInstance(currentAccount).cancelRequest(reqId, true));','progressDialog.setOnCancelListener(dialog -> { vyrnSaving = false; doneButton.setEnabled(true); ConnectionsManager.getInstance(currentAccount).cancelRequest(reqId, true); });')
+ $t
+}
 Edit 'TMessagesProj/src/main/java/org/telegram/ui/SessionBottomSheet.java' {
  param($t)
  $t=(& git -c "safe.directory=$($upstream.Replace('\','/'))" -C $upstream show "${pin}:TMessagesProj/src/main/java/org/telegram/ui/SessionBottomSheet.java") -join "`n"

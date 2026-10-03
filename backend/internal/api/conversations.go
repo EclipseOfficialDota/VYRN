@@ -28,7 +28,12 @@ func (s *Server) getProfile(w http.ResponseWriter, r *http.Request, id string, s
 	var avatar *string
 	var last time.Time
 	var admin bool
-	err := s.db.QueryRow(r.Context(), `SELECT display_name,email,avatar_id::text,last_seen,admin,COALESCE(first_name,display_name),last_name,about FROM users WHERE id=$1 AND NOT disabled`, id).Scan(&name, &email, &avatar, &last, &admin, &first, &lastName, &about)
+	var blocked bool
+	var common int
+	err := s.db.QueryRow(r.Context(), `SELECT display_name,email,avatar_id::text,last_seen,admin,COALESCE(first_name,display_name),last_name,about,
+        EXISTS(SELECT 1 FROM blocks WHERE user_id=$2 AND blocked_id=users.id),
+        CASE WHEN users.id=$2 THEN 0 ELSE (SELECT count(*) FROM members a JOIN members b ON b.conversation_id=a.conversation_id JOIN conversations c ON c.id=a.conversation_id WHERE a.user_id=$2 AND b.user_id=users.id AND c.kind='group') END
+        FROM users WHERE id=$1 AND NOT disabled`, id, current(r).UserID).Scan(&name, &email, &avatar, &last, &admin, &first, &lastName, &about, &blocked, &common)
 	if err == pgx.ErrNoRows {
 		fail(w, 404, "not_found")
 		return
@@ -38,6 +43,8 @@ func (s *Server) getProfile(w http.ResponseWriter, r *http.Request, id string, s
 		return
 	}
 	out := map[string]any{"id": id, "display_name": name, "first_name": first, "last_name": lastName, "about": about, "avatar_id": avatar, "last_seen": last, "online": time.Since(last) < 45*time.Second}
+	out["blocked"] = blocked
+	out["common_group_count"] = common
 	if self {
 		out["email"] = email
 		out["admin"] = admin
