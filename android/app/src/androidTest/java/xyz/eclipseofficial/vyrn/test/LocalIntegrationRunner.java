@@ -390,23 +390,35 @@ public final class LocalIntegrationRunner extends Instrumentation {
         verifyNativeTextEdit(a,state.getString("native_created_group"),state.getString("user"));verifyNativeDeletion(a,b,state.getString("native_created_group"),state.getString("user"));
     }
     private void profile() throws Exception {
-        RestRepository a=repo(9001),b=repo(9002);check(a.me().id.equals(read("vyrn-test-state.json").getString("user")),"profile_process_identity");verifyNativeProfile(a,b);verifyNameEditor(a);verifyBioEditor(a);
+        RestRepository a=repo(9001),b=repo(9002);check(a.me().id.equals(read("vyrn-test-state.json").getString("user")),"profile_process_identity");verifyNativeProfile(a,b);verifyNameEditor(a);verifyBioEditor(a,b);
     }
     private <T> T onUi(java.util.concurrent.Callable<T> action) throws Exception {
         CompletableFuture<T> result=new CompletableFuture<>();AndroidUtilities.runOnUIThread(()->{try{result.complete(action.call());}catch(Throwable failure){result.completeExceptionally(failure);}});return result.get(15,TimeUnit.SECONDS);
     }
     private Object editorField(Object editor,String name) throws Exception {java.lang.reflect.Field field=editor.getClass().getDeclaredField(name);field.setAccessible(true);return field.get(editor);}
-    private void verifyBioEditor(RestRepository a) throws Exception {
+    private void clearFullProfile(long user) throws Exception {
+        onUi(()->{Object cache=editorField(MessagesController.getInstance(2),"fullUsers");cache.getClass().getMethod("remove",long.class).invoke(cache,user);return true;});
+    }
+    private org.telegram.ui.ChangeBioActivity openBioEditor() throws Exception {
+        org.telegram.ui.ChangeBioActivity editor=new org.telegram.ui.ChangeBioActivity();editor.setCurrentAccount(2);boolean opened=false;long deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(5);
+        while(!opened && System.nanoTime()<deadline){opened=onUi(()->{org.telegram.ui.ActionBar.BaseFragment parent=(org.telegram.ui.ActionBar.BaseFragment)org.telegram.ui.LaunchActivity.class.getMethod("getSafeLastFragment").invoke(null);return parent!=null && parent.presentFragment(editor,false,true);});if(!opened)Thread.sleep(50);}
+        check(opened,"bio_editor_presented");return editor;
+    }
+    private void verifyBioEditor(RestRepository a,RestRepository b) throws Exception {
         stage="original_bio_editor";long self=UserConfig.getInstance(2).getClientUserId();
         TLRPC.TL_users_getFullUser request=new TLRPC.TL_users_getFullUser();request.id=new TLRPC.TL_inputUserSelf();
         TLRPC.TL_users_userFull response=(TLRPC.TL_users_userFull)nativeResponse(request);
         check(response.full_user.id==self && response.full_user.about.equals(a.me().about) && (response.full_user.flags&2)!=0 && !response.full_user.phone_calls_available && !response.full_user.video_calls_available,"native_full_profile_bio_caps");passed.put("native_full_profile_bio_caps");
         CompletableFuture<Boolean> loaded=new CompletableFuture<>();NotificationCenter.NotificationCenterDelegate loading=(id,account,args)->{if(((Long)args[0])==self)loaded.complete(true);};
-        onUi(()->{NotificationCenter.getInstance(2).addObserver(loading,NotificationCenter.userInfoDidLoad);MessagesController.getInstance(2).loadFullUser(UserConfig.getInstance(2).getCurrentUser(),0,true);return true;});
-        try{loaded.get(30,TimeUnit.SECONDS);}finally{onUi(()->{NotificationCenter.getInstance(2).removeObserver(loading,NotificationCenter.userInfoDidLoad);return true;});}
-        org.telegram.ui.ChangeBioActivity editor=new org.telegram.ui.ChangeBioActivity();editor.setCurrentAccount(2);boolean opened=false;long deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(5);
-        while(!opened && System.nanoTime()<deadline){opened=onUi(()->{org.telegram.ui.ActionBar.BaseFragment parent=(org.telegram.ui.ActionBar.BaseFragment)org.telegram.ui.LaunchActivity.class.getMethod("getSafeLastFragment").invoke(null);return parent!=null && parent.presentFragment(editor,false,true);});if(!opened)Thread.sleep(50);}
-        check(opened && onUi(()->((android.widget.EditText)editorField(editor,"firstNameField")).getText().toString().equals("دربارهٔ VYRN")),"bio_editor_loads_actual_profile");passed.put("bio_editor_loads_actual_profile");
+        clearFullProfile(self);onUi(()->{NotificationCenter.getInstance(2).addObserver(loading,NotificationCenter.userInfoDidLoad);return true;});
+        org.telegram.ui.ChangeBioActivity editor;
+        try{
+            synchronized(VyrnBridge.forAccount(2).repository.vault.guard()){
+                editor=openBioEditor();check(onUi(()->!((android.widget.EditText)editorField(editor,"firstNameField")).isEnabled() && !((android.view.View)editorField(editor,"doneButton")).isEnabled()),"bio_editor_missing_cache_locked");check(!loaded.isDone(),"bio_editor_missing_cache_waits");
+            }
+            loaded.get(30,TimeUnit.SECONDS);
+        }finally{onUi(()->{NotificationCenter.getInstance(2).removeObserver(loading,NotificationCenter.userInfoDidLoad);return true;});}
+        check(onUi(()->((android.widget.EditText)editorField(editor,"firstNameField")).isEnabled() && ((android.widget.EditText)editorField(editor,"firstNameField")).getText().toString().equals("دربارهٔ VYRN")),"bio_editor_loads_actual_profile");passed.put("bio_editor_missing_cache_locked").put("bio_editor_missing_cache_waits").put("bio_editor_loads_actual_profile");
         String target="توضیحات پایدار VYRN";CompletableFuture<Boolean> saved=new CompletableFuture<>();NotificationCenter.NotificationCenterDelegate saving=(id,account,args)->{if(((Long)args[0])==self && target.equals(((TLRPC.UserFull)args[1]).about))saved.complete(true);};
         onUi(()->{NotificationCenter.getInstance(2).addObserver(saving,NotificationCenter.userInfoDidLoad);((android.widget.EditText)editorField(editor,"firstNameField")).setText(target);return true;});
         try{
@@ -419,6 +431,25 @@ public final class LocalIntegrationRunner extends Instrumentation {
         CompletableFuture<Boolean> cached=new CompletableFuture<>();MessagesStorage storage=MessagesStorage.getInstance(2);storage.getStorageQueue().postRunnable(()->{java.util.HashSet<Long> ids=new java.util.HashSet<>();ids.add(self);cached.complete(storage.loadUserInfos(ids).stream().anyMatch(info->info.id==self && target.equals(info.about)));});check(cached.get(10,TimeUnit.SECONDS),"bio_editor_native_cache_confirmed");
         JSONObject fixture=read("vyrn-profile-ui.json");fixture.put("about",target);write("vyrn-profile-ui.json",fixture);
         passed.put("bio_editor_waits_for_server").put("bio_editor_no_premature_confirmation").put("bio_editor_preserves_names").put("bio_editor_native_cache_confirmed");
+        verifyBioLoadRetry(a,b,target);
+    }
+    private void verifyBioLoadRetry(RestRepository a,RestRepository b,String previous) throws Exception {
+        stage="bio_load_retry";long self=UserConfig.getInstance(2).getClientUserId();clearFullProfile(self);VyrnBridge bridge=VyrnBridge.forAccount(2);JSONObject original=bridge.repository.vault.load();org.telegram.ui.ChangeBioActivity editor;
+        try{
+            bridge.repository.vault.save(b.vault.load());editor=openBioEditor();long deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(30);
+            while(!onUi(()->editor.getVisibleDialog()!=null) && System.nanoTime()<deadline)Thread.sleep(50);
+            check(onUi(()->editor.getVisibleDialog()!=null && !((android.widget.EditText)editorField(editor,"firstNameField")).isEnabled() && !((android.view.View)editorField(editor,"doneButton")).isEnabled()),"bio_load_failure_visible_locked");
+        }finally{bridge.repository.vault.save(original);}
+        check(a.me().about.equals(previous),"bio_load_failure_preserves_server");
+        onUi(()->{((org.telegram.ui.ActionBar.AlertDialog)editor.getVisibleDialog()).getButton(android.content.DialogInterface.BUTTON_POSITIVE).performClick();return true;});long deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(30);
+        while(!onUi(()->((android.widget.EditText)editorField(editor,"firstNameField")).isEnabled()) && System.nanoTime()<deadline)Thread.sleep(50);
+        check(onUi(()->((android.widget.EditText)editorField(editor,"firstNameField")).isEnabled() && ((android.widget.EditText)editorField(editor,"firstNameField")).getText().toString().equals(previous)),"bio_load_retry_restores_real_profile");
+        String boundary="🛰".repeat(280);onUi(()->{android.widget.EditText field=(android.widget.EditText)editorField(editor,"firstNameField");field.setText("B".repeat(281));check(field.length()==280,"bio_editor_BMP_limit_280");field.setText(boundary+"X");check(field.getText().toString().equals(boundary),"bio_editor_unicode_limit_280");field.getText().replace(2,4,"Q🛰X",1,4);check(field.getText().toString().equals(boundary),"bio_editor_selected_unicode_replacement");return true;});
+        CompletableFuture<Boolean> saved=new CompletableFuture<>();NotificationCenter.NotificationCenterDelegate observer=(id,account,args)->{if(((Long)args[0])==self && boundary.equals(((TLRPC.UserFull)args[1]).about))saved.complete(true);};
+        onUi(()->{NotificationCenter.getInstance(2).addObserver(observer,NotificationCenter.userInfoDidLoad);((android.view.View)editorField(editor,"doneButton")).performClick();return true;});
+        try{saved.get(30,TimeUnit.SECONDS);}finally{onUi(()->{NotificationCenter.getInstance(2).removeObserver(observer,NotificationCenter.userInfoDidLoad);return true;});}
+        check(a.me().about.equals(boundary),"bio_editor_boundary_server_confirmed");JSONObject fixture=read("vyrn-profile-ui.json");fixture.put("about",boundary);write("vyrn-profile-ui.json",fixture);
+        passed.put("bio_load_failure_visible_locked").put("bio_load_failure_preserves_server").put("bio_load_retry_restores_real_profile").put("bio_editor_BMP_limit_280").put("bio_editor_unicode_limit_280").put("bio_editor_selected_unicode_replacement").put("bio_editor_boundary_server_confirmed");
     }
     private void enterName(org.telegram.ui.ChangeNameActivity editor,String first,String last) throws Exception {
         onUi(()->{((android.widget.EditText)editorField(editor,"firstNameField")).setText(first);((android.widget.EditText)editorField(editor,"lastNameField")).setText(last);return true;});

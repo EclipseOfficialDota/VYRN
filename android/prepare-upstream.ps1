@@ -118,9 +118,57 @@ private void saveName() {
 Edit 'TMessagesProj/src/main/java/org/telegram/ui/ChangeBioActivity.java' {
  param($t)
  $t=(& git -c "safe.directory=$($upstream.Replace('\','/'))" -C $upstream show "${pin}:TMessagesProj/src/main/java/org/telegram/ui/ChangeBioActivity.java") -join "`n"
- $t=$t.Replace('private View doneButton;','private View doneButton; private long vyrnProfileOrigin; private boolean vyrnSaving;')
- $t=$t.Replace('public View createView(Context context) {',"public View createView(Context context) {`n        vyrnProfileOrigin = UserConfig.getInstance(currentAccount).getClientUserId();")
- $t=$t.Replace('private void saveName() {',"private void saveName() {`n        final long origin = vyrnProfileOrigin;`n        if (vyrnSaving || origin == 0 || UserConfig.getInstance(currentAccount).getClientUserId() != origin) return;")
+ $t=$t.Replace('private View doneButton;','private View doneButton; private long vyrnProfileOrigin; private boolean vyrnSaving, vyrnLoading, vyrnDestroyed;')
+ $t=$t.Replace('public View createView(Context context) {',"public View createView(Context context) {`n        if (vyrnProfileOrigin == 0) vyrnProfileOrigin = UserConfig.getInstance(currentAccount).getClientUserId();")
+ $t=$t.Replace('getMessagesController().getAboutLimit()','280')
+ $t=$t.Replace('MessagesController.getInstance(currentAccount).getUserFull(UserConfig.getInstance(currentAccount).getClientUserId())','getMessagesController().getUserFull(vyrnProfileOrigin)')
+ $t=$t.Replace('if (userFull != null && userFull.about != null) {','if (vyrnHasOrigin() && userFull != null && userFull.about != null) {')
+ $t=$t.Replace('public class ChangeBioActivity extends BaseFragment {','public class ChangeBioActivity extends BaseFragment implements NotificationCenter.NotificationCenterDelegate {')
+ $loading=@'
+    @Override public boolean onFragmentCreate() {
+        if (!super.onFragmentCreate()) return false;
+        getNotificationCenter().addObserver(this, NotificationCenter.userInfoDidLoad);
+        return true;
+    }
+    @Override public void onFragmentDestroy() {
+        vyrnDestroyed = true;
+        getNotificationCenter().removeObserver(this, NotificationCenter.userInfoDidLoad);
+        super.onFragmentDestroy();
+    }
+    private boolean vyrnHasOrigin() {
+        return !vyrnDestroyed && vyrnProfileOrigin != 0 && getUserConfig().getClientUserId() == vyrnProfileOrigin;
+    }
+    private void vyrnLoadProfile() {
+        if (vyrnLoading || !vyrnHasOrigin()) return;
+        vyrnLoading = true; firstNameField.setEnabled(false); doneButton.setEnabled(false);
+        helpTextView.setText(LocaleController.getString(R.string.Loading));
+        getMessagesController().loadFullUser(getUserConfig().getCurrentUser(), classGuid, true, null, error -> {
+            if (!vyrnHasOrigin() || !vyrnLoading) return;
+            vyrnLoading = false;
+            String message = LocaleController.isRTL ? "بارگیری پروفایل انجام نشد. دوباره تلاش کنید." : "Your profile could not be loaded. Try again.";
+            helpTextView.setText(message);
+            if (getParentActivity() != null) showDialog(new AlertDialog.Builder(getParentActivity())
+                .setMessage(message)
+                .setPositiveButton(LocaleController.getString(R.string.Retry), (dialog, which) -> vyrnLoadProfile())
+                .setNegativeButton(LocaleController.getString(R.string.Cancel), (dialog, which) -> finishFragment()).create());
+        });
+    }
+    @Override public void didReceivedNotification(int id, int account, Object... args) {
+        if (id != NotificationCenter.userInfoDidLoad || !vyrnLoading || !vyrnHasOrigin() || (Long) args[0] != vyrnProfileOrigin) return;
+        TLRPC.UserFull profile = (TLRPC.UserFull) args[1];
+        if (profile == null || profile.id != vyrnProfileOrigin) return;
+        vyrnLoading = false;
+        firstNameField.setText(profile.about == null ? "" : profile.about);
+        firstNameField.setSelection(firstNameField.length());
+        firstNameField.setEnabled(true); doneButton.setEnabled(true);
+        helpTextView.setText(AndroidUtilities.replaceTags(LocaleController.getString(R.string.UserBioInfo)));
+    }
+
+'@
+ $t=$t.Replace('    @Override'+"`n"+'    public View createView(Context context) {',$loading+'    @Override'+"`n"+'    public View createView(Context context) {')
+ $ready='        return fragmentView;'
+ $t=$t.Replace($ready,"        if (userFull == null || !vyrnHasOrigin()) { firstNameField.setEnabled(false); doneButton.setEnabled(false); vyrnLoadProfile(); }`n"+$ready)
+ $t=$t.Replace('private void saveName() {',"private void saveName() {`n        final long origin = vyrnProfileOrigin;`n        if (vyrnSaving || !firstNameField.isEnabled() || !vyrnHasOrigin()) return;")
  $t=$t.Replace('final AlertDialog progressDialog = new AlertDialog',"final String previousAbout = userFull.about; final int previousFlags = userFull.flags;`n        vyrnSaving = true; doneButton.setEnabled(false);`n        final AlertDialog progressDialog = new AlertDialog")
  $marker="userFull.about = newName;`n                    NotificationCenter.getInstance(currentAccount).postNotificationName(NotificationCenter.userInfoDidLoad, user.id, userFull);`n                    finishFragment();"
  if(!$t.Contains($marker)){throw 'Pinned biography confirmation marker missing'}
@@ -151,6 +199,15 @@ if (UserConfig.getInstance(currentAccount).getClientUserId() != origin || user.i
  $t=$t.Replace('progressDialog.setOnCancelListener(dialog -> ConnectionsManager.getInstance(currentAccount).cancelRequest(reqId, true));','progressDialog.setOnCancelListener(dialog -> { vyrnSaving = false; doneButton.setEnabled(true); ConnectionsManager.getInstance(currentAccount).cancelRequest(reqId, true); });')
  $t
 }
+Edit 'TMessagesProj/src/main/java/org/telegram/ui/Components/CodepointsLengthInputFilter.java' {
+ param($t)
+ $t=(& git -c "safe.directory=$($upstream.Replace('\','/'))" -C $upstream show "${pin}:TMessagesProj/src/main/java/org/telegram/ui/Components/CodepointsLengthInputFilter.java") -join "`n"
+ $start=$t.IndexOf('            keep += start;')
+ $end=$t.IndexOf('            return source.subSequence(start, keep);', $start)
+ if($start -lt 0 -or $end -lt 0){throw 'Pinned code-point truncation marker missing'}
+ $end+='            return source.subSequence(start, keep);'.Length
+ $t.Substring(0,$start)+'            return source.subSequence(start, Character.offsetByCodePoints(source, start, keep));'+$t.Substring($end)
+}
 Edit 'TMessagesProj/src/main/java/org/telegram/ui/SessionBottomSheet.java' {
  param($t)
  $t=(& git -c "safe.directory=$($upstream.Replace('\','/'))" -C $upstream show "${pin}:TMessagesProj/src/main/java/org/telegram/ui/SessionBottomSheet.java") -join "`n"
@@ -177,6 +234,22 @@ Edit 'TMessagesProj/src/main/java/org/telegram/tgnet/ConnectionsManager.java' {
 Edit 'TMessagesProj/src/main/java/org/telegram/messenger/MessagesController.java' {
  param($t)
  $t=(& git -c "safe.directory=$($upstream.Replace('\','/'))" -C $upstream show "${pin}:TMessagesProj/src/main/java/org/telegram/messenger/MessagesController.java") -join "`n"
+ $fullStart=$t.IndexOf('    public void loadFullUser(final TLRPC.User user, int classGuid, boolean force, Utilities.Callback<TLRPC.UserFull> whenReceivedFullUser) {')
+ $fullEnd=$t.IndexOf('    private void reloadMessages(', $fullStart)
+ if($fullStart -lt 0 -or $fullEnd -lt 0){throw 'Pinned full-profile loading section missing'}
+ $fullSection=$t.Substring($fullStart,$fullEnd-$fullStart)
+ $fullSignature='public void loadFullUser(final TLRPC.User user, int classGuid, boolean force, Utilities.Callback<TLRPC.UserFull> whenReceivedFullUser) {'
+ $fullOverload=@'
+public void loadFullUser(final TLRPC.User user, int classGuid, boolean force, Utilities.Callback<TLRPC.UserFull> whenReceivedFullUser) {
+        loadFullUser(user, classGuid, force, whenReceivedFullUser, null);
+    }
+    public void loadFullUser(final TLRPC.User user, int classGuid, boolean force, Utilities.Callback<TLRPC.UserFull> whenReceivedFullUser, Utilities.Callback<TLRPC.TL_error> whenFailed) {
+'@
+ $fullSection=$fullSection.Replace($fullSignature,$fullOverload).Replace('whenReceivedFullUser == null && (loadingFullUsers','whenReceivedFullUser == null && whenFailed == null && (loadingFullUsers')
+ $fullError='AndroidUtilities.runOnUIThread(() -> loadingFullUsers.remove(user.id));'
+ if(!$fullSection.Contains($fullError)){throw 'Pinned full-profile error marker missing'}
+ $fullSection=$fullSection.Replace($fullError,'AndroidUtilities.runOnUIThread(() -> { loadingFullUsers.remove(user.id); if (whenFailed != null) whenFailed.run(error); });')
+ $t=$t.Substring(0,$fullStart)+$fullSection+$t.Substring($fullEnd)
  $deletion='public void deleteMessages(ArrayList<Integer> messages, ArrayList<Long> randoms, TLRPC.EncryptedChat encryptedChat, long dialogId, boolean forAll, int mode, boolean cacheOnly, long taskId, TLObject taskRequest, int topicId, boolean movedToScheduled, int movedToScheduledMessageId) {'
  if(!$t.Contains($deletion)){throw 'Pinned message deletion marker missing'}
  $t=$t.Replace($deletion,$deletion+"`n        if (!cacheOnly) { xyz.eclipseofficial.vyrn.compat.VyrnBridge.deleteMessages(currentAccount, dialogId, messages, forAll, mode, topicId, encryptedChat != null || taskId != 0); return; }")

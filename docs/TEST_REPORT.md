@@ -2,6 +2,15 @@
 
 Updated: 2026-10-03. This records performed checks, not planned tests.
 
+## Biography loading, retry and Unicode checkpoint — 2026-10-03
+
+- Original ChangeBioActivity now loads a missing full profile through the original controller. It disables text/Done until the originating user's real biography arrives, displays loading status and shows a localized error with actual Retry/Cancel controls on failure. The controller gains an optional UI-thread failure callback while preserving existing overloads. Fragment destruction removes its observer and cancels its bound requests; view recreation retains the original identity.
+- Instrumentation removes the actual controller's full-user cache, opens the real editor while its account network guard is held and proves the controls remain disabled without premature completion. Releasing the guard loads the existing server biography. A real native/vault identity mismatch then exercises the load failure, visible locked controls and unchanged server value. Restoring the vault and clicking the actual Retry button reloads the biography and enables editing. Offline load failure and adversarial lifecycle/account-switch races remain unverified.
+- The screen's filter/counter now use the server's280-code-point limit. The boundary test found an upstream CodepointsLengthInputFilter bug: it counted code points but used that count as a UTF-16 substring index, truncating supplementary characters too early. The reproducible overlay uses Character.offsetByCodePoints. Real widget tests cover281 BMP characters,280 supplementary emoji plus an extra character and selected replacement with a nonzero source offset. The final280-emoji biography is accepted by the server and survives native SQLite/process reopen.
+- All221 API35 checks pass:92 first,34 mutations,28 profile,16 offline,51 restart. The latest Android report records the tested APK hash. Final x86_64 instrumentation and three normal ARM Debug APKs build successfully; signature/package/API/ABI/manifest verification passes. Scanner passes119 files. Backend unchanged from the preceding21 PostgreSQL tests/vet checkpoint.
+- The first instrumentation compilation failed because its cache fixture referenced an upstream implementation dependency not exposed to the test module. The fixture now invokes the existing native cache method reflectively without adding a dependency. The subsequent real boundary failure produced the Unicode correction above; only the final complete221-check run is recorded as passed.
+- Full visual/theme/RTL/gesture acceptance, stale profile and late callbacks, disk-failure injection, account switches, photos/realtime, physical devices and the rest of the original production scope remain open.
+
 ## Original biography-editor persistence checkpoint — 2026-10-03
 
 - Authenticated profile reads now return actual viewer-specific blocked state and current common-group count. The new PostgreSQL test proves directional blocking, unrelated-viewer isolation and membership removal, without exposing public login fields. All21 API tests and go vet pass.
