@@ -431,3 +431,11 @@ Public DNS/TLS, public APK connectivity, owner browser login, whole-host reboot 
 Full Android interactive UI E2E, complete offline incoming flows, E2EE protocol tests, background push, final release/R8 builds, physical ARM-device tests, external backup/retention/restore, production VPS reboot/DNS/TLS, TURN and load testing. Foreground repository/adapter tests do not prove Persian layout or complete multi-device synchronization.
 
 Integration tests use disposable PostgreSQL schemas and fail on unexpected status codes without printing account tokens or passwords. Test fixtures contain only artificial local data. The local backup dump is ignored and is not an external backup.
+
+## Owner logo and native login — 2026-10-04
+
+Original owner JPG preserved; transparent 1024 PNG, adaptive foreground and monochrome icon derived from its actual silhouette. Native Telegram outlined fields, typography and continuation button now style the Vyrn email/password and invite flow. Display strings and common launcher, splash, notification and QR logo resources are replaced; real URLs, package IDs and source attribution remain intact. This is not a full audit of every upstream screen.
+
+Final ARM64/ARMv7/Universal Debug build completed successfully (1m43s). All three APK signature/package/API/ABI/native-library/TLS-policy checks pass. ARM64 SHA-256: 1d51355bdf1ac93d1f80babc7398dc2464063af9109a9220050f363432ca6238. Physical ARM installation, release signing and full authentication on these builds are not verified. Public Android connectivity currently fails at app-UID DNS while emulator shell DNS succeeds; do not claim production APK acceptance. Earlier backend/integration checkpoints were not rerun for this branding change.
+
+Final fresh branding run passed all three groups; login hierarchy readiness and actual screenshot reviewed. Normal x86 Debug SHA-256: 1ef3382520daeebd37618f73c34a9e59f34f251fa352934085af68f405a60e74. Registration toggle, keyboard-open scrolling and visible email/password/name/invite fields above the continuation button were manually inspected on the 320x640 emulator. This confirms layout behavior, not completed authentication or production connectivity.

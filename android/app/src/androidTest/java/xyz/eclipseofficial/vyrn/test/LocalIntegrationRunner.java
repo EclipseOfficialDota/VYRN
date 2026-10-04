@@ -46,7 +46,7 @@ import xyz.eclipseofficial.vyrn.data.RestRepository;
 import xyz.eclipseofficial.vyrn.data.TokenVault;
 import xyz.eclipseofficial.vyrn.domain.Models;
 
-/** Runs only in the opt-in local TLS debug APK. No test secrets or test endpoints in release code. */
+/** Stateful suites require local TLS; public-connectivity is read-only. No test secrets in release code. */
 public final class LocalIntegrationRunner extends Instrumentation {
     private String phase, stage = "initialization";
     private Context context;
@@ -58,12 +58,18 @@ public final class LocalIntegrationRunner extends Instrumentation {
         context=getTargetContext();
         Bundle result=new Bundle();
         try {
+            if(phase.equals("branding")) {
+                branding();
+            } else if(phase.equals("public-connectivity")) {
+                publicConnectivity();
+            } else {
             check(BuildConfig.VYRN_API_URL.equals("https://localhost:18443"), "local_endpoint_required");
             stage="foreground_activity";
             Intent launch=new Intent(Intent.ACTION_MAIN).setClassName(context,"org.telegram.ui.LaunchActivity").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
             check(startActivitySync(launch)!=null,"foreground_activity");
             waitForIdleSync();
             if(phase.equals("signal-network-restart")){stage="signal_network_restart";SignalNetworkIntegration.restart(context,(condition,name)->{check(condition,name);passed.put(name);});} else if(phase.equals("signal-network-cleanup")){stage="signal_network_cleanup";SignalNetworkIntegration.cleanup(context);} else if(phase.equals("signal-network")){stage="signal_network";SignalNetworkIntegration.run(context,(condition,name)->{check(condition,name);passed.put(name);});} else if(phase.startsWith("signal")){stage="signal_protocol";SignalIntegration.run(context,phase,(condition,name)->{check(condition,name);passed.put(name);});} else if(phase.equals("first")) first(); else if(phase.equals("mutations")) mutations(); else if(phase.equals("profile")) profile(); else if(phase.equals("avatar")){RestRepository a=repo(9001),b=repo(9002);check(a.me().id.equals(read("vyrn-test-state.json").getString("user")),"avatar_disposable_fixture_identity");verifyAvatar(a,b);} else if(phase.equals("offline")) offline(); else if(phase.equals("restart")) restart(); else throw new IllegalArgumentException();
+            }
             result.putString("vyrn_result", "passed");
             result.putString("checks", passed.toString());
             result.putInt("process_id", android.os.Process.myPid());
@@ -78,6 +84,41 @@ public final class LocalIntegrationRunner extends Instrumentation {
             for(StackTraceElement frame:failure.getStackTrace()) if(frame.getClassName().startsWith("xyz.eclipseofficial")) trace.append(frame.toString()).append(";");
             result.putString("failure_location",trace.toString());
             finish(Activity.RESULT_CANCELED, result);
+        }
+    }
+
+    private void branding() throws Exception {
+        stage="branding";
+        check(xyz.eclipseofficial.vyrn.compat.VyrnBrand.text("Telegram تلگرام telegram").equals("Vyrn Vyrn Vyrn"),"localized_brand_names");
+        check(xyz.eclipseofficial.vyrn.compat.VyrnBrand.text("https://telegram.org org.telegram").equals("https://telegram.org org.telegram"),"technical_identifiers_preserved");
+        check(org.telegram.messenger.LocaleController.getString(org.telegram.messenger.R.string.AppName).equals("Vyrn"),"native_app_name");
+        passed.put("brand_names_and_identifiers");
+        android.graphics.Bitmap mask=xyz.eclipseofficial.vyrn.compat.VyrnBrand.renderLogo(context.getResources(),1024);
+        check(mask.getWidth()==1024&&mask.getHeight()==1024&&android.graphics.Color.alpha(mask.getPixel(0,0))==0,"transparent_logo_render");
+        try(java.io.FileOutputStream output=new java.io.FileOutputStream(file("vyrn-logo-transparent.png"))){check(mask.compress(android.graphics.Bitmap.CompressFormat.PNG,100,output),"logo_export");}
+        mask.recycle();passed.put("source_logo_transparent_export");
+        Intent launch=new Intent(Intent.ACTION_MAIN).setClassName(context,"org.telegram.ui.LaunchActivity").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        check(startActivitySync(launch)!=null,"login_activity_launch");waitForIdleSync();passed.put("login_activity_launch");
+    }
+
+    private void publicConnectivity() throws Exception {
+        check(BuildConfig.VYRN_API_URL.equals("https://api.vyrn.eclipseofficial.xyz"),"public_endpoint_required");
+        check(!NetworkSecurityPolicy.getInstance().isCleartextTrafficPermitted("api.vyrn.eclipseofficial.xyz"),"public_cleartext_disabled");
+        passed.put("public_endpoint_and_cleartext_policy");
+        stage="public_DNS";
+        check(java.net.InetAddress.getAllByName("api.vyrn.eclipseofficial.xyz").length>0,"public_DNS");
+        passed.put("public_DNS");
+        RestRepository repository=repo(9001);
+        stage="public_HTTPS_health";
+        check(((JSONObject)repository.request("GET","/health/ready",null,false)).getString("status").equals("ready"),"public_HTTPS_health");
+        passed.put("public_HTTPS_health_with_platform_trust");
+        String[] paths={"/v1/me","/v1/admin","/v1/admin/dashboard","/metrics"};
+        int[] statuses={401,404,404,404};
+        for(int i=0;i<paths.length;i++){
+            stage="public_access_boundary_"+i;
+            boolean rejected=false;
+            try{repository.request("GET",paths[i],null,false);}catch(RestRepository.ApiException error){rejected=error.status==statuses[i];}
+            check(rejected,stage);passed.put(stage);
         }
     }
 

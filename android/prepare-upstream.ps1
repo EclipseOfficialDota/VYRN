@@ -614,9 +614,84 @@ Edit 'TMessagesProj/src/main/AndroidManifest.xml' {
  $t=$t -replace 'android:backupAgent="[^"]+"',''
  $t
 }
+Edit 'TMessagesProj/src/main/java/org/telegram/messenger/LocaleController.java' {
+ param($t)
+ $t=(& git -c "safe.directory=$($upstream.Replace('\','/'))" -C $upstream show "${pin}:TMessagesProj/src/main/java/org/telegram/messenger/LocaleController.java") -join "`n"
+ $start=$t.IndexOf('    private String getStringV2(');$end=$t.IndexOf('    private Localization localizationInternalDefault;', $start)
+ if($start -lt 0 -or $end -lt 0){throw 'Pinned localization branding marker missing'}
+ $body=$t.Substring($start,$end-$start).Replace('return value;','return xyz.eclipseofficial.vyrn.compat.VyrnBrand.text(value);').Replace('return localizationInternal.getByResName(fallback);','return xyz.eclipseofficial.vyrn.compat.VyrnBrand.text(localizationInternal.getByResName(fallback));')
+ $t.Substring(0,$start)+$body+$t.Substring($end)
+}
+$logoSource=Join-Path $root 'app/src/main/res/drawable/vyrn_logo.jpg'
+$logoMask=Join-Path $root 'app/src/main/res/drawable-nodpi/vyrn_mark.png'
+$logoDir=Join-Path $upstream 'TMessagesProj/src/main/res/drawable-nodpi'
+New-Item -ItemType Directory -Path $logoDir -Force | Out-Null
+Copy-Item -LiteralPath $logoSource -Destination (Join-Path $logoDir 'vyrn_logo.jpg')
+if(Test-Path -LiteralPath $logoMask){Copy-Item -LiteralPath $logoMask -Destination (Join-Path $logoDir 'vyrn_mark.png')}
+# Replace existing resource identifiers so every native caller keeps working.
+foreach($resource in @('telegram_logo','telegram_logo_2','logo_middle','intro_tg_plane','menu_invit_telegram','ic_launcher_dr','notification','tg_splash_320','tg_splash_108','icon_plane')){
+ Get-ChildItem (Join-Path $upstream 'TMessagesProj/src/main/res') -Recurse -File | Where-Object {$_.BaseName -eq $resource -and $_.Directory.Name -like 'drawable*'} | Remove-Item
+ if(Test-Path -LiteralPath $logoMask){Copy-Item -LiteralPath $logoMask -Destination (Join-Path $logoDir ($resource+'.png'))}else{Copy-Item -LiteralPath $logoSource -Destination (Join-Path $logoDir ($resource+'.jpg'))}
+}
+if(Test-Path -LiteralPath $logoMask){
+ # Activity aliases and share targets reference the upstream launcher IDs directly.
+ foreach($launcher in @('ic_launcher','ic_launcher_round')){
+  Get-ChildItem (Join-Path $upstream 'TMessagesProj/src/main/res') -Recurse -File | Where-Object {$_.BaseName -eq $launcher -and $_.Directory.Name -like 'mipmap*'} | ForEach-Object {Remove-Item -LiteralPath $_.FullName}
+  $launcherXml='<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android"><background android:drawable="@android:color/black"/><foreground android:drawable="@drawable/vyrn_launcher_foreground"/><monochrome android:drawable="@drawable/vyrn_launcher_foreground"/></adaptive-icon>'
+  Write-Text (Join-Path $upstream ('TMessagesProj/src/main/res/mipmap-anydpi-v26/'+$launcher+'.xml')) $launcherXml
+ }
+ Copy-Item -LiteralPath (Join-Path $root 'app/src/main/res/drawable/vyrn_launcher_foreground.xml') -Destination (Join-Path $upstream 'TMessagesProj/src/main/res/drawable/vyrn_launcher_foreground.xml')
+ # Native icon previews use foreground resources even when their aliases are disabled.
+ $previews=@(Get-ChildItem (Join-Path $upstream 'TMessagesProj/src/main/res') -Recurse -File | Where-Object {$_.Directory.Name -like 'mipmap*' -and $_.BaseName -match '^icon(?:_\d+)?_foreground(?:_sa)?$'} | Select-Object -ExpandProperty BaseName -Unique)
+ foreach($preview in $previews){
+  Get-ChildItem (Join-Path $upstream 'TMessagesProj/src/main/res') -Recurse -File | Where-Object {$_.Directory.Name -like 'mipmap*' -and $_.BaseName -eq $preview} | ForEach-Object {Remove-Item -LiteralPath $_.FullName}
+  Copy-Item -LiteralPath $logoMask -Destination (Join-Path $upstream ('TMessagesProj/src/main/res/mipmap-anydpi-v26/'+$preview+'.png'))
+ }
+ $imageData=[Convert]::ToBase64String([IO.File]::ReadAllBytes($logoMask))
+ $animation=@{v='5.7.4';fr=60;ip=0;op=60;w=1024;h=1024;nm='Vyrn';ddd=0;assets=@(@{id='vyrn';w=1024;h=1024;u='';p=('data:image/png;base64,'+$imageData);e=1});layers=@(@{ddd=0;ind=1;ty=2;nm='Vyrn';refId='vyrn';sr=1;ks=@{o=@{a=0;k=100};r=@{a=0;k=0};p=@{a=0;k=@(512,512,0)};a=@{a=0;k=@(512,512,0)};s=@{a=0;k=@(100,100,100)}};ip=0;op=60;st=0;bm=0})}|ConvertTo-Json -Depth 12 -Compress
+ foreach($raw in @('plane_logo_plain','qr_code_logo')){Write-Text (Join-Path $upstream ('TMessagesProj/src/main/res/raw/'+$raw+'.json')) $animation}
+}
+Get-ChildItem (Join-Path $upstream 'TMessagesProj/src/main/res') -Recurse -Filter styles.xml | ForEach-Object {
+ $style=[IO.File]::ReadAllText($_.FullName)
+ $style=$style.Replace('<item name="android:windowSplashScreenAnimatedIcon">@drawable/tg_splash_320</item>','<item name="android:windowSplashScreenAnimatedIcon">@drawable/vyrn_launcher_foreground</item>')
+ Write-Text $_.FullName $style
+}
+Edit 'TMessagesProj/src/main/java/org/telegram/ui/DialogsActivity.java' {
+ param($t)
+ $t.Replace('logoDrawable.setBounds(0, dp(2), logoDrawable.getIntrinsicWidth(), dp(2) + logoDrawable.getIntrinsicHeight());','logoDrawable.setBounds(0, dp(2), dp(28), dp(30));')
+}
+Edit 'TMessagesProj/src/main/java/org/telegram/ui/ThemePreviewActivity.java' {param($t) $t.Replace('"Telegram Beta Chat"','"Vyrn Preview Chat"')}
+Edit 'TMessagesProj/src/main/java/org/telegram/ui/Components/ChatAttachAlertDocumentLayout.java' {param($t) $t.Replace('fs.title = "Telegram";','fs.title = "Vyrn";')}
+Edit 'TMessagesProj/src/main/java/org/telegram/ui/Components/QRCodeBottomSheet.java' {
+ param($t)
+ $t=(& git -c "safe.directory=$($upstream.Replace('\','/'))" -C $upstream show "${pin}:TMessagesProj/src/main/java/org/telegram/ui/Components/QRCodeBottomSheet.java") -join "`n"
+ $t.Replace('public void setCenterAnimation(int resId) {','public void setCenterAnimation(int resId) { if (resId == org.telegram.messenger.R.raw.qr_code_logo || resId == org.telegram.messenger.R.raw.plane_logo_plain) { iconImage.setImageBitmap(xyz.eclipseofficial.vyrn.compat.VyrnBrand.notificationBitmap(getContext())); return; }')
+}
+foreach($relative in @('TMessagesProj/src/main/java/org/telegram/messenger/NotificationsController.java','TMessagesProj/src/main/java/org/telegram/messenger/FilesMigrationService.java')){
+ $nativeBuilder=$relative.EndsWith('FilesMigrationService.java')
+ Edit $relative {
+  param($t)
+  $t=(& git -c "safe.directory=$($upstream.Replace('\','/'))" -C $upstream show "${pin}:$relative") -join "`n"
+  $icon='androidx.core.graphics.drawable.IconCompat.createWithBitmap(xyz.eclipseofficial.vyrn.compat.VyrnBrand.notificationBitmap(ApplicationLoader.applicationContext))'
+  if($nativeBuilder){$icon+='.toIcon(ApplicationLoader.applicationContext)'}
+  $t.Replace('.setSmallIcon(R.drawable.notification)',('.setSmallIcon('+$icon+')'))
+ }
+}
+Edit 'TMessagesProj/src/main/java/org/telegram/ui/IntroActivity.java' {
+ param($t)
+ $t=(& git -c "safe.directory=$($upstream.Replace('\','/'))" -C $upstream show "${pin}:TMessagesProj/src/main/java/org/telegram/ui/IntroActivity.java") -join "`n"
+ $t=$t.Replace('new LoginActivity().setIntroView(frameContainerView, startMessagingButton)','new xyz.eclipseofficial.vyrn.compat.VyrnLoginActivity()')
+ $t.Replace('logoDrawable.setBounds(0, dp(8.666f), dp(115), dp(35));','logoDrawable.setBounds(0, 0, dp(36), dp(36));')
+}
+Edit 'TMessagesProj/src/main/java/org/telegram/messenger/TelegramQRCodeWriter.java' {
+ param($t)
+ $t=(& git -c "safe.directory=$($upstream.Replace('\','/'))" -C $upstream show "${pin}:TMessagesProj/src/main/java/org/telegram/messenger/TelegramQRCodeWriter.java") -join "`n"
+ $t.Replace('SvgHelper.getBitmap(readRes(R.raw.qr_logo), imageSize, imageSize, false)','Bitmap.createScaledBitmap(xyz.eclipseofficial.vyrn.compat.VyrnBrand.notificationBitmap(ApplicationLoader.applicationContext), imageSize, imageSize, true).copy(Bitmap.Config.ARGB_8888, true)')
+}
 Get-ChildItem (Join-Path $upstream 'TMessagesProj/src/main/res') -Filter strings.xml -Recurse | ForEach-Object {
  $t=[IO.File]::ReadAllText($_.FullName)
- $t=$t -replace '(<string name="AppName">)[^<]+','$1VYRN' -replace '(<string name="AppNameBeta">)[^<]+','$1VYRN Dev'
+ $t=$t -replace '(<string name="AppName">)[^<]+','$1Vyrn' -replace '(<string name="AppNameBeta">)[^<]+','$1Vyrn Dev'
+ $t=[regex]::Replace($t,'(?s)>([^<]+)<',{param($m) '>'+([regex]::Replace($m.Groups[1].Value,'(?i)(?<![./:@\w])telegram(?![.\w])|تلگرام','Vyrn'))+'<'})
  Write-Text $_.FullName $t
 }
 Write-Output 'Pinned Telegram prepared for VYRN. Original UI retained; Telegram transport disabled.'

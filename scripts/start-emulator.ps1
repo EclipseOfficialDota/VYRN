@@ -1,4 +1,4 @@
-param([string]$Serial='emulator-5560')
+param([string]$Serial='emulator-5560',[string]$DnsServers='')
 $ErrorActionPreference='Stop'
 $root=Split-Path $PSScriptRoot -Parent
 & (Join-Path $root 'scripts/setup-emulator.ps1')
@@ -11,7 +11,9 @@ $existing=(& $adb devices) -join "`n"
 if($existing -match "(?m)^$([regex]::Escape($Serial))\s+device$"){Write-Output 'VYRN emulator is already running.';exit 0}
 if($existing -match "(?m)^emulator-"){throw 'Another emulator is connected; refusing an ambiguous test target'}
 $stdout=Join-Path $root '.local/emulator.log';$stderr=Join-Path $root '.local/emulator-error.log'
-$process=Start-Process -FilePath $emulator -ArgumentList @('-avd','vyrn_api35','-port','5560','-no-window','-no-audio','-no-boot-anim','-gpu','swiftshader_indirect','-no-snapshot-save') -WindowStyle Hidden -RedirectStandardOutput $stdout -RedirectStandardError $stderr -PassThru
+$arguments=@('-avd','vyrn_api35','-port','5560','-no-window','-no-audio','-no-boot-anim','-gpu','swiftshader_indirect','-no-snapshot-save')
+if($DnsServers){foreach($server in $DnsServers.Split(',')){$parsed=$null;if(![Net.IPAddress]::TryParse($server,[ref]$parsed)){throw 'Invalid emulator DNS server'}};$arguments+=@('-dns-server',$DnsServers)}
+$process=Start-Process -FilePath $emulator -ArgumentList $arguments -WindowStyle Hidden -RedirectStandardOutput $stdout -RedirectStandardError $stderr -PassThru
 $ready=$false
 for($attempt=0;$attempt -lt 180;$attempt++){
     if($process.HasExited){throw 'VYRN emulator exited during startup'}

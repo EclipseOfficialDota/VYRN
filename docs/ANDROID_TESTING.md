@@ -74,3 +74,16 @@ This is not complete UI E2E: login button navigation, RTL layouts, themes, media
 Development compatibility: migration003 introduces server-assigned message ordinals. APKs built before this change used fetch-order IDs. Migration of Telegram's previously populated UI cache is not validated; use a fresh development installation when testing this transition. No production upgrade compatibility is claimed. The server migration preserves existing UUIDs, orders their backfill by creation time/UUID, and continues the sequence for new messages; populated migration and repeat-migration tests pass.
 
 Historical schema4 checkpoint: the suite passed63 named checks. Schema4 adds a journal retaining the negative UI message/dialog/random IDs until cache cleanup is durably acknowledged. New checks cover populated schema3 upgrade, journal reopen, account isolation, guarded acknowledgements and retention, immutable UI identity, transaction rollback and conservative handling of unknown delivery history. The journal is not yet connected to SendMessagesHelper/cache cleanup, so these store checks do not prove interactive cancellation completion.
+
+## Owner branding checkpoint — 2026-10-04
+
+Normal public-endpoint Debug builds now support a separate instrumentation APK:
+
+```powershell
+./scripts/build-android.ps1 -Abis x86_64 -Instrumentation
+./scripts/start-emulator.ps1 -DnsServers '156.154.71.22,4.2.2.3'
+./scripts/test-branding.ps1
+./scripts/test-public-android.ps1
+```
+
+Branding checks reset only the disposable vyrn_api35 app, verify localized names and the original logo mask, then require the real fresh login hierarchy before capturing its screenshot. Inspect artifacts/vyrn-login.png separately. The public connectivity test does not create accounts or reset app data. Its latest result fails at app-UID DNS (UnknownHostException); shell DNS succeeds. This supersedes the older statement that foreground launch alone resolved DNS for every build. Do not count production Android networking as verified.

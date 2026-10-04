@@ -56,7 +56,7 @@ backup:
   daily_retention: 7
   weekly_retention: 4
 assets:
-  original_logo_path: null
+  original_logo_path: assets/vyrn-logo-original.jpg
 signing:
   keystore_path: null
   keystore_path_env: VYRN_KEYSTORE_PATH

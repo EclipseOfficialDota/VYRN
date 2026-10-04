@@ -1,7 +1,7 @@
 param([ValidateSet('dev','staging','production')][string]$Flavor='dev',[ValidateSet('debug','release')][string]$BuildType='debug',[string]$Abis='arm64-v8a,armeabi-v7a',[string]$ApiUrl='https://api.vyrn.eclipseofficial.xyz',[switch]$LocalTest,[switch]$Instrumentation)
 $ErrorActionPreference='Stop'
 $root=Split-Path $PSScriptRoot -Parent
-if($Instrumentation -and !$LocalTest){throw 'Local instrumentation requires -LocalTest'}
+if($Instrumentation -and ($Flavor -ne 'dev' -or $BuildType -ne 'debug')){throw 'Instrumentation requires dev/debug'}
 if($LocalTest){
     if($Flavor -ne 'dev' -or $BuildType -ne 'debug'){throw 'Local TLS is allowed only for dev/debug'}
     if(!(Test-Path (Join-Path $root '.local/android-test-res/raw/vyrn_dev_ca.crt'))){throw 'Run setup-dev-tls.ps1 first'}
