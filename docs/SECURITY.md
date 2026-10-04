@@ -12,13 +12,14 @@
 - Membership-based permissions, quota and disk reserve checks, private media authorization and path-safe UUID storage keys.
 - Android token encryption through Android Keystore and standard AES-GCM; production/Android cleartext disabled.
 - Authenticated device-only public-key publication, immutable identity/address binding, optimistic key versions, key-ID reuse/rotation-rollback rejection and atomic one-time EC prekey consumption. The server validates wire shape; receiving libsignal clients must verify signatures. Active unprepared devices are visible in the authorized roster. No private keys are stored by these endpoints.
+- Android initial-publication/claim services bind the user and original session through refresh, persist private keys before HTTP and recover the same publication after acknowledgement failure. Real identity signatures and strict owner/device/version/key encodings are checked before constructing a claimed Signal bundle.20 actual HTTPS/JNI checks pass, including exhausted EC keys with last-resort Kyber decryption.
 - Signed update envelope library rejects tampering, expired metadata, version rollback and unauthorized APK hosts.
 
 ## Incomplete controls — release blockers
 
 The pinned official Signal JNI and account/device-scoped Android Keystore-encrypted SQLite store now pass27 real cryptographic/storage/restart checks. Authenticated public-key publication, metadata reads and atomic one-time claims pass PostgreSQL privacy/concurrency/rollback tests. Signature verification occurs in the receiving Signal client; server fixtures only validate wire shape. The storage transaction can couple ratchet advancement and application ciphertext/cache records, but the private-chat network outbox, server fanout and verification UI are not integrated.
 
-End-to-end Signal integration, identity verification, ratchet/key rotation, device-key publication/consumption, multi-device encrypted fanout and adversarial crypto tests are not complete. Private plaintext is rejected by the backend and private sending is disabled in the initial bridge. The presence of an `encrypted` flag is never proof of E2EE.
+End-to-end Signal integration, identity verification, automatic publication/refill/key rotation, multi-device encrypted fanout and full adversarial device/network lifecycle tests are not complete. Private plaintext is rejected by the backend and private sending is disabled in the initial bridge. The presence of an `encrypted` flag is never proof of E2EE.
 
 Android background sync, durable acknowledgement handling, media encryption, signed remote configuration, updater integration, full logout key cleanup and device-revocation UI require completion. Unsupported Telegram surfaces need removal or VYRN implementations. No production penetration/security review has been claimed.
 

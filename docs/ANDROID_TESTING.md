@@ -1,5 +1,12 @@
 # Local Android integration
 
+## HTTPS Signal key exchange — 2026-10-04
+
+After building the local x86_64 instrumentation APK, run scripts/test-signal.ps1 -Network. It installs only on the named local emulator, forwards the scoped TLS endpoint and feeds disposable generated credentials/bootstrap invite through stdin into app-private storage. The fixture is removed in finally; credentials are never printed or passed as command arguments. It creates two test accounts and a private authorization relationship, publishes real keys and runs20 checks recorded in artifacts/android-signal-network.json.
+
+Coverage includes local acknowledgement-write failure after server commit/recovery, exact publication retry, forged signatures, owner/integer/version validation, consumed-key non-resurrection, exhaustion of100 EC keys with real last-resort-Kyber decryption, account/session changes and session-preserving refresh. Run scripts/test-signal.ps1 separately for27 storage/ratchet/restart checks. Both pass on local APK SHA-256 26bd7401767dba2049405d1137fefb28d0e4ef08f9d6e89e94b5118f5a429127. Do not run emulator harnesses concurrently. Two stores on one emulator and local decryption after HTTPS key exchange are not server ciphertext fanout or full private UI acceptance.
+The complete original275-check harness also passes on this APK; the final report is dated2026-10-04T04:29:52.0099938Z. Normal ARM64/ARMv7/Universal Debug builds pass APK verification, but physical installation and release/R8 remain untested. Historical checkpoints below retain their earlier hashes and scope.
+
 Latest Signal run passes27 checks (21 initial,6 restart), including four initial-publication checks for private-key persistence, consumed-key retry, exact store-reopen retry and missing-publication protection. Latest local TLS APK SHA-256: aa56cde1143e184aceea83b48d1a773d1ef244fddabc16b133e5d18a1039beb0. Publication HTTP/UI/refill/rotation remains unconnected. The23-check and275-check same-APK evidence below is the preceding checkpoint, not the current Signal report.
 
 ## Signal foundation checkpoint — 2026-10-04

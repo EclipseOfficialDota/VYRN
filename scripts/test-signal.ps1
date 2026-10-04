@@ -1,4 +1,4 @@
-param([string]$Serial='emulator-5560')
+param([string]$Serial='emulator-5560',[switch]$Network)
 $ErrorActionPreference='Stop'
 $root=Split-Path $PSScriptRoot -Parent
 $adb=Join-Path $root '.tools/android-sdk/platform-tools/adb.exe'
@@ -11,8 +11,28 @@ foreach($path in @($apk,$testApk)){
     $output=(& $adb -s $Serial install -r -t $path) -join "`n"
     if($LASTEXITCODE -ne 0 -or $output -notmatch 'Success'){throw 'Signal test APK installation failed'}
 }
+$phases=@('signal','signal-restart')
+$report='android-signal.json'
+try {
+if($Network){
+    $phases=@('signal-network');$report='android-signal-network.json'
+    & $adb -s $Serial reverse tcp:18443 tcp:18443
+    if($LASTEXITCODE -ne 0){throw 'Local TLS forwarding failed'}
+    & $adb -s $Serial shell run-as $package mkdir -p files
+    if($LASTEXITCODE -ne 0){throw 'App-private test directory unavailable'}
+    $settings=@{}
+    foreach($line in [IO.File]::ReadAllLines((Join-Path $root '.local/dev.env'))){if($line -match '^([A-Z_]+)=(.*)$'){$settings[$matches[1]]=$matches[2]}}
+    $fixture=@{email=('signal-'+[guid]::NewGuid().ToString('N')+'@vyrn.local');password=[Convert]::ToBase64String([Security.Cryptography.RandomNumberGenerator]::GetBytes(32));invite=$settings.VYRN_BOOTSTRAP_INVITE}
+    if(!$fixture.invite){throw 'Local bootstrap invite unavailable'}
+    $start=[Diagnostics.ProcessStartInfo]::new($adb);$start.UseShellExecute=$false;$start.RedirectStandardInput=$true;$start.RedirectStandardOutput=$true;$start.RedirectStandardError=$true;$start.CreateNoWindow=$true
+    foreach($argument in @('-s',$Serial,'shell','-T','run-as',$package,'sh','-c',"'cat > files/vyrn-signal-network-fixture.json'")){$start.ArgumentList.Add($argument)}
+    $process=[Diagnostics.Process]::Start($start);$process.StandardInput.Write(($fixture | ConvertTo-Json -Compress));$process.StandardInput.Close()
+    $privateOutput=$process.StandardOutput.ReadToEnd();$privateError=$process.StandardError.ReadToEnd();$process.WaitForExit()
+    $fixture=$null;$settings=$null
+    if($process.ExitCode -ne 0){throw 'Private Signal test fixture transfer failed'}
+}
 $rounds=@()
-foreach($phase in @('signal','signal-restart')){
+foreach($phase in $phases){
     & $adb -s $Serial shell am force-stop $package
     if($LASTEXITCODE -ne 0){throw 'Test process stop failed'}
     $result=(& $adb -s $Serial shell am instrument -w -e phase $phase "$package.test/xyz.eclipseofficial.vyrn.test.LocalIntegrationRunner") -join "`n"
@@ -21,6 +41,7 @@ foreach($phase in @('signal','signal-restart')){
         $stage='instrumentation_start';$failure='unknown'
         if($result -match 'stage=([a-zA-Z0-9_]+)'){$stage=$Matches[1]}
         if($result -match 'failure_type=([a-zA-Z0-9_]+)'){$failure=$Matches[1]}
+        if($result -match 'failure_status=([0-9]+)'){$failure+=" HTTP $($Matches[1])"}
         throw "Signal integration failed at $stage ($failure)"
     }
     if($result -notmatch 'checks=(\[[^\r\n]*\])'){throw 'Signal report missing'}
@@ -30,5 +51,7 @@ foreach($phase in @('signal','signal-restart')){
     if($rounds.Count -gt 0 -and $rounds[0].process_id -eq $processId){throw 'Signal process restart was not exercised'}
     $rounds+=@{phase=$phase;checks=$checks;process_id=$processId;result='passed'}
     Write-Output "PASS: Signal integration phase $phase"
+} } finally {
+    if($Network){& $adb -s $Serial shell run-as $package rm -f files/vyrn-signal-network-fixture.json;if($LASTEXITCODE -ne 0){throw 'Private Signal fixture cleanup failed'}}
 }
-@{date=[DateTimeOffset]::UtcNow.ToString('o');sha256=(Get-FileHash -LiteralPath $apk).Hash.ToLowerInvariant();api=35;library='org.signal:libsignal-client:0.103.0';rounds=$rounds;private_chat_ui='not implemented';server_fanout='not tested'} | ConvertTo-Json -Depth 6 | Set-Content (Join-Path $root 'artifacts/android-signal.json') -Encoding utf8
+@{date=[DateTimeOffset]::UtcNow.ToString('o');sha256=(Get-FileHash -LiteralPath $apk).Hash.ToLowerInvariant();api=35;library='org.signal:libsignal-client:0.103.0';rounds=$rounds;private_chat_ui='not implemented';server_fanout='not tested';network_key_exchange=$Network.IsPresent} | ConvertTo-Json -Depth 6 | Set-Content (Join-Path $root "artifacts/$report") -Encoding utf8

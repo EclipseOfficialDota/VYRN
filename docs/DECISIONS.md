@@ -1,6 +1,8 @@
 # Decisions
 
 ## 2026-10-04 — Signal foundation
+- Bind key networking to the original authenticated session as well as account; obtain device identity from the authenticated self profile rather than assuming a copied vault's local device preference is authoritative. Refresh must preserve both bindings before saving replacement tokens. Validate actual identity signatures and strict claimed-bundle metadata before allowing SessionBuilder to use a bundle.
+- Persist publication acknowledgement only after validating its device/version/address. If local persistence fails after server commit, replay the exact durable initial publication to recover the same generation address. Keep automatic scheduling/refill/rotation and full UI lifecycle acceptance open.
 - Persist initial private keys and the exact public publication atomically before HTTP. Retry the identical publication after a lost response, including consumed EC IDs; never regenerate private keys to repair a missing publication record. Automatic refill/rotation and acknowledgement reconciliation require separate verified lifecycle work.
 - Pin official libsignal0.103.0, official Maven artifacts and upstream license; use JDK21 and Java17 Android source/target. Keep the full corresponding-source/license audit as a release gate.
 - Use a server-generated immutable UUID Signal address for each device-key generation with protocol device number1. Keep account/device session identity separate from the cryptographic address.

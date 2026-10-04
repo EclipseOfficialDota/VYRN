@@ -23,13 +23,25 @@ public final class RestRepository implements Models.Repository {
     public Object request(String method,String path,JSONObject body,boolean authenticated) throws Exception {
         return requestForUser(null,method,path,body,authenticated);
     }
-    public Object requestForUser(String expectedUser,String method,String path,JSONObject body,boolean authenticated) throws Exception { synchronized(vault.guard()) {
-        if(expectedUser!=null && !expectedUser.equals(vault.load().optString("user_id")))throw new SecurityException("account_changed");
+    public Object requestForUser(String expectedUser,String method,String path,JSONObject body,boolean authenticated) throws Exception {
+        return requestBound(expectedUser,null,method,path,body,authenticated);
+    }
+    public Object requestForSession(String user,String session,String method,String path,JSONObject body) throws Exception {
+        if(user==null || user.isEmpty() || session==null || session.isEmpty())throw new SecurityException("session_required");
+        return requestBound(user,session,method,path,body,true);
+    }
+    private static void requireIdentity(JSONObject tokens,String user,String session){
+        if(user!=null && !user.equals(tokens.optString("user_id")))throw new SecurityException("account_changed");
+        if(session!=null && !session.equals(tokens.optString("session_id")))throw new SecurityException("session_changed");
+    }
+    private Object requestBound(String expectedUser,String expectedSession,String method,String path,JSONObject body,boolean authenticated) throws Exception { synchronized(vault.guard()) {
+        if(expectedUser!=null || expectedSession!=null)requireIdentity(vault.load(),expectedUser,expectedSession);
         String access=authenticated?vault.load().optString("access_token"):"";
         try{return exchange(method,path,body,access);}catch(ApiException failure){
             if(!authenticated||failure.status!=401)throw failure;
             JSONObject previous=vault.load();String refresh=previous.optString("refresh_token");if(refresh.isEmpty())throw failure;
             JSONObject renewed=(JSONObject)exchange("POST","/v1/auth/refresh",new JSONObject().put("refresh_token",refresh),"");
+            requireIdentity(renewed,expectedUser,expectedSession);
             vault.save(renewed);return exchange(method,path,body,renewed.getString("access_token"));
         }
     }}
