@@ -28,21 +28,8 @@ func validPayload(payload json.RawMessage, encrypted bool) bool {
 		return false
 	}
 	if encrypted {
-		var in struct {
-			Protocol string            `json:"protocol"`
-			Devices  map[string]string `json:"devices"`
-		}
-		d := json.NewDecoder(bytes.NewReader(payload))
-		d.DisallowUnknownFields()
-		if d.Decode(&in) != nil || in.Protocol != "signal-v1" || len(in.Devices) < 1 || len(in.Devices) > 6 {
-			return false
-		}
-		for id, ciphertext := range in.Devices {
-			if !validID(id) || len(ciphertext) < 32 || len(ciphertext) > 128<<10 {
-				return false
-			}
-		}
-		return true
+		_, valid := parseSignalEnvelope(payload)
+		return valid
 	}
 	var in struct {
 		Text    string `json:"text"`
@@ -103,14 +90,16 @@ func (s *Server) sendMessage(w http.ResponseWriter, r *http.Request) {
 		fail(w, 409, "send_cancelled")
 		return
 	}
+	var signalDevices []activeSignalDevice
 	if kind == "private" {
-		var blocked bool
-		if tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM blocks b JOIN members m ON m.user_id=b.user_id JOIN members n ON n.user_id=b.blocked_id WHERE m.conversation_id=$1 AND n.conversation_id=$1)`, conversation).Scan(&blocked) != nil {
-			s.internal(w)
+		var allowed bool
+		signalDevices, allowed = s.lockPrivateDevices(w, r, tx, conversation)
+		if !allowed {
 			return
 		}
-		if blocked {
-			fail(w, 403, "forbidden")
+		envelope, _ := parseSignalEnvelope(in.Payload)
+		if envelope.Sender.User != p.UserID || envelope.Sender.Device != p.DeviceID {
+			fail(w, 409, "device_keys_changed")
 			return
 		}
 	}
@@ -132,39 +121,8 @@ func (s *Server) sendMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if in.Encrypted {
-		var envelope struct {
-			Devices map[string]string `json:"devices"`
-		}
-		_ = json.Unmarshal(in.Payload, &envelope)
-		rows, e := tx.Query(ctx, `SELECT DISTINCT s.device_id::text FROM sessions s JOIN members m ON m.user_id=s.user_id JOIN device_keys k ON k.user_id=s.user_id AND k.device_id=s.device_id WHERE m.conversation_id=$1 AND s.revoked_at IS NULL AND s.refresh_expires>now()`, conversation)
-		if e != nil {
-			s.internal(w)
+		if !s.requireSignalFanout(w, r, tx, signalDevices, in.Payload) {
 			return
-		}
-		ids := []string{}
-		for rows.Next() {
-			var id string
-			if rows.Scan(&id) != nil {
-				rows.Close()
-				s.internal(w)
-				return
-			}
-			ids = append(ids, id)
-		}
-		rows.Close()
-		if rows.Err() != nil {
-			s.internal(w)
-			return
-		}
-		if len(ids) < 2 || len(ids) != len(envelope.Devices) {
-			fail(w, 409, "device_keys_changed")
-			return
-		}
-		for _, id := range ids {
-			if _, ok := envelope.Devices[id]; !ok {
-				fail(w, 409, "device_keys_changed")
-				return
-			}
 		}
 	}
 	for _, ref := range []*string{in.ReplyTo, in.ForwardedFrom} {
@@ -328,7 +286,13 @@ func (s *Server) editMessage(w http.ResponseWriter, r *http.Request) {
 			fail(w, 403, "forbidden")
 			return false
 		}
-		result, err := tx.Exec(r.Context(), `UPDATE messages SET payload=$2,revision=revision+1,edited_at=now() WHERE id=$1 AND revision=$3 AND deleted_at IS NULL`, id, in.Payload, in.Revision)
+		if enc {
+			devices, allowed := s.lockPrivateDevices(w, r, tx, conversation)
+			if !allowed || !s.requireSignalFanout(w, r, tx, devices, in.Payload) {
+				return false
+			}
+		}
+		result, err := tx.Exec(r.Context(), `UPDATE messages SET payload=$2,revision=revision+1,edited_at=now(),sender_device=CASE WHEN encrypted THEN $4::uuid ELSE sender_device END WHERE id=$1 AND revision=$3 AND deleted_at IS NULL`, id, in.Payload, in.Revision, current(r).DeviceID)
 		if err != nil {
 			s.internal(w)
 			return false

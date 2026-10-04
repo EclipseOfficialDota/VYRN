@@ -1,5 +1,11 @@
 # Local Android integration
 
+## Actual private ciphertext service delivery — 2026-10-04
+
+The latest scripts/test-signal.ps1 -Network run passes27 checks. Real Signal ciphertext is sent through POST /v1/conversations/{id}/messages with the signal-v2 envelope, retrieved through authorized GET /v1/messages/{id} and decrypted by the recipient. A later message has distinct copies for two recipient stores, and both decrypt their own copy retrieved through their actual sessions. The second recipient uses the sender's physical device UUID under a different account; authenticated profile identity and separate Signal addresses/storage namespaces disambiguate it. Unprepared/revoked destinations and exact accepted retry after revocation are checked.
+
+The27 storage/ratchet/restart checks and275 existing Android checks also pass on local TLS APK SHA-256 5d69d3798b5c74092dad15eeb48fca25b801284c749ac100b85e5ab8924d3744 against the new local Core. Latest report dates are2026-10-04T04:51:40.2711169Z (network),04:53:30.7645872Z (Signal storage) and04:58:23.2680334Z (original suite). The network report now records service fanout as tested while retaining private_chat_ui as not implemented. Three device stores on one emulator are not two physical Android clients or complete private UI/realtime/outbox/cache/trust/lifecycle acceptance. Historical checkpoint evidence below retains its earlier scope.
+
 ## HTTPS Signal key exchange — 2026-10-04
 
 After building the local x86_64 instrumentation APK, run scripts/test-signal.ps1 -Network. It installs only on the named local emulator, forwards the scoped TLS endpoint and feeds disposable generated credentials/bootstrap invite through stdin into app-private storage. The fixture is removed in finally; credentials are never printed or passed as command arguments. It creates two test accounts and a private authorization relationship, publishes real keys and runs20 checks recorded in artifacts/android-signal-network.json.
