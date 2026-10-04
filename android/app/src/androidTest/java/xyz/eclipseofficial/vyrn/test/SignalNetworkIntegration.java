@@ -35,6 +35,7 @@ final class SignalNetworkIntegration {
     static void run(Context context,BiConsumer<Boolean,String> check) throws Exception {
         JSONObject fixture=new JSONObject(new String(Files.readAllBytes(new File(context.getFilesDir(),"vyrn-signal-network-fixture.json").toPath()),StandardCharsets.UTF_8));
         RestRepository a=register(context,fixture,9101,"a"),b=register(context,fixture,9102,"b");
+        boolean handoff=false;
         try(SignalDeviceKeys alice=new SignalDeviceKeys(context,a);SignalDeviceKeys bob=new SignalDeviceKeys(context,b)){
             check.accept(alice.device.equals(a.vault.device()) && bob.device.equals(b.vault.device()),"signal_network_authenticated_device_binding");
             File aliceDatabase=new File(context.getNoBackupFilesDir(),"vyrn_signal_"+alice.user+"_"+alice.device+".db");
@@ -124,10 +125,47 @@ final class SignalNetworkIntegration {
                 check.accept(denied,"signal_network_revoked_recipient_copy_rejected");
                 check.accept(multipleId.equals(((JSONObject)a.request("POST","/v1/conversations/"+conversation+"/messages",multiple,true)).getString("id")),"signal_network_committed_retry_after_device_revocation");
             }finally{second.vault.clear();}
+            prepareRestart(context,a,b,alice,bob,conversation,check);handoff=true;
         }finally{
-            try{a.request("POST","/v1/auth/logout",new JSONObject(),true);}finally{a.vault.clear();}
-            try{b.request("POST","/v1/auth/logout",new JSONObject(),true);}finally{b.vault.clear();}
+            if(!handoff)cleanup(context);
         }
+    }
+
+    private static final String RESTART_TEXT="بازیابی پیام خصوصی 🔐";
+    private static String fingerprint(byte[] value) throws Exception {return Base64.encodeToString(java.security.MessageDigest.getInstance("SHA-256").digest(value),Base64.NO_WRAP);}
+    private static void prepareRestart(Context context,RestRepository a,RestRepository b,SignalDeviceKeys alice,SignalDeviceKeys bob,String conversation,BiConsumer<Boolean,String> check) throws Exception {
+        SignalMessages outgoing=new SignalMessages(alice),incoming=new SignalMessages(bob);
+        java.util.List<SignalDeviceKeys.ClaimedKey> targets=java.util.Collections.singletonList(alice.claim(bob.user,bob.device,1));
+        SignalDeviceKeys.ClaimedKey sender=bob.claim(alice.user,alice.device,1);
+        String pending=UUID.randomUUID().toString(),committed=UUID.randomUUID().toString();
+        String body=outgoing.prepare(bob.user,conversation,pending,RESTART_TEXT,targets);
+        outgoing.prepare(bob.user,conversation,committed,RESTART_TEXT,targets);String message=outgoing.send(committed);
+        JSONObject delivered=(JSONObject)b.request("GET","/v1/messages/"+message,null,true);
+        check.accept(RESTART_TEXT.equals(incoming.receive(alice.user,conversation,delivered,sender)),"signal_codec_restart_fixture_committed_cache");
+        JSONObject state=new JSONObject().put("alice",alice.user).put("bob",bob.user).put("conversation",conversation).put("pending",pending).put("committed",committed).put("message",message).put("body",body).put("delivered",delivered).put("sender_address",sender.address.getName()).put("recipient_address",targets.get(0).address.getName())
+            .put("sender_ratchet",fingerprint(alice.store.loadSession(targets.get(0).address).serialize())).put("receiver_ratchet",fingerprint(bob.store.loadSession(sender.address).serialize()));
+        // Test-only app-private state: no credentials or decrypted message text.
+        Files.write(new File(context.getFilesDir(),"vyrn-signal-network-state.json").toPath(),state.toString().getBytes(StandardCharsets.UTF_8));
+        check.accept(alice.store.loadValue("private-outgoing",pending)!=null && bob.store.loadValue("private-cache",message+"_1")!=null,"signal_codec_restart_fixture_pending_ciphertext");
+    }
+    static void restart(Context context,BiConsumer<Boolean,String> check) throws Exception {
+        JSONObject state=new JSONObject(new String(Files.readAllBytes(new File(context.getFilesDir(),"vyrn-signal-network-state.json").toPath()),StandardCharsets.UTF_8));
+        RestRepository a=new RestRepository(new TokenVault(context,9101)),b=new RestRepository(new TokenVault(context,9102));
+        try(SignalDeviceKeys alice=new SignalDeviceKeys(context,a);SignalDeviceKeys bob=new SignalDeviceKeys(context,b)){
+            check.accept(alice.user.equals(state.getString("alice")) && bob.user.equals(state.getString("bob")),"signal_codec_restart_original_account_binding");
+            SignalMessages outgoing=new SignalMessages(alice),incoming=new SignalMessages(bob);String peer=state.getString("bob"),conversation=state.getString("conversation"),pending=state.getString("pending"),message=state.getString("message");
+            check.accept(RESTART_TEXT.equals(outgoing.cachedText(message)) && RESTART_TEXT.equals(incoming.cachedText(message)),"signal_codec_restart_both_encrypted_history_caches");
+            check.accept(state.getString("body").equals(outgoing.prepare(peer,conversation,pending,RESTART_TEXT,null)) && state.getString("sender_ratchet").equals(fingerprint(alice.store.loadSession(new SignalProtocolAddress(state.getString("recipient_address"),1)).serialize())),"signal_codec_restart_pending_exact_body_no_ratchet_advance");
+            check.accept(RESTART_TEXT.equals(incoming.receive(alice.user,conversation,state.getJSONObject("delivered"),null)) && state.getString("receiver_ratchet").equals(fingerprint(bob.store.loadSession(new SignalProtocolAddress(state.getString("sender_address"),1)).serialize())),"signal_codec_restart_cached_duplicate_no_directory_or_ratchet");
+            check.accept(message.equals(outgoing.send(state.getString("committed"))),"signal_codec_restart_acknowledged_retry_same_server_id");
+            String pendingMessage=outgoing.send(pending);JSONObject delivered=(JSONObject)b.request("GET","/v1/messages/"+pendingMessage,null,true);
+            check.accept(RESTART_TEXT.equals(incoming.receive(alice.user,conversation,delivered,null)) && pendingMessage.equals(outgoing.send(pending)),"signal_codec_restart_pending_out_of_order_delivery_once");
+        }finally{cleanup(context);}
+    }
+    static void cleanup(Context context) throws Exception {
+        Exception failure=null;
+        for(int slot:new int[]{9101,9102}){RestRepository repository=new RestRepository(new TokenVault(context,slot));try{if(repository.vault.load().has("access_token"))repository.request("POST","/v1/auth/logout",new JSONObject(),true);}catch(Exception error){if(failure==null)failure=error;}finally{repository.vault.clear();}}
+        if(failure!=null)throw failure;
     }
 
     private static void codec(Context context,RestRepository a,RestRepository b,RestRepository second,SignalDeviceKeys alice,SignalDeviceKeys bob,SignalDeviceKeys bob2,String conversation,java.util.List<SignalDeviceKeys.ClaimedKey> targets,BiConsumer<Boolean,String> check) throws Exception {

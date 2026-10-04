@@ -1,5 +1,9 @@
 # Local Android integration
 
+## Private codec across actual process death — 2026-10-04
+
+scripts/test-signal.ps1 -Network now passes55 checks across two distinct processes (49 initial,6 recovery). After force-stop, the codec reads both encrypted history caches, reuses the pending body without advancing its ratchet, serves duplicates without decrypting again, recovers the acknowledged server ID and delivers an earlier-prepared pending ciphertext out of order once. Report2026-10-04T06:04:28.4933285Z, APK SHA-2567d7172bd86c0f044d260b3c05538f949479f4286429b5092f3b9d598154ea800. Session cleanup and deletion of both app-private test fixture/state files run in finally. State contains public routing/ciphertext and ratchet hashes, not private keys, tokens or decoded text. These are service tests on one emulator; native UI/lifecycle workers and uncertain acknowledgement-loss recovery still require acceptance.
+
 ## Actual deletion and learned expiry — 2026-10-04
 
 The latest scripts/test-signal.ps1 -Network passes47 checks on APK SHA-256 be80e544fa068b2d13bbbedc60a747d7d63f4cfc40c09365e2a69f73d072d1e3. DELETE/GET provides the real tombstone and cleared payload. A real five-second conversation TTL drives sender/two-recipient cache expiry, unread-cache sweeping and stale replay guards without further network reads. Actual cache-write failure rolls back receive ratchets. All27 Signal storage/process-restart checks also pass; the275 original regression suite retains its previous recorded APK evidence. This is a codec primitive on one emulator; expiry-worker/native UI/realtime and private-codec process-restart acceptance remain unfinished.

@@ -15,7 +15,7 @@ $phases=@('signal','signal-restart')
 $report='android-signal.json'
 try {
 if($Network){
-    $phases=@('signal-network');$report='android-signal-network.json'
+    $phases=@('signal-network','signal-network-restart');$report='android-signal-network.json'
     & $adb -s $Serial reverse tcp:18443 tcp:18443
     if($LASTEXITCODE -ne 0){throw 'Local TLS forwarding failed'}
     & $adb -s $Serial shell run-as $package mkdir -p files
@@ -52,7 +52,14 @@ foreach($phase in $phases){
     $rounds+=@{phase=$phase;checks=$checks;process_id=$processId;result='passed'}
     Write-Output "PASS: Signal integration phase $phase"
 } } finally {
-    if($Network){& $adb -s $Serial shell run-as $package rm -f files/vyrn-signal-network-fixture.json;if($LASTEXITCODE -ne 0){throw 'Private Signal fixture cleanup failed'}}
+    if($Network){
+        $cleanup=(& $adb -s $Serial shell am instrument -w -e phase signal-network-cleanup "$package.test/xyz.eclipseofficial.vyrn.test.LocalIntegrationRunner") -join "`n"
+        [IO.File]::WriteAllText((Join-Path $root '.local/android-signal-network-cleanup.log'),$cleanup)
+        $cleanupFailed=($LASTEXITCODE -ne 0 -or $cleanup -notmatch 'vyrn_result=passed')
+        & $adb -s $Serial shell run-as $package rm -f files/vyrn-signal-network-fixture.json files/vyrn-signal-network-state.json
+        if($LASTEXITCODE -ne 0){throw 'Private Signal fixture cleanup failed'}
+        if($cleanupFailed){throw 'Signal test session cleanup failed'}
+    }
 }
 $fanout='not tested'
 if($Network){$fanout='single and two-recipient-device ciphertext delivery; authenticated text codec, atomic outbox/cache; service only'}

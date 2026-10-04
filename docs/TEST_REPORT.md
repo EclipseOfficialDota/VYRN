@@ -2,6 +2,13 @@
 
 Updated: 2026-10-04. This records performed checks, not planned tests.
 
+## Private codec process recovery — 2026-10-04
+
+- scripts/test-signal.ps1 -Network now executes signal-network and signal-network-restart with an actual am force-stop between phases and verifies distinct process IDs. App-private handoff contains only ciphertext/public routing state and SHA-256 ratchet fingerprints; credentials remain in TokenVault and private sessions remain encrypted in SignalStore. Finally runs idempotent test-account logout and removes both private fixture/state files, including after test failure.
+- All55 checks pass:49 initial and6 recovery in PIDs6884 and6980. The recovery process verifies original account binding, both encrypted history caches, pending exact-body reuse without ratchet advancement, duplicate cached receive without directory lookup/decryption, an acknowledged retry returning the original server ID and an earlier-prepared ciphertext delivered/decrypted out of order exactly once. Report2026-10-04T06:04:28.4933285Z; local TLS APK SHA-2567d7172bd86c0f044d260b3c05538f949479f4286429b5092f3b9d598154ea800.
+- The first attempt failed during registration because the disposable local bootstrap invite had remaining=0 and was still time-valid. Only that local exhausted invite was refilled with the existing ignored fixture helper; production access/invite policy was not changed. The rerun and session/file cleanup pass.
+- Production Android/backend sources are unchanged from the preceding expiry checkpoint. Existing27 Signal storage/restart and normal ARM APK verification retain that checkpoint's evidence;275 original checks retain their previously recorded APK. These tests prove private codec restart cases, not native private UI, periodic workers, uncertain server-commit/local-ack-loss recovery across death, cancellation/retention, automatic roster/rotation/trust or two physical clients.
+
 ## Private text deletion and learned expiry — 2026-10-04
 
 - SignalMessages.send now reconciles an authorized server DTO after persisting the HTTP acknowledgement, so its own encrypted history learns expiry. cachedText returns no own text before this reconciliation. Received deadlines persist in encrypted message heads, can shorten but never extend/disappear after learning, and are checked on cache reads and known outgoing retries. retire clears every decrypted revision and the producing device's own text/outgoing body/pointer while preserving deletion/send fences. pruneExpired provides an atomic idempotent sweep for unread expired heads.
