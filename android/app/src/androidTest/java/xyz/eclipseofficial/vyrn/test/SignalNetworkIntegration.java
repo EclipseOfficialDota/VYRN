@@ -157,11 +157,33 @@ final class SignalNetworkIntegration {
         changed=new JSONObject(delivered.toString()).put("id",UUID.randomUUID().toString());denied=false;try{receiving.receive(alice.user,conversation,changed,null);}catch(SecurityException expected){denied=true;}
         check.accept(denied,"signal_codec_ciphertext_message_id_rebound_rejected");
         try(SignalDeviceKeys reopened=new SignalDeviceKeys(context,b)){check.accept(text.equals(new SignalMessages(reopened).cachedText(message)) && text.equals(new SignalMessages(reopened).receive(alice.user,conversation,delivered,null)),"signal_codec_encrypted_cache_survives_store_reopen");}
-        JSONObject tombstone=new JSONObject(delivered.toString()).put("deleted_at",java.time.Instant.now().toString());
+        a.request("DELETE","/v1/messages/"+message,null,true);
+        JSONObject tombstone=(JSONObject)b.request("GET","/v1/messages/"+message,null,true);
+        check.accept(!tombstone.isNull("deleted_at") && tombstone.getInt("revision")>delivered.getInt("revision") && tombstone.getJSONObject("payload").length()==0,"signal_codec_server_deletion_tombstone_delivery");
         check.accept(receiving.receive(alice.user,conversation,tombstone,null)==null && receiving.cachedText(message)==null,"signal_codec_deletion_purges_decrypted_cache");
         denied=false;try{receiving.receive(alice.user,conversation,delivered,null);}catch(SecurityException expected){denied=true;}
         check.accept(denied,"signal_codec_deleted_history_cannot_resurrect");
         sending.receive(bob.user,conversation,tombstone,null);denied=false;try{sending.send(client);}catch(SecurityException expected){denied=true;}
         check.accept(denied && sending.cachedText(message)==null && alice.store.loadValue("private-outgoing",client)==null,"signal_codec_deleted_own_message_fences_outbox");
+        a.request("PATCH","/v1/conversations/"+conversation,new JSONObject().put("disappearing_seconds",5),true);
+        String expiresClient=UUID.randomUUID().toString();sending.prepare(bob.user,conversation,expiresClient,text,targets);String expiresMessage=sending.send(expiresClient);
+        JSONObject expiring=(JSONObject)b.request("GET","/v1/messages/"+expiresMessage,null,true);
+        File receiveDatabase=new File(context.getNoBackupFilesDir(),"vyrn_signal_"+bob.user+"_"+bob.device+".db");
+        byte[] ratchet=bob.store.loadSession(senderKey.address).serialize();
+        try(SQLiteDatabase db=SQLiteDatabase.openDatabase(receiveDatabase.getAbsolutePath(),null,SQLiteDatabase.OPEN_READWRITE)){db.execSQL("CREATE TRIGGER fail_private_cache BEFORE INSERT ON records WHEN NEW.kind='app:private-cache' BEGIN SELECT RAISE(ABORT,'fixture_cache_failure'); END");}
+        denied=false;try{receiving.receive(alice.user,conversation,expiring,null);}catch(Exception expected){denied=true;}
+        check.accept(denied && Arrays.equals(ratchet,bob.store.loadSession(senderKey.address).serialize()) && bob.store.loadValue("private-head",expiresMessage)==null && bob.store.loadValue("private-cache",expiresMessage+"_1")==null,"signal_codec_receive_cache_failure_rolls_back_ratchet");
+        try(SQLiteDatabase db=SQLiteDatabase.openDatabase(receiveDatabase.getAbsolutePath(),null,SQLiteDatabase.OPEN_READWRITE)){db.execSQL("DROP TRIGGER fail_private_cache");}
+        check.accept(!expiring.isNull("expires_at") && text.equals(receiving.receive(alice.user,conversation,expiring,null)) && text.equals(receiving2.receive(alice.user,conversation,expiring,senderKey)) && text.equals(sending.cachedText(expiresMessage)),"signal_codec_server_expiry_deadline_cached_all_devices");
+        JSONObject extension=new JSONObject(expiring.toString()).put("expires_at",java.time.Instant.now().plusSeconds(3600).toString());
+        check.accept(text.equals(receiving.receive(alice.user,conversation,extension,null)),"signal_codec_duplicate_expiry_cannot_extend_learned_deadline");
+        long deadline=java.time.Instant.parse(expiring.getString("expires_at")).toEpochMilli();
+        while(System.currentTimeMillis()<=deadline)android.os.SystemClock.sleep(Math.max(1,Math.min(100,deadline-System.currentTimeMillis()+1)));
+        check.accept(receiving.cachedText(expiresMessage)==null && sending.cachedText(expiresMessage)==null && bob.store.loadValue("private-cache",expiresMessage+"_1")==null && alice.store.loadValue("private-own",expiresClient)==null && alice.store.loadValue("private-outgoing",expiresClient)==null,"signal_codec_offline_cache_read_expiry_purges_plaintext");
+        check.accept(receiving2.pruneExpired()==1 && receiving2.pruneExpired()==0 && bob2.store.loadValue("private-cache",expiresMessage+"_1")==null,"signal_codec_idle_expiry_sweep_is_durable_idempotent");
+        denied=false;try{sending.send(expiresClient);}catch(SecurityException expected){denied=true;}
+        check.accept(denied,"signal_codec_expired_own_outbox_cannot_retry");
+        check.accept(receiving.receive(alice.user,conversation,extension,null)==null && receiving.cachedText(expiresMessage)==null,"signal_codec_expired_stale_extension_cannot_resurrect");
+        a.request("PATCH","/v1/conversations/"+conversation,new JSONObject().put("disappearing_seconds",0),true);
     }
 }

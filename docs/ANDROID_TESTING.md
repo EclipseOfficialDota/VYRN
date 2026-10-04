@@ -1,5 +1,9 @@
 # Local Android integration
 
+## Actual deletion and learned expiry — 2026-10-04
+
+The latest scripts/test-signal.ps1 -Network passes47 checks on APK SHA-256 be80e544fa068b2d13bbbedc60a747d7d63f4cfc40c09365e2a69f73d072d1e3. DELETE/GET provides the real tombstone and cleared payload. A real five-second conversation TTL drives sender/two-recipient cache expiry, unread-cache sweeping and stale replay guards without further network reads. Actual cache-write failure rolls back receive ratchets. All27 Signal storage/process-restart checks also pass; the275 original regression suite retains its previous recorded APK evidence. This is a codec primitive on one emulator; expiry-worker/native UI/realtime and private-codec process-restart acceptance remain unfinished.
+
 ## Authenticated private text codec — 2026-10-04
 
 The latest scripts/test-signal.ps1 -Network run passes39 checks on APK SHA-256 47d8700db1c728e2975083bb6aae9d8c635abc6d5bfdf7e1a03b5b421ee6e0b7. SignalMessages now persists all fanout ratchets and exact outgoing body/own cache atomically, retries unchanged ciphertext, validates authenticated inner conversation/client/revision/participants/sender/recipient/routing metadata, and commits decrypt state with encrypted receive cache. Actual failure/retry/tamper/two-recipient/cache-reopen checks pass. Deletion tests inject a tombstone DTO, so server deletion/realtime acceptance is still required. Private UI, scheduling, explicit verification, rotation, expiry and two physical clients remain unverified. Historical sections retain their original scope.

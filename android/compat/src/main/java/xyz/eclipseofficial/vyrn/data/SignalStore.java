@@ -110,6 +110,7 @@ public final class SignalStore implements SignalProtocolStore, AutoCloseable {
     public void saveValue(String kind,String id,byte[] value){write("app:"+kind,id,0,0,value);}
     public void removeValue(String kind,String id){remove("app:"+kind,id,0,0);}
     public void removeValues(String kind,String prefix){synchronized(guard){requireTransaction();helper.getWritableDatabase().delete("records","kind=? AND substr(name,1,?)=?",new String[]{"app:"+kind,Integer.toString(prefix.length()),prefix});}}
+    public List<String> valueNames(String kind){synchronized(guard){List<String> names=new ArrayList<>();try(Cursor cursor=helper.getReadableDatabase().rawQuery("SELECT name FROM records WHERE kind=? ORDER BY name",new String[]{"app:"+kind})){while(cursor.moveToNext())names.add(cursor.getString(0));}return names;}}
 
     /** Persist private prekeys before exposing their public publication; retries reuse exact bytes. */
     public JSONObject initialPublication() throws Exception {return transaction(()->{
