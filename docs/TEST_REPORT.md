@@ -2,6 +2,13 @@
 
 Updated: 2026-10-04. This records performed checks, not planned tests.
 
+## Durable initial prekey generation — 2026-10-04
+
+- SignalStore.initialPublication generates100 EC prekeys, one signed EC key and one signed last-resort Kyber key. Private records and the exact public publication commit together before the caller can send it. Repeated calls return the persisted publication without replacing consumed private keys; a missing publication with existing keys fails closed.
+- All27 actual API35 Signal checks pass (21 initial,6 distinct-process restart). Four additional checks verify public/private correspondence, exact retry after consumption, database reopen and missing-publication protection. Latest artifacts/android-signal.json is dated2026-10-04T04:07:24.9736483Z; APK SHA-256 aa56cde1143e184aceea83b48d1a773d1ef244fddabc16b133e5d18a1039beb0. Publication retry is tested across store reopen; the six process-restart checks cover the existing ratchet/storage behavior.
+- Initial publication is a durable generation primitive, not yet connected to HTTP or the chat UI. Refill, rotation, server acknowledgement reconciliation and lifecycle remain required. The275-check suite below passed on its explicitly recorded earlier APK; it has not been rerun for this isolated additional primitive. Backend source is unchanged from the25-test checkpoint.
+- All three normal ARM Debug APKs were rebuilt with this primitive and pass signature/package/API/ABI/manifest and native Signal verification. The scanner still passes134 tracked files; staged whitespace checks pass. Physical device installation, release signing and R8 remain untested.
+
 ## Signal storage and device-prekey checkpoint — 2026-10-04
 
 - Official libsignal 0.103.0 is pinned; Android builds use JDK21 and Java17 source/target. Actual Android JNI establishes PQXDH sessions with real generated identity, signed EC and Kyber keys.

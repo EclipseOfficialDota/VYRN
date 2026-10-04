@@ -67,6 +67,24 @@ final class SignalIntegration {
         String a=UUID.randomUUID().toString(),ad=UUID.randomUUID().toString(),b=UUID.randomUUID().toString(),bd=UUID.randomUUID().toString();
         String aliceAddress=UUID.randomUUID().toString(),bobAddress=UUID.randomUUID().toString();
         SignalProtocolAddress aa=new SignalProtocolAddress(aliceAddress,1),ba=new SignalProtocolAddress(bobAddress,1);
+        String publicationDevice=UUID.randomUUID().toString();
+        String publication;
+        try(SignalStore prepared=new SignalStore(context,a,publicationDevice)){
+            JSONObject keys=prepared.initialPublication();publication=keys.toString();
+            boolean matched=keys.getInt("expected_version")==0 && keys.getInt("registration_id")==prepared.getLocalRegistrationId() && keys.getJSONArray("prekeys").length()==100;
+            for(int id=1;id<=100;id++)matched &= keys.getJSONArray("prekeys").getJSONObject(id-1).getInt("id")==id && keys.getJSONArray("prekeys").getJSONObject(id-1).getString("public_key").equals(android.util.Base64.encodeToString(prepared.loadPreKey(id).getKeyPair().getPublicKey().serialize(),android.util.Base64.NO_WRAP));
+            matched &= keys.getJSONObject("signed_prekey").getString("signature").equals(android.util.Base64.encodeToString(prepared.loadSignedPreKey(1).getSignature(),android.util.Base64.NO_WRAP));
+            matched &= keys.getJSONObject("kyber_prekey").getString("public_key").equals(android.util.Base64.encodeToString(prepared.loadKyberPreKey(1).getKeyPair().getPublicKey().serialize(),android.util.Base64.NO_WRAP));
+            check.accept(matched,"signal_publication_private_keys_persisted");
+            prepared.transaction(()->{prepared.removePreKey(1);return null;});
+            check.accept(publication.equals(prepared.initialPublication().toString()) && !prepared.containsPreKey(1),"signal_publication_retry_no_regeneration");
+        }
+        try(SignalStore prepared=new SignalStore(context,a,publicationDevice)){
+            check.accept(publication.equals(prepared.initialPublication().toString()) && !prepared.containsPreKey(1),"signal_publication_reopen_exact_retry");
+            prepared.transaction(()->{prepared.removeValue("keys","initial");return null;});
+            boolean refused=false;try{prepared.initialPublication();}catch(SecurityException expected){refused=true;}
+            check.accept(refused && prepared.containsPreKey(2),"signal_missing_publication_preserves_existing_keys");
+        }
         try(SignalStore alice=new SignalStore(context,a,ad);SignalStore bob=new SignalStore(context,b,bd)){
             check.accept(!Arrays.equals(alice.getIdentityKeyPair().serialize(),bob.getIdentityKeyPair().serialize()),"signal_independent_device_identities");
             boolean refused=false;try{alice.saveValue("outgoing","unsafe",HELLO);}catch(IllegalStateException expected){refused=true;}check.accept(refused,"signal_mutation_requires_transaction");

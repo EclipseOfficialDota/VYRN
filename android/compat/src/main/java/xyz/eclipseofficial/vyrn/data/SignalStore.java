@@ -24,6 +24,7 @@ import javax.crypto.KeyGenerator;
 import javax.crypto.SecretKey;
 import javax.crypto.spec.GCMParameterSpec;
 import org.json.JSONArray;
+import org.json.JSONObject;
 import org.signal.libsignal.protocol.IdentityKey;
 import org.signal.libsignal.protocol.IdentityKeyPair;
 import org.signal.libsignal.protocol.InvalidKeyIdException;
@@ -31,6 +32,9 @@ import org.signal.libsignal.protocol.NoSessionException;
 import org.signal.libsignal.protocol.ReusedBaseKeyException;
 import org.signal.libsignal.protocol.SignalProtocolAddress;
 import org.signal.libsignal.protocol.ecc.ECPublicKey;
+import org.signal.libsignal.protocol.ecc.ECKeyPair;
+import org.signal.libsignal.protocol.kem.KEMKeyPair;
+import org.signal.libsignal.protocol.kem.KEMKeyType;
 import org.signal.libsignal.protocol.groups.state.SenderKeyRecord;
 import org.signal.libsignal.protocol.state.*;
 import org.signal.libsignal.protocol.util.KeyHelper;
@@ -105,6 +109,31 @@ public final class SignalStore implements SignalProtocolStore, AutoCloseable {
     public byte[] loadValue(String kind,String id){return read("app:"+kind,id,0,0);}
     public void saveValue(String kind,String id,byte[] value){write("app:"+kind,id,0,0,value);}
     public void removeValue(String kind,String id){remove("app:"+kind,id,0,0);}
+
+    /** Persist private prekeys before exposing their public publication; retries reuse exact bytes. */
+    public JSONObject initialPublication() throws Exception {return transaction(()->{
+        byte[] pending=loadValue("keys","initial");
+        if(pending!=null)return new JSONObject(new String(pending,StandardCharsets.UTF_8));
+        // Never overwrite existing private key IDs when a publication record is missing.
+        if(!ids("prekey","").isEmpty() || !ids("signed","").isEmpty() || !ids("kyber","").isEmpty())throw new SecurityException("signal_publication_missing");
+        long now=System.currentTimeMillis();
+        ECKeyPair signed=ECKeyPair.generate();KEMKeyPair kyber=KEMKeyPair.generate(KEMKeyType.KYBER_1024);
+        byte[] signature=getIdentityKeyPair().getPrivateKey().calculateSignature(signed.getPublicKey().serialize());
+        byte[] kyberSignature=getIdentityKeyPair().getPrivateKey().calculateSignature(kyber.getPublicKey().serialize());
+        storeSignedPreKey(1,new SignedPreKeyRecord(1,now,signed,signature));
+        storeKyberPreKey(1,new KyberPreKeyRecord(1,now,kyber,kyberSignature));
+        JSONArray prekeys=new JSONArray();
+        for(int id=1;id<=100;id++){ECKeyPair pair=ECKeyPair.generate();storePreKey(id,new PreKeyRecord(id,pair));prekeys.put(publicKey(id,pair.getPublicKey().serialize(),null));}
+        JSONObject publication=new JSONObject().put("expected_version",0).put("registration_id",getLocalRegistrationId())
+            .put("identity_key",Base64.encodeToString(getIdentityKeyPair().getPublicKey().serialize(),Base64.NO_WRAP))
+            .put("signed_prekey",publicKey(1,signed.getPublicKey().serialize(),signature))
+            .put("kyber_prekey",publicKey(1,kyber.getPublicKey().serialize(),kyberSignature)).put("prekeys",prekeys);
+        saveValue("keys","initial",publication.toString().getBytes(StandardCharsets.UTF_8));return publication;
+    });}
+    private static JSONObject publicKey(int id,byte[] key,byte[] signature) throws Exception {
+        JSONObject result=new JSONObject().put("id",id).put("public_key",Base64.encodeToString(key,Base64.NO_WRAP));
+        if(signature!=null)result.put("signature",Base64.encodeToString(signature,Base64.NO_WRAP));return result;
+    }
 
     @Override public IdentityKeyPair getIdentityKeyPair(){try{return new IdentityKeyPair(read("local","",0,0));}catch(Exception e){throw new SecurityException("invalid_signal_identity",e);}}
     @Override public int getLocalRegistrationId(){byte[] bytes=read("local","",0,1);if(bytes==null || bytes.length!=4)throw new SecurityException("invalid_signal_registration");int id=ByteBuffer.wrap(bytes).getInt();if(id<1 || id>16380)throw new SecurityException("invalid_signal_registration");return id;}

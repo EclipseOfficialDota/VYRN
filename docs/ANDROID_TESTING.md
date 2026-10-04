@@ -1,5 +1,7 @@
 # Local Android integration
 
+Latest Signal run passes27 checks (21 initial,6 restart), including four initial-publication checks for private-key persistence, consumed-key retry, exact store-reopen retry and missing-publication protection. Latest local TLS APK SHA-256: aa56cde1143e184aceea83b48d1a773d1ef244fddabc16b133e5d18a1039beb0. Publication HTTP/UI/refill/rotation remains unconnected. The23-check and275-check same-APK evidence below is the preceding checkpoint, not the current Signal report.
+
 ## Signal foundation checkpoint — 2026-10-04
 
 Run scripts/setup-jdk.ps1 for the pinned verified JDK21, then build the x86_64 local TLS instrumentation APK with scripts/build-android.ps1 -Abis x86_64 -LocalTest -Instrumentation. Run scripts/test-signal.ps1 on the local API35 emulator. The harness executes17 initial and6 restart checks, forces application process death and verifies distinct process IDs. It records artifacts/android-signal.json. Private-chat UI and server fanout are explicitly not tested.

@@ -1,6 +1,7 @@
 # Decisions
 
 ## 2026-10-04 — Signal foundation
+- Persist initial private keys and the exact public publication atomically before HTTP. Retry the identical publication after a lost response, including consumed EC IDs; never regenerate private keys to repair a missing publication record. Automatic refill/rotation and acknowledgement reconciliation require separate verified lifecycle work.
 - Pin official libsignal0.103.0, official Maven artifacts and upstream license; use JDK21 and Java17 Android source/target. Keep the full corresponding-source/license audit as a release gate.
 - Use a server-generated immutable UUID Signal address for each device-key generation with protocol device number1. Keep account/device session identity separate from the cryptographic address.
 - Public-key publication requires an explicit expected version. Identity/registration are immutable; signed/Kyber rotations require increasing IDs. Identical accepted publications are retryable and claimed EC IDs never return to the available pool.
