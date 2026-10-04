@@ -25,6 +25,6 @@ Updated 2026-10-04. A route existing or a build compiling does **not** establish
 | Updates | Ed25519 envelope library and tamper/expiry/rollback tests | Android verification/download/install and signed remote config |
 | Backup | Local dump restored successfully to isolated database | External S3 configuration, encryption/retention/restore/alert proof, media backup |
 | TURN/calls | Inactive template and profile | Provider inbound UDP, credentials, TLS renewal, WebRTC and relay testing |
-| VPS/DNS/TLS | Configuration and guarded DNS script | SSH key installation, read-only audit, host hardening, DNS and live TLS |
+| VPS/DNS/TLS | Dedicated key login, live Core/PostgreSQL and private owner panel; eight DNS records, public API TLS/readiness, admin/metrics blocking, HTTPS login/logout and renewal dry-run pass | Whole-host reboot, operational/load/security review and full APK production acceptance |
 
 Do not present VYRN as complete until every required production and end-to-end acceptance item is verified. Missing external inputs are separate from unfinished implementation work.

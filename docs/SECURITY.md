@@ -36,7 +36,7 @@ Admin TOTP currently uses one deployment secret for the bootstrap administrator.
 
 ## Operational boundaries
 
-The dedicated SSH key is `.local/ssh/vyrn_ed25519`; its public half may be installed through the VPS provider console. The private file remains local and ignored. First-seen SSH host identity is stored in `.local/known_hosts`; compare its fingerprint with the provider before administrative changes. The server rejected the new key during the read-only attempt, so no host changes ran.
+The dedicated SSH key is `.local/ssh/vyrn_ed25519`; its public half is installed and key login verified. The private file remains local and ignored. SSH host identity is pinned in `.local/known_hosts`; the deployment matched its existing fingerprint. Private owner panel access uses an SSH tunnel. Public API TLS validates and admin/metrics routes are blocked; public admin rollout remains disabled. Cloudflare credentials were supplied through masked stdin and never persisted to source or VPS. The chat-disclosed token still requires owner rotation through the Cloudflare account; no rotation is claimed.
 
 Never disable root login or password authentication without explicit user permission. Never commit `.env`, keystores, service JSON, credential files, backups or private keys. Do not write secrets into process arguments, logs, reports, screenshots or shell history. Root/password access settings are preserved.
 

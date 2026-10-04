@@ -2,6 +2,14 @@
 
 Updated: 2026-10-04. This records performed checks, not planned tests.
 
+## Public DNS and HTTPS activation — 2026-10-04
+
+All eight intended A records created through Cloudflare with TTL300, DNS-only and IPv4 217.18.90.114. Seven-domain Let's Encrypt certificate `vyrn-public` issued, expiry2027-01-02. Existing Nginx serves public Core domains, while admin/web/updates deliberately return503 and TURN is inactive. Existing unrelated sites were preserved.
+
+External Windows HTTPS checks with full certificate validation passed on api/ws/media/push readiness: HTTP200, statusready. Public API admin dashboard and metrics returned404; admin hostname returned503. Actual owner login/logout through Nginx HTTPS passed on-host, with explicit loopback routing preserving hostname/SNI and certificate validation. Certbot timer active; `renew --cert-name vyrn-public --dry-run --run-deploy-hooks` passed, including Nginx validation/reload hook. Initial sandbox Schannel checks could not obtain OS credentials; rerun from the actual Windows account passed without disabling certificate validation.
+
+Cloudflare token input was masked and memory-only; no token persisted to source, VPS or environment files. Token rotation is not claimed. Full Android production acceptance remains pending.
+
 ## VPS private activation — 2026-10-04
 
 Verified Ubuntu 24.04.3 LTS on 217.18.90.114; dedicated Ed25519 key login on root:3939, preserving prior access. Docker 29.1.3 / Compose 2.40.3 run healthy Core and PostgreSQL containers. Core readiness returned ready on loopback18080. Nginx configuration passed validation, and the private owner panel returned HTTP200 through an actual Windows OpenSSH tunnel on loopback19091.
