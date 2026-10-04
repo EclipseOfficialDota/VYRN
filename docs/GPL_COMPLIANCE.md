@@ -1,5 +1,7 @@
 # Source and license compliance
 
+The Android build includes pinned libsignal0.103.0 (AGPL-3.0-only). Telegram core file headers allow GPLv2 or later, so the combination uses the GPLv3 option for those sources and must also satisfy AGPLv3 section13. Preserve both upstream licenses and inspect remaining third-party/submodule terms before distribution. See [Android notices](../android/NOTICE.md), [libsignal license](../android/LICENSE.libsignal) and the [GNU compatibility explanation](https://www.gnu.org/licenses/license-compatibility.en.html). This integration does not establish that the full release license/source audit has passed.
+
 Pinned source: https://github.com/DrKLO/Telegram/commit/f2908b14133bbffbf7ab04f641ecb5bfaf533242 . Preserve the original copyright and license headers, LICENSE text, submodule pins and bundled third-party notices. Source file headers specify their applicable GPL terms; inspect those terms when introducing additional copyleft libraries.
 
 The VYRN adapter does not replace or redraw Telegram's UI: it compiles the original UI and modifies branding, the entry flow and transport boundary. Preserve notices inside generated source packages even where product branding is removed from the application.

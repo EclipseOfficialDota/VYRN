@@ -2,7 +2,8 @@ $ErrorActionPreference='Stop'
 $ProgressPreference='SilentlyContinue'
 $root=Split-Path $PSScriptRoot -Parent
 $sdk=Join-Path $root '.tools/android-sdk'
-$env:JAVA_HOME=(Get-ChildItem (Join-Path $root '.tools/jdk17') -Directory | Select-Object -First 1).FullName
+$env:JAVA_HOME=Join-Path $root '.tools/jdk21/jdk-21.0.12.1+1'
+if(!(Test-Path -LiteralPath (Join-Path $env:JAVA_HOME 'bin/java.exe'))){throw 'Run scripts/setup-jdk.ps1 first'}
 $env:ANDROID_HOME=$sdk
 $env:ANDROID_SDK_ROOT=$sdk
 $env:ANDROID_USER_HOME=Join-Path $root '.local/android-home'

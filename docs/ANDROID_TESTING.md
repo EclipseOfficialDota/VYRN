@@ -1,5 +1,13 @@
 # Local Android integration
 
+## Signal foundation checkpoint — 2026-10-04
+
+Run scripts/setup-jdk.ps1 for the pinned verified JDK21, then build the x86_64 local TLS instrumentation APK with scripts/build-android.ps1 -Abis x86_64 -LocalTest -Instrumentation. Run scripts/test-signal.ps1 on the local API35 emulator. The harness executes17 initial and6 restart checks, forces application process death and verifies distinct process IDs. It records artifacts/android-signal.json. Private-chat UI and server fanout are explicitly not tested.
+
+These checks use actual official Signal JNI, real keys, PQXDH, ratchets and Android Keystore-encrypted SQLite records. They verify transaction rollback, ciphertext retry persistence, invalid signatures, tamper/replay, identity changes, record binding and missing-key failure. They use two isolated device stores on one emulator, not two physical clients.
+
+The latest original275-check suite and the23-check Signal suite both pass on APK SHA-256 0aa21a915f6de626f3e634fc55bf78e53bb5a9c58db00b8a41e0639a051c6df0. The original harness clears app data; do not run the harnesses concurrently. ARM64/ARMv7/Universal Debug APK verification also passes; physical devices, full UI E2E and release/R8 remain required.
+
 Latest verified checkpoint:275 named API35 checks pass:93 first,34 mutations,76 profile,16 offline,56 restart. The tested APK hash is recorded in artifacts/android-integration.json.
 
 Foreground profile checks use the real distinct session in slot9025 for other-device name/bio edits, avatar replacement, clearing and restoration, then verify a shared-group peer's name/bio/avatar. Actual receiving controller, UserConfig and native SQLite data match; peer profile data survives process restart. The controller preserves existing user and unchanged photo references while applying accepted data. Completed events are drained before controlled empty-cache bio fixtures, preserving all loading/error/Retry assertions. The second device logs out after profile checks. One receiving emulator and API writers are not complete two-Android-device UI acceptance. A native download callback also verifies byte-buffer release after delivery; normal FileLoader download/decoding still passes.

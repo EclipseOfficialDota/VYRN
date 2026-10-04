@@ -1,6 +1,12 @@
 apply plugin: 'com.android.application'
 apply plugin: 'org.telegram.build-app-plugin'
 
+repositories {
+    google()
+    mavenCentral()
+    maven { url 'https://build-artifacts.signal.org/libraries/maven/'; content { includeGroup 'org.signal' } }
+}
+
 dependencies {
     implementation project(':TMessagesProj')
     coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs:2.1.5'
@@ -45,8 +51,8 @@ android {
         }
     }
     compileOptions {
-    sourceCompatibility JavaVersion.VERSION_1_8
-        targetCompatibility JavaVersion.VERSION_1_8
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
         coreLibraryDesugaringEnabled true
     }
     splits {
@@ -59,6 +65,7 @@ android {
     }
     buildFeatures { buildConfig true }
     androidResources { noCompress += 'pack' }
+    packaging.resources.excludes += ['libsignal_jni*.dylib', 'signal_jni*.dll', 'libsignal_jni*.so']
     lint { abortOnError true; disable 'MissingTranslation','ExtraTranslation' }
     if (findProperty('VYRN_LOCAL_TLS') == 'true') {
         sourceSets.debug.res.srcDirs += ['../../.local/android-test-res']

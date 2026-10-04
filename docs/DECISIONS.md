@@ -1,5 +1,13 @@
 # Decisions
 
+## 2026-10-04 — Signal foundation
+- Pin official libsignal0.103.0, official Maven artifacts and upstream license; use JDK21 and Java17 Android source/target. Keep the full corresponding-source/license audit as a release gate.
+- Use a server-generated immutable UUID Signal address for each device-key generation with protocol device number1. Keep account/device session identity separate from the cryptographic address.
+- Public-key publication requires an explicit expected version. Identity/registration are immutable; signed/Kyber rotations require increasing IDs. Identical accepted publications are retryable and claimed EC IDs never return to the available pool.
+- The server validates wire structure; the receiving Signal client verifies signed EC/Kyber signatures. Claims atomically consume one EC key and use the signed last-resort Kyber key when the EC pool is empty.
+- Store private state under Android no-backup storage with Keystore AES-GCM and account/record-bound authenticated data. Ratchet writes and persisted ciphertext/cache changes share one SQLite transaction. Missing keys, changed identities and corrupted records fail closed.
+- Keep private messaging disabled until publication, trust verification, complete device lifecycle, durable network retry, encrypted fanout and the original UI are connected and verified. Foundation tests are not product completion.
+
 ## 2026-09-30 — user-confirmed
 - Use the explicitly requested VYRN child directory, preserving the parent workspace.
 - Pin official Telegram Android at f2908b14133bbffbf7ab04f641ecb5bfaf533242; preserve source attribution and GPL redistribution requirements.

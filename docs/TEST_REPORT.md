@@ -1,6 +1,17 @@
 # Verification report
 
-Updated: 2026-10-03. This records performed checks, not planned tests.
+Updated: 2026-10-04. This records performed checks, not planned tests.
+
+## Signal storage and device-prekey checkpoint — 2026-10-04
+
+- Official libsignal 0.103.0 is pinned; Android builds use JDK21 and Java17 source/target. Actual Android JNI establishes PQXDH sessions with real generated identity, signed EC and Kyber keys.
+- All23 Signal checks pass (17 initial,6 restart) on API35 with distinct application processes. Coverage includes signature rejection, tampering, replay, bidirectional/out-of-order ratchets, immutable peer identity, consumed prekeys, transaction rollback, persisted retry ciphertext, encrypted records, record-binding rejection and missing-Keystore-key failure. Evidence: artifacts/android-signal.json, dated2026-10-04T03:45:21.1936127Z.
+- All275 existing Android checks also pass (93 first,34 mutations,76 profile,16 offline,56 restart). Both suites used local TLS APK SHA-256 0aa21a915f6de626f3e634fc55bf78e53bb5a9c58db00b8a41e0639a051c6df0. Latest regression report: artifacts/android-integration.json, dated2026-10-04T03:53:09.9845592Z.
+- All25 PostgreSQL API tests pass; go vet passes. Device-key coverage includes authenticated publication, owner/private-peer privacy, atomic distinct one-time claims, idempotent replay without replenishing consumed keys, stale versions, immutable identities, key-ID collision/rollback, revoked sessions and blocked peers. Backend test key material is synthetic wire-format data; cryptographic signature verification is tested by the actual Android library.
+- ARM64, ARMv7 and Universal Debug builds and APK verification pass. Each ABI includes Signal JNI; desktop JNI and the local test CA are absent. Debug APKs remain unminified; physical ARM devices and production signing/R8 are untested.
+- SignalStore provides account/device-scoped Keystore encryption and one SQLite transaction for ratchet changes plus application ciphertext/cache records. These are storage primitives, not a completed private outbox.
+- Private-chat UI, client publication/refill/rotation, server encrypted fanout, trust-verification UI, complete device lifecycle and network retries remain unfinished. Two isolated stores on one emulator do not prove two-device interactive messaging. Private sending stays disabled. Full production acceptance remains open.
+- The staged repository scanner passes134 tracked files with no forbidden paths or recognized secret patterns; staged whitespace verification passes. Ignored runtime keys, tools, credentials and APK artifacts are excluded.
 
 ## Foreground profile synchronization checkpoint — 2026-10-03
 

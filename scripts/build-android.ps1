@@ -11,7 +11,8 @@ if($ApiUrl -notmatch '^https://[a-zA-Z][a-zA-Z0-9.-]+(:[0-9]+)?$'){throw 'API mu
 if($Abis -notmatch '^(arm64-v8a|armeabi-v7a|x86_64)(,(arm64-v8a|armeabi-v7a|x86_64))*$'){throw 'Invalid ABI list'}
 if($BuildType -eq 'release'){foreach($name in @('VYRN_KEYSTORE_PATH','VYRN_KEY_ALIAS','VYRN_STORE_PASSWORD','VYRN_KEY_PASSWORD')){if(![Environment]::GetEnvironmentVariable($name)){throw "Required environment variable missing: $name"}}}
 & (Join-Path $root 'android/prepare-upstream.ps1')
-$env:JAVA_HOME=(Get-ChildItem (Join-Path $root '.tools/jdk17') -Directory | Select-Object -First 1).FullName
+$env:JAVA_HOME=Join-Path $root '.tools/jdk21/jdk-21.0.12.1+1'
+if(!(Test-Path -LiteralPath (Join-Path $env:JAVA_HOME 'bin/java.exe'))){throw 'Run scripts/setup-jdk.ps1 first; libsignal requires JDK21'}
 $env:ANDROID_HOME=Join-Path $root '.tools/android-sdk'
 $env:ANDROID_SDK_ROOT=$env:ANDROID_HOME
 $env:GRADLE_USER_HOME=Join-Path $root '.local/gradle'

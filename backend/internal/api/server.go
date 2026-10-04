@@ -86,6 +86,9 @@ func (s *Server) Handler() http.Handler {
 	secure := func(pattern string, fn http.HandlerFunc) { mux.Handle(pattern, s.requireAuth(fn)) }
 	secure("GET /v1/me", s.me)
 	secure("PATCH /v1/me", s.updateProfile)
+	secure("PUT /v1/me/device-keys", s.publishDeviceKeys)
+	secure("GET /v1/users/{id}/device-keys", s.deviceKeys)
+	secure("POST /v1/users/{id}/device-keys/{device}/claim", s.claimDevicePreKey)
 	secure("GET /v1/sessions", s.sessions)
 	secure("DELETE /v1/sessions", s.revokeOtherSessions)
 	secure("DELETE /v1/sessions/{id}", s.revokeSession)

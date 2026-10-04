@@ -26,7 +26,17 @@ Edit 'TMessagesProj/build.gradle' {
  param($t)
  $t=$t -replace "apply plugin: 'com.google.gms.google-services'",''
  $t=$t -replace 'minSdkVersion 21','minSdkVersion 26'
+ $t=$t.Replace('sourceCompatibility JavaVersion.VERSION_1_8','sourceCompatibility JavaVersion.VERSION_17').Replace('targetCompatibility JavaVersion.VERSION_1_8','targetCompatibility JavaVersion.VERSION_17')
  if(!$t.Contains("com.squareup.okhttp3:okhttp:5.3.0")){$t+="`ndependencies { implementation 'com.squareup.okhttp3:okhttp:5.3.0' }`n"}
+ $signalVersion=(Get-Content (Join-Path $root 'libsignal.lock.json') -Raw | ConvertFrom-Json).version
+ if($signalVersion -notmatch '^\d+\.\d+\.\d+$'){throw 'Invalid pinned libsignal version'}
+ if($t.Contains('VYRN_SIGNAL_DEPENDENCIES')){
+ $dependencyPattern="(?m)^dependencies \{ (?:api|implementation) 'org\.signal:libsignal-client:[0-9.]+'; implementation 'org\.signal:libsignal-android:[0-9.]+' \}\r?$"
+ if(![regex]::IsMatch($t,$dependencyPattern)){throw 'Generated libsignal dependency marker is inconsistent'}
+ $t=[regex]::Replace($t,$dependencyPattern,"dependencies { api 'org.signal:libsignal-client:$signalVersion'; implementation 'org.signal:libsignal-android:$signalVersion' }")
+ }else{
+ $t+="`n// VYRN_SIGNAL_DEPENDENCIES`nrepositories { maven { url 'https://build-artifacts.signal.org/libraries/maven/'; content { includeGroup 'org.signal' } } }`ndependencies { api 'org.signal:libsignal-client:$signalVersion'; implementation 'org.signal:libsignal-android:$signalVersion' }`n"
+ }
  if(!$t.Contains('VYRN_API_URL')){
  $extra=@'
 

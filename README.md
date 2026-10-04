@@ -35,6 +35,7 @@ Upstream pin: `f2908b14133bbffbf7ab04f641ecb5bfaf533242` (12.10.6 / 7112). Initi
 
 ```powershell
 ./android/fetch-upstream.ps1
+./scripts/setup-jdk.ps1
 ./scripts/build-android.ps1 -Flavor dev -BuildType debug
 ./scripts/verify-apks.ps1
 ```
