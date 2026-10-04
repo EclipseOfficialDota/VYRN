@@ -2,6 +2,21 @@
 
 Updated: 2026-10-04. This records performed checks, not planned tests.
 
+## VPS private activation — 2026-10-04
+
+Verified Ubuntu 24.04.3 LTS on 217.18.90.114; dedicated Ed25519 key login on root:3939, preserving prior access. Docker 29.1.3 / Compose 2.40.3 run healthy Core and PostgreSQL containers. Core readiness returned ready on loopback18080. Nginx configuration passed validation, and the private owner panel returned HTTP200 through an actual Windows OpenSSH tunnel on loopback19091.
+
+Live API checks passed: owner password login, TOTP unlock, dashboard/users/groups/invites/audit reads, test invitation create/revoke, and test session logout. Secret runtime and owner credential files have mode0600. Compose config validation passed without printing expanded secrets. Release binary SHA256: `522ac0ea90aaba6acb5306a1b74141ffd8911f313c76a45ccad45e71d7012157`.
+
+Public DNS/TLS, public APK connectivity, owner browser login, whole-host reboot and external backup remain unverified. Existing Nginx sites and other host services were preserved. Caddy and calling profiles are inactive.
+
+## Automatic complete Signal recipient acquisition — 2026-10-04
+
+- SignalDeviceKeys.targets validates complete authenticated rosters for both users before any one-time claim:1..3 unique devices per user, ready keys/signatures, globally unique Signal addresses and presence of the producing device with matching local address/version/identity/registration. It excludes only that producer, includes sender other devices, reuses metadata for existing sessions and claims an EC bundle only for a missing session. Claim address/identity/registration/version must match its snapshot. Key Base64 lengths are checked before allocation/decoding.
+- SignalMessages.prepare(peer,conversation,client,text) now acquires these targets automatically for a new send. Existing durable body/fence checks occur before roster networking, preserving exact ciphertext retries and session guards. The backend remains the authoritative roster/version guard at send commit; lifecycle changes during fetch/claim can still require conflict reconciliation.
+- All64 actual HTTPS/JNI/recovery checks pass:58 initial PID7183 and6 restart PID7282. Nine new checks prove unprepared peer and sender-other devices cannot be omitted, a new device's session is established through automatic claims, one message decrypts on two recipient stores and the sender's other store, current sessions consume no extra EC prekeys, cached retries retain original-session binding and exact body, and an accepted retry survives sender-other logout. Report2026-10-04T06:13:55.2472928Z; local TLS APK SHA-2569b0098cd75f40b797ba41a3fc2d1beb2620350f4778e494cd59eff80c732f33a. All27 Signal storage/ratchet/distinct-process restart checks also pass on this APK.
+- Four stores on one emulator are not physical-client/native-UI acceptance. Automatic publication/refill/rotation, receiver directory scheduling, concurrent roster-conflict repair, retry worker/cancellation/retention and explicit trust verification remain incomplete. SignalDeviceKeys construction still obtains /v1/me online, so offline cold-start private history also needs implementation/acceptance. Backend source is unchanged from29 API/vet checks;275 original UI checks retain their previously recorded APK.
+
 ## Private codec process recovery — 2026-10-04
 
 - scripts/test-signal.ps1 -Network now executes signal-network and signal-network-restart with an actual am force-stop between phases and verifies distinct process IDs. App-private handoff contains only ciphertext/public routing state and SHA-256 ratchet fingerprints; credentials remain in TokenVault and private sessions remain encrypted in SignalStore. Finally runs idempotent test-account logout and removes both private fixture/state files, including after test failure.

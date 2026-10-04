@@ -19,6 +19,12 @@ public final class SignalMessages {
     private final SignalStore store;
     public SignalMessages(SignalDeviceKeys keys){this.keys=keys;store=keys.store;}
 
+    /** Existing ciphertext retries stay offline; only new sends acquire the complete current roster. */
+    public String prepare(String peer,String conversation,String client,String text) throws Exception {synchronized(keys.guard()){
+        keys.requireSession();id(peer);id(conversation);id(client);text(text);if(peer.equals(keys.user))throw new IllegalArgumentException("signal_private_peer_required");if(store.loadValue("private-send-fence",client)!=null || store.loadValue("private-outgoing",client)!=null)return prepare(peer,conversation,client,text,null);
+        return prepare(peer,conversation,client,text,keys.targets(peer));
+    }}
+
     /** Caller obtains the complete verified ready-device snapshot before entering this transaction. */
     public String prepare(String peer,String conversation,String client,String text,List<SignalDeviceKeys.ClaimedKey> targets) throws Exception {synchronized(keys.guard()){
         keys.requireSession();id(peer);id(conversation);id(client);text(text);if(peer.equals(keys.user))throw new IllegalArgumentException("signal_private_peer_required");

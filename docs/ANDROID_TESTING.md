@@ -1,5 +1,9 @@
 # Local Android integration
 
+## Automatic complete-device acquisition — 2026-10-04
+
+The latest network harness passes64 checks (58 initial,6 distinct-process recovery) on APK SHA-2569b0098cd75f40b797ba41a3fc2d1beb2620350f4778e494cd59eff80c732f33a. Automatic prepare reads/validates both complete ready-device rosters, claims only missing sessions and sends actual authenticated copies to two recipient stores plus the sender's other store. Unprepared devices on both users, no extra claims for existing sessions, session-bound/exact retries and accepted retry after sender-other logout pass. All27 Signal storage/restart checks also pass. This uses four isolated stores on one emulator; private UI, offline cold-start key-service construction and lifecycle/retry/verification scheduling remain incomplete.
+
 ## Private codec across actual process death — 2026-10-04
 
 scripts/test-signal.ps1 -Network now passes55 checks across two distinct processes (49 initial,6 recovery). After force-stop, the codec reads both encrypted history caches, reuses the pending body without advancing its ratchet, serves duplicates without decrypting again, recovers the acknowledged server ID and delivers an earlier-prepared pending ciphertext out of order once. Report2026-10-04T06:04:28.4933285Z, APK SHA-2567d7172bd86c0f044d260b3c05538f949479f4286429b5092f3b9d598154ea800. Session cleanup and deletion of both app-private test fixture/state files run in finally. State contains public routing/ciphertext and ratchet hashes, not private keys, tokens or decoded text. These are service tests on one emulator; native UI/lifecycle workers and uncertain acknowledgement-loss recovery still require acceptance.

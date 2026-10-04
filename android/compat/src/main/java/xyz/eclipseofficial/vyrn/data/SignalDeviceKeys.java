@@ -5,6 +5,10 @@ import android.content.Context;
 import android.util.Base64;
 import java.nio.charset.StandardCharsets;
 import java.util.UUID;
+import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Set;
 import org.json.JSONArray;
 import org.json.JSONObject;
 import org.signal.libsignal.protocol.IdentityKey;
@@ -53,6 +57,33 @@ public final class SignalDeviceKeys implements AutoCloseable {
         JSONObject response=(JSONObject)request("POST","/v1/users/"+recipient+"/device-keys/"+recipientDevice+"/claim",new JSONObject().put("expected_version",version));
         return parseClaim(response,recipient,recipientDevice,version);
     }
+    /** Validate both complete rosters before consuming any one-time keys. */
+    public List<ClaimedKey> targets(String peer) throws Exception {synchronized(guard()){
+        requireSession();id(peer);if(peer.equals(user))throw new IllegalArgumentException("signal_private_peer_required");
+        JSONObject local=acknowledged();List<ClaimedKey> targets=new ArrayList<>();Set<String> addresses=new HashSet<>();boolean producer=false;
+        for(String owner:new String[]{user,peer}){
+            JSONArray roster=devices(owner);if(roster.length()<1 || roster.length()>3)throw new SecurityException("invalid_signal_roster");Set<String> devices=new HashSet<>();
+            for(int i=0;i<roster.length();i++){
+                JSONObject item=roster.getJSONObject(i);String targetDevice=id(item.getString("device_id"));
+                if(!devices.add(targetDevice) || item.get("ready")!=Boolean.TRUE)throw new SecurityException("signal_device_not_ready");
+                ClaimedKey target=parseClaim(new JSONObject(item.toString()).put("user_id",owner).put("prekey",JSONObject.NULL),owner,targetDevice,integer(item,"version"));
+                if(!addresses.add(target.address.getName()))throw new SecurityException("invalid_signal_roster");
+                if(owner.equals(user) && targetDevice.equals(device)){
+                    producer=true;if(!target.address.getName().equals(local.getString("signal_address_id")) || target.version!=integer(local,"version") || !target.bundle.getIdentityKey().equals(store.getIdentityKeyPair().getPublicKey()) || target.bundle.getRegistrationId()!=store.getLocalRegistrationId())throw new SecurityException("signal_local_publication_changed");
+                }else targets.add(target);
+            }
+        }
+        if(!producer || targets.isEmpty() || targets.size()>5)throw new SecurityException("invalid_signal_roster");
+        for(int i=0;i<targets.size();i++){
+            ClaimedKey snapshot=targets.get(i);
+            if(!store.containsSession(snapshot.address)){
+                ClaimedKey claimed=claim(snapshot.user,snapshot.device,snapshot.version);
+                if(!snapshot.address.equals(claimed.address) || !snapshot.bundle.getIdentityKey().equals(claimed.bundle.getIdentityKey()) || snapshot.bundle.getRegistrationId()!=claimed.bundle.getRegistrationId())throw new SecurityException("signal_roster_changed");
+                targets.set(i,claimed);
+            }
+        }
+        return targets;
+    }}
     public static ClaimedKey parseClaim(JSONObject response,String recipient,String device,int version) throws Exception {
         id(recipient);id(device);
         if(version<1 || !recipient.equals(response.getString("user_id")) || !device.equals(response.getString("device_id")) || integer(response,"version")!=version)throw new SecurityException("signal_claim_mismatch");
@@ -70,7 +101,7 @@ public final class SignalDeviceKeys implements AutoCloseable {
     }
     private static int integer(JSONObject object,String field) throws Exception {Object value=object.get(field);if(!(value instanceof Integer) && !(value instanceof Long))throw new SecurityException("invalid_signal_integer");long number=((Number)value).longValue();if(number<0 || number>Integer.MAX_VALUE)throw new SecurityException("invalid_signal_integer");return (int)number;}
     private static int keyId(JSONObject key) throws Exception {int id=integer(key,"id");if(id>16777215)throw new SecurityException("invalid_signal_key_id");return id;}
-    private static byte[] bytes(String value,int size,int prefix){byte[] decoded=Base64.decode(value,Base64.NO_WRAP);if(decoded.length!=size || prefix>=0 && decoded[0]!=(byte)prefix || !Base64.encodeToString(decoded,Base64.NO_WRAP).equals(value))throw new SecurityException("invalid_signal_key_encoding");return decoded;}
+    private static byte[] bytes(String value,int size,int prefix){if(value.length()!=4*((size+2)/3))throw new SecurityException("invalid_signal_key_encoding");byte[] decoded=Base64.decode(value,Base64.NO_WRAP);if(decoded.length!=size || prefix>=0 && decoded[0]!=(byte)prefix || !Base64.encodeToString(decoded,Base64.NO_WRAP).equals(value))throw new SecurityException("invalid_signal_key_encoding");return decoded;}
     private static String id(String value){if(!UUID.fromString(value).toString().equals(value))throw new IllegalArgumentException("invalid_signal_id");return value;}
     public static final class ClaimedKey {
         public final String user,device;

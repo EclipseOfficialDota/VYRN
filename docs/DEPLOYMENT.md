@@ -1,14 +1,22 @@
 # Deployment runbook
 
-Status: configuration prepared; **VPS not provisioned and production not deployed**.
+Status (2026-10-04): **VPS provisioned; Core and PostgreSQL healthy; owner panel active through SSH only. Public DNS/TLS and public Android connectivity remain pending.** See [Persian owner guide](OWNER_GUIDE.fa.md).
+
+## Active deployment
+
+The actual host is Ubuntu 24.04.3 LTS, with Docker 29.1.3 and Compose 2.40.3 installed from Ubuntu packages. Source release: `/opt/vyrn/releases/vps-initial-20261004`, linked as `/opt/vyrn/current`. Run Compose with both `deployment/compose.yaml` and `deployment/compose.existing-nginx.yaml` and `/etc/vyrn/runtime.env`. Core listens only on `127.0.0.1:18080`; PostgreSQL is unpublished. Caddy is excluded by its `standalone-proxy` profile because existing Nginx uses 80/443. The owner panel Nginx site listens only on `127.0.0.1:19091`.
+
+Dedicated key login was verified. Existing root/password access, SSH settings, firewall policy and unrelated services were preserved. Owner credentials live only in `/etc/vyrn/owner-access.json` mode 0600. Owner login, TOTP, all panel read endpoints, invite creation/revocation and session logout passed on the VPS. Bootstrap environment was removed. Containers use restart `unless-stopped` and Docker is enabled; whole-host reboot has not been tested.
+
+The prebuilt image copies the executable with mode 0755. Normalize exported release directories to 0755 and static/source files to 0644 before Nginx serves them; secret files remain outside the release at 0600. Public Nginx VYRN hosts and matching certificates must still be configured after DNS. Do not start Caddy on the existing public ports.
 
 ## Prerequisites
 
-Confirmed target: `217.18.90.114`, expected Ubuntu 24.04.3 LTS, SSH `root` on port `3939`, 4 GB RAM and 40 GB disk. The dedicated new key is not yet accepted. Install only `.local/ssh/vyrn_ed25519.pub` via the provider console or an existing authenticated session. Never transfer the private half. Verify the host fingerprint independently.
+Confirmed target: `217.18.90.114`, Ubuntu 24.04.3 LTS, SSH `root` on port `3939`, about 4 GB RAM and 40 GB disk. Dedicated key login is accepted. Never transfer the private half. The recorded host fingerprint was checked against the existing known-host entry.
 
 Run read-only checks first: `/etc/os-release`, `uname`, RAM, disk, existing services, listeners, firewall, Docker, users, SSH effective settings and timezone. Preserve current services and access. Create a non-root administrative user and confirm its SSH key login in a separate session before changing any access policy. Root login and password authentication require separate explicit user approval to disable.
 
-## Host setup sequence
+## Future standalone-host setup reference (not the active existing-Nginx deployment)
 
 1. Configure `Asia/Tehran`, unattended security updates and Fail2ban on SSH port 3939.
 2. Keep `3939/tcp` open before enabling UFW; allow `80/tcp` and `443/tcp`. Do not open relay ports before provider confirmation.

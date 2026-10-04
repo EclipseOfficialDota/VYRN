@@ -1,6 +1,6 @@
 # VYRN project memory
 
-Updated 2026-10-04. Development is unfinished. No production release or VPS deployment is claimed.
+Updated 2026-10-04. Development is unfinished. VPS Core/PostgreSQL and private owner panel are deployed; public DNS/TLS and production Android release remain pending. See the VPS activation update below.
 
 ## Authoritative decisions
 - Root: C:/Users/PC/Documents/ChatGPT/Telegram/VYRN; parent workspace preserved.
@@ -104,3 +104,6 @@ Preceding checkpoint: All117 named emulator checks pass across first/offline/res
 7. After prerequisites: VPS read-only audit/hardening, restricted admin, DNS/TLS, encrypted external backup, final logo/signing, gated TURN.
 
 Keep docs/ACCEPTANCE.md and docs/TEST_REPORT.md aligned with actual results. Product is complete only when every required production and end-to-end acceptance criterion passes.
+# VPS activation update — 2026-10-04
+
+Authoritative override of earlier SSH/deployment blockers: owner explicitly authorized VPS login/upload/activation. Dedicated key login works on root@217.18.90.114:3939. Ubuntu24.04.3 verified. Docker29.1.3/Compose2.40.3 installed via official Ubuntu packages. Core/PostgreSQL healthy under `/opt/vyrn/current` -> `/opt/vyrn/releases/vps-initial-20261004`, with compose.existing-nginx.yaml. Core127.0.0.1:18080, owner Nginx127.0.0.1:19091, Windows SSH tunnel verified. Caddy inactive, existing Nginx/sites/services and root/password access preserved. Owner login/TOTP/read endpoints/invite create-revoke/logout passed. Credentials only `/etc/vyrn/owner-access.json`0600 and runtime.env0600; no secrets exported. Owner email owner@vyrn.local. Owner guide docs/OWNER_GUIDE.fa.md. Native key ACL restricted to PC/System/Admin, extra sandbox grant removed. Public DNS/TLS absent; Cloudflare env absent; no raw-IP cleartext fallback. Full project still incomplete; do not mark goal complete. Release signing/TURN/external backup/logo/GitHub and remaining Android flows stay pending. Whole-host reboot not tested.

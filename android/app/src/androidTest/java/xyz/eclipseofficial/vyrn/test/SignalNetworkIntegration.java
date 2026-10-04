@@ -107,8 +107,12 @@ final class SignalNetworkIntegration {
             try(SignalDeviceKeys bob2=new SignalDeviceKeys(context,second)){
                 denied=false;try{a.request("POST","/v1/conversations/"+conversation+"/messages",new JSONObject(input.toString()).put("client_id",UUID.randomUUID().toString()),true);}catch(RestRepository.ApiException expected){denied=expected.status==409;}
                 check.accept(denied,"signal_network_unprepared_device_not_omitted");
+                String unpreparedClient=UUID.randomUUID().toString();byte[] beforeRoster=alice.store.loadSession(ba).serialize();denied=false;
+                try{new SignalMessages(alice).prepare(bob.user,conversation,unpreparedClient,"دستگاه آماده نیست");}catch(SecurityException expected){denied=true;}
+                check.accept(denied && alice.store.loadValue("private-outgoing",unpreparedClient)==null && Arrays.equals(beforeRoster,alice.store.loadSession(ba).serialize()),"signal_auto_roster_unprepared_device_stops_before_encryption");
                 SignalProtocolAddress b2a=bob2.publishInitial();
                 check.accept(bob2.device.equals(alice.device) && !b2a.equals(aa) && !bob2.device.equals(second.vault.device()),"signal_network_cross_account_device_UUID_addresses");
+                automatic(context,fixture,a,b,second,alice,bob,bob2,conversation,check);
                 SignalDeviceKeys.ClaimedKey b2key=alice.claim(bob2.user,bob2.device,1);
                 alice.store.transaction(()->{new SessionBuilder(alice.store,b2a,aa).process(b2key.bundle);return null;});
                 JSONObject copies=alice.store.transaction(()->new JSONObject().put(ba.getName(),recipient(bob,new SessionCipher(alice.store,aa,ba).encrypt(text))).put(b2a.getName(),recipient(bob2,new SessionCipher(alice.store,aa,b2a).encrypt(text))));
@@ -132,6 +136,31 @@ final class SignalNetworkIntegration {
     }
 
     private static final String RESTART_TEXT="بازیابی پیام خصوصی 🔐";
+    private static void automatic(Context context,JSONObject fixture,RestRepository a,RestRepository b,RestRepository second,SignalDeviceKeys alice,SignalDeviceKeys bob,SignalDeviceKeys bob2,String conversation,BiConsumer<Boolean,String> check) throws Exception {
+        RestRepository other=new RestRepository(new TokenVault(context,9105));other.vault.clear();
+        other.vault.save((JSONObject)other.request("POST","/v1/auth/login",new JSONObject().put("email",fixture.getString("email").replace("@","a@")).put("password",fixture.getString("password")).put("device_id",other.vault.device()).put("device_name","Signal producer second device"),false));
+        try(SignalDeviceKeys alice2=new SignalDeviceKeys(context,other)){
+        boolean unprepared=false;try{alice.targets(bob.user);}catch(SecurityException expected){unprepared=true;}
+        check.accept(unprepared,"signal_auto_roster_sender_other_device_must_be_ready");alice2.publishInitial();
+        SignalMessages sending=new SignalMessages(alice);String client=UUID.randomUUID().toString(),text="فهرست خودکار دستگاه‌ها";
+        String body=sending.prepare(bob.user,conversation,client,text);
+        JSONObject copies=new JSONObject(body).getJSONObject("payload").getJSONObject("devices");
+        check.accept(copies.length()==3 && alice.store.containsSession(new SignalProtocolAddress(bob2.publishInitial().getName(),1)),"signal_auto_roster_claims_new_device_and_complete_fanout");
+        String message=sending.send(client);
+        JSONArray senders=bob.devices(alice.user);JSONObject senderMetadata=null;
+        for(int i=0;i<senders.length();i++)if(alice.device.equals(senders.getJSONObject(i).getString("device_id")))senderMetadata=new JSONObject(senders.getJSONObject(i).toString()).put("user_id",alice.user).put("prekey",JSONObject.NULL);
+        SignalDeviceKeys.ClaimedKey sender=SignalDeviceKeys.parseClaim(senderMetadata,alice.user,alice.device,1);
+        check.accept(text.equals(new SignalMessages(bob).receive(alice.user,conversation,(JSONObject)b.request("GET","/v1/messages/"+message,null,true),sender)) && text.equals(new SignalMessages(bob2).receive(alice.user,conversation,(JSONObject)second.request("GET","/v1/messages/"+message,null,true),sender)),"signal_auto_roster_new_session_ciphertext_two_device_delivery");
+        check.accept(text.equals(new SignalMessages(alice2).receive(bob.user,conversation,(JSONObject)other.request("GET","/v1/messages/"+message,null,true),sender)),"signal_auto_roster_sender_other_device_decrypts_own_history");
+        other.request("POST","/v1/auth/logout",new JSONObject(),true);other.vault.clear();
+        check.accept(body.equals(sending.prepare(bob.user,conversation,client,text)) && message.equals(sending.send(client)),"signal_auto_roster_committed_retry_after_sender_device_logout");
+        java.util.List<SignalDeviceKeys.ClaimedKey> metadata=alice.targets(bob.user);
+        boolean noClaims=metadata.size()==2;for(SignalDeviceKeys.ClaimedKey key:metadata)noClaims &= key.bundle.getPreKeyId()==org.signal.libsignal.protocol.state.PreKeyBundle.NULL_PRE_KEY_ID;
+        check.accept(noClaims && alice.claim(bob2.user,bob2.device,1).bundle.getPreKeyId()==2,"signal_auto_roster_existing_sessions_do_not_consume_prekeys");
+        JSONObject original=a.vault.load();try{a.vault.save(b.vault.load());boolean denied=false;try{sending.prepare(bob.user,conversation,client,text);}catch(SecurityException expected){denied=true;}check.accept(denied,"signal_auto_roster_cached_retry_original_session_guard");}finally{a.vault.save(original);}
+        check.accept(body.equals(sending.prepare(bob.user,conversation,client,text)),"signal_auto_roster_retry_reuses_persisted_ciphertext");
+        }finally{try{if(other.vault.load().has("access_token"))other.request("POST","/v1/auth/logout",new JSONObject(),true);}finally{other.vault.clear();}}
+    }
     private static String fingerprint(byte[] value) throws Exception {return Base64.encodeToString(java.security.MessageDigest.getInstance("SHA-256").digest(value),Base64.NO_WRAP);}
     private static void prepareRestart(Context context,RestRepository a,RestRepository b,SignalDeviceKeys alice,SignalDeviceKeys bob,String conversation,BiConsumer<Boolean,String> check) throws Exception {
         SignalMessages outgoing=new SignalMessages(alice),incoming=new SignalMessages(bob);
@@ -186,9 +215,9 @@ final class SignalNetworkIntegration {
         check.accept(message.equals(sending.send(client)) && text.equals(sending.cachedText(message)) && Arrays.equals(prepared,alice.store.loadSession(targets.get(0).address).serialize()),"signal_codec_http_retry_and_own_cache");
         JSONObject delivered=(JSONObject)b.request("GET","/v1/messages/"+message,null,true);
         JSONObject changed=new JSONObject(delivered.toString()).put("client_id",UUID.randomUUID().toString());
-        byte[] receiveBefore=bob.store.loadSession(senderKey.address).serialize();
+        byte[] receiveBefore=bob.store.loadSession(senderKey.address).serialize(),bindingBefore=bob.store.loadValue("private-peer",alice.user+"_"+alice.device);
         denied=false;try{receiving.receive(alice.user,conversation,changed,senderKey);}catch(SecurityException expected){denied=true;}
-        check.accept(denied && Arrays.equals(receiveBefore,bob.store.loadSession(senderKey.address).serialize()) && bob.store.loadValue("private-peer",alice.user+"_"+alice.device)==null,"signal_codec_authenticated_inner_rejection_rolls_back_receive");
+        check.accept(denied && Arrays.equals(receiveBefore,bob.store.loadSession(senderKey.address).serialize()) && Arrays.equals(bindingBefore,bob.store.loadValue("private-peer",alice.user+"_"+alice.device)),"signal_codec_authenticated_inner_rejection_rolls_back_receive");
         check.accept(text.equals(receiving.receive(alice.user,conversation,delivered,senderKey)) && text.equals(receiving2.receive(alice.user,conversation,(JSONObject)second.request("GET","/v1/messages/"+message,null,true),senderKey)),"signal_codec_two_device_authenticated_plaintext_delivery");
         byte[] after=bob.store.loadSession(senderKey.address).serialize();
         check.accept(text.equals(receiving.receive(alice.user,conversation,delivered,null)) && Arrays.equals(after,bob.store.loadSession(senderKey.address).serialize()) && text.equals(sending.receive(bob.user,conversation,(JSONObject)a.request("GET","/v1/messages/"+message,null,true),null)),"signal_codec_duplicate_and_producing_device_history_cache");
