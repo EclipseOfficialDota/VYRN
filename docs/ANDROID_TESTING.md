@@ -1,5 +1,9 @@
 # Local Android integration
 
+## Authenticated private text codec — 2026-10-04
+
+The latest scripts/test-signal.ps1 -Network run passes39 checks on APK SHA-256 47d8700db1c728e2975083bb6aae9d8c635abc6d5bfdf7e1a03b5b421ee6e0b7. SignalMessages now persists all fanout ratchets and exact outgoing body/own cache atomically, retries unchanged ciphertext, validates authenticated inner conversation/client/revision/participants/sender/recipient/routing metadata, and commits decrypt state with encrypted receive cache. Actual failure/retry/tamper/two-recipient/cache-reopen checks pass. Deletion tests inject a tombstone DTO, so server deletion/realtime acceptance is still required. Private UI, scheduling, explicit verification, rotation, expiry and two physical clients remain unverified. Historical sections retain their original scope.
+
 ## Actual private ciphertext service delivery — 2026-10-04
 
 The latest scripts/test-signal.ps1 -Network run passes27 checks. Real Signal ciphertext is sent through POST /v1/conversations/{id}/messages with the signal-v2 envelope, retrieved through authorized GET /v1/messages/{id} and decrypted by the recipient. A later message has distinct copies for two recipient stores, and both decrypt their own copy retrieved through their actual sessions. The second recipient uses the sender's physical device UUID under a different account; authenticated profile identity and separate Signal addresses/storage namespaces disambiguate it. Unprepared/revoked destinations and exact accepted retry after revocation are checked.

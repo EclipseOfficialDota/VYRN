@@ -55,5 +55,5 @@ foreach($phase in $phases){
     if($Network){& $adb -s $Serial shell run-as $package rm -f files/vyrn-signal-network-fixture.json;if($LASTEXITCODE -ne 0){throw 'Private Signal fixture cleanup failed'}}
 }
 $fanout='not tested'
-if($Network){$fanout='single and two-recipient-device ciphertext delivery; service only'}
+if($Network){$fanout='single and two-recipient-device ciphertext delivery; authenticated text codec, atomic outbox/cache; service only'}
 @{date=[DateTimeOffset]::UtcNow.ToString('o');sha256=(Get-FileHash -LiteralPath $apk).Hash.ToLowerInvariant();api=35;library='org.signal:libsignal-client:0.103.0';rounds=$rounds;private_chat_ui='not implemented';server_fanout=$fanout;network_key_exchange=$Network.IsPresent} | ConvertTo-Json -Depth 6 | Set-Content (Join-Path $root "artifacts/$report") -Encoding utf8

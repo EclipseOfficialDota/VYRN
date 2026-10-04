@@ -118,6 +118,7 @@ final class SignalNetworkIntegration {
                 byte[] firstText=bob.store.transaction(()->decrypt(new SessionCipher(bob.store,ba,aa),firstCopy));
                 byte[] secondText=bob2.store.transaction(()->decrypt(new SessionCipher(bob2.store,b2a,aa),secondCopy));
                 check.accept(Arrays.equals(firstText,text) && Arrays.equals(secondText,text) && !firstCopy.getString("ciphertext").equals(secondCopy.getString("ciphertext")),"signal_network_two_recipient_devices_decrypt_server_copies");
+                codec(context,a,b,second,alice,bob,bob2,conversation,Arrays.asList(fallback,b2key),check);
                 second.request("POST","/v1/auth/logout",new JSONObject(),true);
                 denied=false;try{a.request("POST","/v1/conversations/"+conversation+"/messages",new JSONObject(multiple.toString()).put("client_id",UUID.randomUUID().toString()),true);}catch(RestRepository.ApiException expected){denied=expected.status==409;}
                 check.accept(denied,"signal_network_revoked_recipient_copy_rejected");
@@ -127,5 +128,40 @@ final class SignalNetworkIntegration {
             try{a.request("POST","/v1/auth/logout",new JSONObject(),true);}finally{a.vault.clear();}
             try{b.request("POST","/v1/auth/logout",new JSONObject(),true);}finally{b.vault.clear();}
         }
+    }
+
+    private static void codec(Context context,RestRepository a,RestRepository b,RestRepository second,SignalDeviceKeys alice,SignalDeviceKeys bob,SignalDeviceKeys bob2,String conversation,java.util.List<SignalDeviceKeys.ClaimedKey> targets,BiConsumer<Boolean,String> check) throws Exception {
+        SignalMessages sending=new SignalMessages(alice),receiving=new SignalMessages(bob),receiving2=new SignalMessages(bob2);
+        SignalDeviceKeys.ClaimedKey senderKey=bob.claim(alice.user,alice.device,1);
+        String client=UUID.randomUUID().toString(),text="پیام خصوصی پایدار 🔐";
+        byte[] before=alice.store.loadSession(targets.get(0).address).serialize();
+        File database=new File(context.getNoBackupFilesDir(),"vyrn_signal_"+alice.user+"_"+alice.device+".db");
+        try(SQLiteDatabase db=SQLiteDatabase.openDatabase(database.getAbsolutePath(),null,SQLiteDatabase.OPEN_READWRITE)){db.execSQL("CREATE TRIGGER fail_private_outgoing BEFORE INSERT ON records WHEN NEW.kind='app:private-outgoing' BEGIN SELECT RAISE(ABORT,'fixture_outgoing_failure'); END");}
+        boolean denied=false;try{sending.prepare(bob.user,conversation,client,text,targets);}catch(Exception expected){denied=true;}
+        check.accept(denied && alice.store.loadValue("private-outgoing",client)==null && alice.store.loadValue("private-own",client)==null && Arrays.equals(before,alice.store.loadSession(targets.get(0).address).serialize()),"signal_codec_outgoing_failure_rolls_back_ratchet_and_cache");
+        try(SQLiteDatabase db=SQLiteDatabase.openDatabase(database.getAbsolutePath(),null,SQLiteDatabase.OPEN_READWRITE)){db.execSQL("DROP TRIGGER fail_private_outgoing");}
+        String body=sending.prepare(bob.user,conversation,client,text,targets);byte[] prepared=alice.store.loadSession(targets.get(0).address).serialize();
+        check.accept(body.equals(sending.prepare(bob.user,conversation,client,text,targets)) && Arrays.equals(prepared,alice.store.loadSession(targets.get(0).address).serialize()) && !body.contains(text),"signal_codec_prepare_retry_exact_ciphertext_no_ratchet_advance");
+        denied=false;try{sending.prepare(bob.user,conversation,client,"changed",targets);}catch(SecurityException expected){denied=true;}
+        check.accept(denied,"signal_codec_client_id_plaintext_conflict");
+        String message=sending.send(client);
+        check.accept(message.equals(sending.send(client)) && text.equals(sending.cachedText(message)) && Arrays.equals(prepared,alice.store.loadSession(targets.get(0).address).serialize()),"signal_codec_http_retry_and_own_cache");
+        JSONObject delivered=(JSONObject)b.request("GET","/v1/messages/"+message,null,true);
+        JSONObject changed=new JSONObject(delivered.toString()).put("client_id",UUID.randomUUID().toString());
+        byte[] receiveBefore=bob.store.loadSession(senderKey.address).serialize();
+        denied=false;try{receiving.receive(alice.user,conversation,changed,senderKey);}catch(SecurityException expected){denied=true;}
+        check.accept(denied && Arrays.equals(receiveBefore,bob.store.loadSession(senderKey.address).serialize()) && bob.store.loadValue("private-peer",alice.user+"_"+alice.device)==null,"signal_codec_authenticated_inner_rejection_rolls_back_receive");
+        check.accept(text.equals(receiving.receive(alice.user,conversation,delivered,senderKey)) && text.equals(receiving2.receive(alice.user,conversation,(JSONObject)second.request("GET","/v1/messages/"+message,null,true),senderKey)),"signal_codec_two_device_authenticated_plaintext_delivery");
+        byte[] after=bob.store.loadSession(senderKey.address).serialize();
+        check.accept(text.equals(receiving.receive(alice.user,conversation,delivered,null)) && Arrays.equals(after,bob.store.loadSession(senderKey.address).serialize()) && text.equals(sending.receive(bob.user,conversation,(JSONObject)a.request("GET","/v1/messages/"+message,null,true),null)),"signal_codec_duplicate_and_producing_device_history_cache");
+        changed=new JSONObject(delivered.toString()).put("id",UUID.randomUUID().toString());denied=false;try{receiving.receive(alice.user,conversation,changed,null);}catch(SecurityException expected){denied=true;}
+        check.accept(denied,"signal_codec_ciphertext_message_id_rebound_rejected");
+        try(SignalDeviceKeys reopened=new SignalDeviceKeys(context,b)){check.accept(text.equals(new SignalMessages(reopened).cachedText(message)) && text.equals(new SignalMessages(reopened).receive(alice.user,conversation,delivered,null)),"signal_codec_encrypted_cache_survives_store_reopen");}
+        JSONObject tombstone=new JSONObject(delivered.toString()).put("deleted_at",java.time.Instant.now().toString());
+        check.accept(receiving.receive(alice.user,conversation,tombstone,null)==null && receiving.cachedText(message)==null,"signal_codec_deletion_purges_decrypted_cache");
+        denied=false;try{receiving.receive(alice.user,conversation,delivered,null);}catch(SecurityException expected){denied=true;}
+        check.accept(denied,"signal_codec_deleted_history_cannot_resurrect");
+        sending.receive(bob.user,conversation,tombstone,null);denied=false;try{sending.send(client);}catch(SecurityException expected){denied=true;}
+        check.accept(denied && sending.cachedText(message)==null && alice.store.loadValue("private-outgoing",client)==null,"signal_codec_deleted_own_message_fences_outbox");
     }
 }
