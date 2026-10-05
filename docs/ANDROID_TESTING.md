@@ -87,3 +87,7 @@ Normal public-endpoint Debug builds now support a separate instrumentation APK:
 ```
 
 Branding checks reset only the disposable vyrn_api35 app, verify localized names and the original logo mask, then require the real fresh login hierarchy before capturing its screenshot. Inspect artifacts/vyrn-login.png separately. The public connectivity test does not create accounts or reset app data. Its latest result fails at app-UID DNS (UnknownHostException); shell DNS succeeds. This supersedes the older statement that foreground launch alone resolved DNS for every build. Do not count production Android networking as verified.
+
+## Public connectivity correction — 2026-10-05
+
+The earlier app-UID DNS failure is resolved for the foreground test. Android blocked background instrumentation with APP_BACKGROUND. public-connectivity now launches and waits for LaunchActivity before requesting DNS and HTTPS. All eight read-only checks pass after the script force-stops the old process. Platform DNS, certificate validation and cleartext prohibition remain intact; no networking policy exemption was added. This supersedes the previous DNS-failure paragraph and does not verify background connectivity, authentication or physical ARM devices.

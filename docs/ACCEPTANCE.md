@@ -1,13 +1,13 @@
 # Acceptance matrix
 
-Updated 2026-10-04. A route existing or a build compiling does **not** establish end-to-end completion.
+Updated 2026-10-05. A route existing or a build compiling does **not** establish end-to-end completion.
 
 | Requirement | Current evidence | Remaining work |
 |---|---|---|
 | Local repository and memory | Root, main/develop/work branch, confirmed config and ignored secrets established | Keep memory current; no remote yet |
 | Telegram source pin | Exact commit and submodules downloaded | Reproducible source export and full branding audit |
 | Original Telegram UI | Original UI compiled through VyrnApp; login and adapter overlays supplied | Finish all unsupported UI paths and settings; device verification |
-| Owner branding | Original owner JPG preserved; native Telegram login controls, display-name localization, adaptive/monochrome/splash/notification/QR marks implemented; Debug builds pass | Full upstream visual audit, original SVG and physical device checks; public Android app DNS failure unresolved |
+| Owner branding | Original owner JPG preserved; native Telegram login controls, display-name localization, adaptive/monochrome/splash/notification/QR marks implemented; Debug builds pass | Full upstream visual audit, original SVG and physical device checks |
 | Debug APK | ARM64/ARMv7/Universal built; signatures/ABIs/manifest verified; x86_64 emulator installed and launched | Functional client E2E and physical ARM-device checks |
 | Production release APKs/AAB | Flavors and release signing gate configured | User keystore variables, universal/ABI builds, R8/device tests |
 | Backend executable | Go executable built; loopback readiness returned ready | More coverage, operational/load/security review |

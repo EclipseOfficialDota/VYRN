@@ -105,6 +105,11 @@ public final class LocalIntegrationRunner extends Instrumentation {
         check(BuildConfig.VYRN_API_URL.equals("https://api.vyrn.eclipseofficial.xyz"),"public_endpoint_required");
         check(!NetworkSecurityPolicy.getInstance().isCleartextTrafficPermitted("api.vyrn.eclipseofficial.xyz"),"public_cleartext_disabled");
         passed.put("public_endpoint_and_cleartext_policy");
+        stage="public_foreground_activity";
+        Intent launch=new Intent(Intent.ACTION_MAIN).setClassName(context,"org.telegram.ui.LaunchActivity").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        check(startActivitySync(launch)!=null,"public_foreground_activity");
+        waitForIdleSync();
+        passed.put("public_foreground_activity");
         stage="public_DNS";
         check(java.net.InetAddress.getAllByName("api.vyrn.eclipseofficial.xyz").length>0,"public_DNS");
         passed.put("public_DNS");
