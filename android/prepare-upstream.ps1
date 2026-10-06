@@ -256,6 +256,9 @@ Edit 'TMessagesProj/src/main/java/org/telegram/messenger/MessagesController.java
  if($fullStart -lt 0 -or $fullEnd -lt 0){throw 'Pinned full-profile loading section missing'}
  $fullSection=$t.Substring($fullStart,$fullEnd-$fullStart)
  $fullSignature='public void loadFullUser(final TLRPC.User user, int classGuid, boolean force, Utilities.Callback<TLRPC.UserFull> whenReceivedFullUser) {'
+ $logoutSignature='public void performLogout(int type) {'
+ if(!$t.Contains($logoutSignature)){throw 'Pinned native logout entry missing'}
+ $t=$t.Replace($logoutSignature,$logoutSignature+"`n        if (type == 1) { xyz.eclipseofficial.vyrn.compat.VyrnBridge.logout(currentAccount, () -> performLogout(0)); return; }")
  $fullOverload=@'
 public void loadFullUser(final TLRPC.User user, int classGuid, boolean force, Utilities.Callback<TLRPC.UserFull> whenReceivedFullUser) {
         loadFullUser(user, classGuid, force, whenReceivedFullUser, null);
@@ -681,6 +684,10 @@ Edit 'TMessagesProj/src/main/java/org/telegram/ui/IntroActivity.java' {
  param($t)
  $t=(& git -c "safe.directory=$($upstream.Replace('\','/'))" -C $upstream show "${pin}:TMessagesProj/src/main/java/org/telegram/ui/IntroActivity.java") -join "`n"
  $t=$t.Replace('new LoginActivity().setIntroView(frameContainerView, startMessagingButton)','new xyz.eclipseofficial.vyrn.compat.VyrnLoginActivity()')
+ # The pinned logout animator never starts or invokes its completion callback. Use the native default transition.
+ $introTransition='(?s)\s+@Override\s+public AnimatorSet onCustomTransitionAnimation\(boolean isOpen, Runnable callback\) \{.*?\n    \}'
+ if($t -notmatch $introTransition){throw 'Pinned intro transition changed'}
+ $t=[regex]::Replace($t,$introTransition,'')
  $t.Replace('logoDrawable.setBounds(0, dp(8.666f), dp(115), dp(35));','logoDrawable.setBounds(0, 0, dp(36), dp(36));')
 }
 Edit 'TMessagesProj/src/main/java/org/telegram/messenger/TelegramQRCodeWriter.java' {

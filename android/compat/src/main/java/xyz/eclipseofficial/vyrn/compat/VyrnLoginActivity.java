@@ -97,7 +97,9 @@ public final class VyrnLoginActivity extends BaseFragment {
                 bridge.repository.vault.save(tokens);TLRPC.User user=bridge.mapUser(bridge.repository.me());
                 AndroidUtilities.runOnUIThread(()->{
                     if(isFinished)return;
-                    UserConfig config=UserConfig.getInstance(currentAccount);config.syncContacts=false;config.setCurrentUser(user);config.saveConfig(true);MessagesController.getInstance(currentAccount).putUser(user,false);
+                    UserConfig config=UserConfig.getInstance(currentAccount);config.syncContacts=false;config.setCurrentUser(user);
+                    if(!config.vyrnSaveCurrentUser(user)){config.clearConfig();submit.setEnabled(true);toggle.setEnabled(true);recover.setEnabled(true);status.setText(tr("Could not save your account on this device. Check available storage and retry.","حساب روی این دستگاه ذخیره نشد. فضای خالی را بررسی کنید و دوباره تلاش کنید."));return;}
+                    config.saveConfig(true);MessagesController.getInstance(currentAccount).putUser(user,false);
                     Runnable open=()->{MainTabsActivity main=new MainTabsActivity();main.prepareDialogsActivity(null);presentFragment(main,true);NotificationCenter.getInstance(currentAccount).postNotificationName(NotificationCenter.mainUserInfoChanged);};
                     String recoveryCode=tokens.optString("recovery_code");
                     if(!recoveryCode.isEmpty()){AlertDialog.Builder dialog=new AlertDialog.Builder(getParentActivity());dialog.setTitle(tr("Save your recovery code","کد بازیابی را ذخیره کنید"));dialog.setMessage(tr("Keep this code somewhere safe. You need it if you forget your password.\n\n","این کد را در جای امن نگه دارید. اگر رمز را فراموش کنید به آن نیاز دارید.\n\n")+recoveryCode);dialog.setPositiveButton(tr("Saved","ذخیره کردم"),(d,which)->open.run());AlertDialog alert=dialog.create();recoveryDialog=alert;showDialog(alert);alert.setCanceledOnTouchOutside(false);alert.setCancelable(false);if(alert.getMessageTextView()!=null)alert.getMessageTextView().setTextIsSelectable(true);}else open.run();

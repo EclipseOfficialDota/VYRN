@@ -1,6 +1,16 @@
 # Verification report
 
-Updated: 2026-10-04. This records performed checks, not planned tests.
+Updated: 2026-10-06. This records performed checks, not planned tests.
+
+## Native logout and durable login — 2026-10-06
+
+The disposable Android35 local-TLS suite passes38 checks across logout-prepare11, logout-offline8 and logout-ui19. It opens the original LogoutActivity, touches the actual logout row, confirms its native dialog, verifies server revocation and local vault/config clearing, and touches Start Messaging on the resulting IntroActivity to reopen Vyrn login. A controlled session replacement rejects stale logout without cleanup or revocation; another session survives successful logout. Offline logout reports failure and preserves the account for retry. These are sessions on one emulator, not two physical-device acceptance.
+
+Two additional defects were found and corrected: login's native UserConfig save could be deferred until an animation ended, losing the account after immediate force-stop; login now uses the existing synchronous identity-persistence helper before proceeding, with storage-error feedback. The pinned IntroActivity logout animator was returned without starting or invoking completion, leaving the layout's transition flag set; preparation removes that override and uses the native default transition. The test no longer waits for global UI idleness after every button press, since intro rendering is continuous; it checks specific screen state and navigation readiness instead.
+
+The same app passes11 recovery/sign-in and14 registration-control checks, including the persisted identity prerequisite. All63 checks use app SHA256 `514db39a93894f26ba6b8838f64a2d35a4f1356571a0085e0ec548e572f6419b`. Reports: artifacts/android-logout-ui.json, android-auth-ui.json and android-registration-ui.json. Android notification permission is allowed in the disposable fixture; unrelated media/contacts permissions are denied. Late permission overlays can require a fresh row touch, and observed button text is a fallback when Android's permission resource identifier differs.
+
+ARM64, ARMv7 and universal Debug APKs rebuilt with both production fixes pass signature, package, API26, ABI, native Signal and manifest/TLS checks. ARM64 SHA256 `2617403f870bb49fbfde008e5fc54530bb62cce2bfd397b390d4c6d41b0ca94b`. No physical installation, release signing, backend change or VPS deployment is claimed. Older broad regression/Signal reports retain their historical APKs. Pending onboarding after process death, screen-driven session management, forced native logout types0/2, cleanup/ack-loss/process-death races, and full multi-device lifecycle remain open. Login storage-failure feedback is not yet covered by an injected disk-failure test.
 
 ## Public DNS and HTTPS activation — 2026-10-04
 

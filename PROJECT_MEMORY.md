@@ -1,6 +1,16 @@
 # VYRN project memory
 
-Updated 2026-10-04. Development is unfinished. VPS Core/PostgreSQL, public API DNS/TLS and private owner panel are deployed; full production Android acceptance and release remain pending. See the latest activation updates below.
+Updated 2026-10-06. Development is unfinished. VPS Core/PostgreSQL, public API DNS/TLS and private owner panel are deployed; full production Android acceptance and release remain pending. See the latest activation updates below.
+
+## Current account lifecycle checkpoint — 2026-10-06
+
+This supersedes older logout TODOs below. Explicit native performLogout(1) now routes through VyrnBridge logout before native cleanup. It captures the original native identity and cached public session UUID, serializes authenticated revocation under the account vault guard, rejects session replacement and closes the old realtime/outbox after confirmed revocation. Offline errors preserve the account and permit retry. Only confirmed target invalidation or successful logout clears encrypted tokens and runs cleanup when identity/session still match. Generic native forced logout types0/2 and cold/cleanup/death/ack-loss cases remain unfinished.
+
+Two real defects found by the new tests are fixed: login uses the existing synchronous UserConfig identity-save helper before proceeding, preventing animation-deferred account persistence from being lost after immediate force-stop; storage failure resets native config and presents retry feedback. The pinned IntroActivity logout custom animator never starts or completes its callback, leaving transition=true; prepare-upstream removes it and inherits the native default animation. Test clicks no longer await global idleness; welcome navigation uses actual touch and specific transition/form checks.
+
+All63 targeted Android35/local-TLS checks pass: logout preparation11, offline8, online19; recovery/sign-in11; registration14. App SHA256514db39a93894f26ba6b8838f64a2d35a4f1356571a0085e0ec548e572f6419b. Reports artifacts/android-logout-ui.json, android-auth-ui.json and android-registration-ui.json. The actual logout screen is opened programmatically, then its real row/dialog and welcome button are used. Controlled same-user session replacement is one-emulator evidence, not multi-phone lifecycle. Permission handling permits notifications and denies unrelated media/contacts; repeated Android permission identifiers can differ, so observed button-label fallback is used. Unwanted native permission prompts still need product gating.
+
+All three final ARM Debug APKs rebuilt/verified; ARM64 SHA2562617403f870bb49fbfde008e5fc54530bb62cce2bfd397b390d4c6d41b0ca94b. No backend/VPS mutation or physical installation/release signing. Historical broad Android/Signal suites were not rerun on this app. All build/test jobs terminal. Next: restore pending recovery-code onboarding after process death, full screen-driven session management and lifecycle races, then two-client messaging and the full unchanged goal. Private UI/background/media/remaining screens/release/external backup/physical-device work and TURN gate remain open; do not complete the goal.
 
 ## Authoritative decisions
 - Root: C:/Users/PC/Documents/ChatGPT/Telegram/VYRN; parent workspace preserved.

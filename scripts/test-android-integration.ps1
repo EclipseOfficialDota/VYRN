@@ -1,5 +1,5 @@
 # Real Android networking/Keystore integration; not a claim of full UI acceptance.
-param([string]$Serial='emulator-5560',[ValidateSet('first','mutations','profile','offline','restart','auth-ui','registration-ui')][string[]]$Phases=@('first','mutations','profile','offline','restart'))
+param([string]$Serial='emulator-5560',[ValidateSet('first','mutations','profile','offline','restart','auth-ui','registration-ui','logout-prepare','logout-offline','logout-ui')][string[]]$Phases=@('first','mutations','profile','offline','restart'))
 $ErrorActionPreference='Stop'
 $root=Split-Path $PSScriptRoot -Parent
 $adb=Join-Path $root '.tools/android-sdk/platform-tools/adb.exe'
@@ -55,7 +55,7 @@ try {
         # The full foreground suite shares the production 300-request/minute user
         # limit with realtime reconciliation. Start recovery in a fresh window.
         if($phase -in @('mutations','profile','restart')){Write-Output "Waiting 60 seconds for the API rate-limit window before $phase tests.";Start-Sleep -Seconds 60}
-        if($phase -eq 'offline'){& $adb -s $Serial reverse --remove tcp:18443}else{& $adb -s $Serial reverse tcp:18443 tcp:18443}
+        if($phase -in @('offline','logout-offline')){& $adb -s $Serial reverse --remove tcp:18443}else{& $adb -s $Serial reverse tcp:18443 tcp:18443}
         if($LASTEXITCODE -ne 0){throw 'Test network transition failed'}
         $result=(& $adb -s $Serial shell am instrument -w -e phase $phase "$package.test/xyz.eclipseofficial.vyrn.test.LocalIntegrationRunner") -join "`n"
         [IO.File]::WriteAllText((Join-Path $root ".local/android-integration-$phase.log"),$result)
@@ -71,7 +71,7 @@ try {
         $rounds+=@{phase=$phase;checks=$checks;result='passed'}
         Write-Output "PASS: Android integration phase $phase"
     }
-    $report=if($Phases.Count -eq 1 -and $Phases[0] -in @('auth-ui','registration-ui')){"artifacts/android-$($Phases[0]).json"}else{'artifacts/android-integration.json'}
+    $report=if(@($Phases | Where-Object {$_ -notlike 'logout-*'}).Count -eq 0){'artifacts/android-logout-ui.json'}elseif($Phases.Count -eq 1 -and $Phases[0] -in @('auth-ui','registration-ui')){"artifacts/android-$($Phases[0]).json"}else{'artifacts/android-integration.json'}
     @{date=[DateTimeOffset]::UtcNow.ToString('o');apk=[IO.Path]::GetFileName($apk);sha256=(Get-FileHash $apk).Hash.ToLowerInvariant();device='vyrn_api35';api=35;transport='HTTPS with scoped local CA';rounds=$rounds;full_ui_e2e='not tested'} | ConvertTo-Json -Depth 6 | Set-Content (Join-Path $root $report) -Encoding utf8
 } finally {
     & $adb -s $Serial reverse tcp:18443 tcp:18443

@@ -69,10 +69,11 @@ public final class LocalIntegrationRunner extends Instrumentation {
             Activity foreground=startActivitySync(launch);
             check(foreground!=null,"foreground_activity");
             waitForIdleSync();
-            if(phase.equals("auth-ui")||phase.equals("registration-ui")){
+            if(phase.equals("auth-ui")||phase.equals("registration-ui")||phase.startsWith("logout-")){
                 stage="auth_ui";
                 AuthUiIntegration.Check verification=(condition,name)->{check(condition,name);passed.put(name);};
                 if(phase.equals("registration-ui"))AuthUiIntegration.registration(this,foreground,read("vyrn-test-fixture.json"),verification);
+                else if(phase.equals("logout-ui")||phase.equals("logout-offline"))AuthUiIntegration.logout(this,foreground,read("vyrn-test-fixture.json"),verification,phase.equals("logout-offline"));
                 else AuthUiIntegration.run(this,foreground,read("vyrn-test-fixture.json"),verification);
             } else {
             if(phase.equals("signal-network-restart")){stage="signal_network_restart";SignalNetworkIntegration.restart(context,(condition,name)->{check(condition,name);passed.put(name);});} else if(phase.equals("signal-network-cleanup")){stage="signal_network_cleanup";SignalNetworkIntegration.cleanup(context);} else if(phase.equals("signal-network")){stage="signal_network";SignalNetworkIntegration.run(context,(condition,name)->{check(condition,name);passed.put(name);});} else if(phase.startsWith("signal")){stage="signal_protocol";SignalIntegration.run(context,phase,(condition,name)->{check(condition,name);passed.put(name);});} else if(phase.equals("first")) first(); else if(phase.equals("mutations")) mutations(); else if(phase.equals("profile")) profile(); else if(phase.equals("avatar")){RestRepository a=repo(9001),b=repo(9002);check(a.me().id.equals(read("vyrn-test-state.json").getString("user")),"avatar_disposable_fixture_identity");verifyAvatar(a,b);} else if(phase.equals("offline")) offline(); else if(phase.equals("restart")) restart(); else throw new IllegalArgumentException();

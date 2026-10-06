@@ -23,6 +23,7 @@ final class AuthUiIntegration {
     private AuthUiIntegration(Instrumentation instrumentation,Activity activity,Check check){this.instrumentation=instrumentation;root=activity.getWindow().getDecorView();this.check=check;}
     static void run(Instrumentation instrumentation,Activity activity,JSONObject fixture,Check check) throws Exception {new AuthUiIntegration(instrumentation,activity,check).run(fixture);}
     static void registration(Instrumentation instrumentation,Activity activity,JSONObject fixture,Check check) throws Exception {new AuthUiIntegration(instrumentation,activity,check).register(fixture);}
+    static void logout(Instrumentation instrumentation,Activity activity,JSONObject fixture,Check check,boolean offline) throws Exception {new AuthUiIntegration(instrumentation,activity,check).logout(fixture,offline);}
     private String label(String en,String persian){return fa?persian:en;}
     private View find(View view,String value){
         if(view.getVisibility()!=View.VISIBLE)return null;
@@ -31,7 +32,7 @@ final class AuthUiIntegration {
         return null;
     }
     private boolean visible(String value){boolean[] found={false};instrumentation.runOnMainSync(()->found[0]=find(root,value)!=null);return found[0];}
-    private void click(String value){instrumentation.runOnMainSync(()->{View view=find(root,value);if(view==null||!view.isEnabled())throw new AssertionError("control_unavailable");view.performClick();});instrumentation.waitForIdleSync();}
+    private void click(String value){instrumentation.runOnMainSync(()->{View view=find(root,value);if(view==null||!view.isEnabled())throw new AssertionError("control_unavailable");view.performClick();});}
     private void fill(String value,String text){instrumentation.runOnMainSync(()->{View view=find(root,value);if(!(view instanceof EditText))throw new AssertionError("field_unavailable");((EditText)view).setText(text);});}
     private void await(BooleanSupplier predicate,String name) throws Exception {long deadline=System.nanoTime()+java.util.concurrent.TimeUnit.SECONDS.toNanos(25);while(!predicate.getAsBoolean()&&System.nanoTime()<deadline)Thread.sleep(100);check.verify(predicate.getAsBoolean(),name);}
     private org.telegram.ui.ActionBar.AlertDialog dialog(){
@@ -92,7 +93,84 @@ final class AuthUiIntegration {
         await(()->visible(label("Could not sign in. Check your connection and account details.","ورود انجام نشد. اتصال و مشخصات حساب را بررسی کنید.")),"auth_ui_old_password_rejected");
         fill(label("Password","رمز عبور"),newPassword);click(label("Sign in","ورود"));
         await(()->UserConfig.getInstance(account).isClientActivated(),"auth_ui_new_password_login");
+        await(()->UserConfig.getInstance(account).getPreferences().contains("user"),"auth_ui_native_identity_persisted");
         RestRepository current=new RestRepository(new TokenVault(instrumentation.getTargetContext(),account));
         check.verify(current.me().id.equals(registered.getString("user_id")),"auth_ui_authenticated_identity");setup.vault.clear();
+    }
+    private void confirmLogout(int account) throws Exception {
+        android.accessibilityservice.AccessibilityServiceInfo info=instrumentation.getUiAutomation().getServiceInfo();info.flags|=android.accessibilityservice.AccessibilityServiceInfo.FLAG_REPORT_VIEW_IDS;instrumentation.getUiAutomation().setServiceInfo(info);
+        instrumentation.runOnMainSync(()->{org.telegram.ui.ActionBar.BaseFragment fragment=org.telegram.ui.LaunchActivity.getLastFragment();if(!(fragment instanceof org.telegram.ui.LogoutActivity))fragment.presentFragment(new org.telegram.ui.LogoutActivity(),false,true);});
+        instrumentation.waitForIdleSync();
+        String title=org.telegram.messenger.LocaleController.getString(org.telegram.messenger.R.string.LogOutTitle);
+        instrumentation.runOnMainSync(()->{ViewGroup form=(ViewGroup)org.telegram.ui.LaunchActivity.getLastFragment().getFragmentView();org.telegram.ui.Components.RecyclerListView list=(org.telegram.ui.Components.RecyclerListView)form.getChildAt(0);list.scrollToPosition(list.getAdapter().getItemCount()-2);});
+        android.graphics.Rect row=new android.graphics.Rect();
+        try{await(()->{if(systemPromptBlocks())return false;boolean[] found={false};instrumentation.runOnMainSync(()->{ViewGroup form=(ViewGroup)org.telegram.ui.LaunchActivity.getLastFragment().getFragmentView();org.telegram.ui.Components.RecyclerListView list=(org.telegram.ui.Components.RecyclerListView)form.getChildAt(0);if(list.isLayoutRequested()||list.isComputingLayout())return;View view=find(form,title);found[0]=view!=null&&view.getGlobalVisibleRect(row)&&!row.isEmpty();});return found[0];},"logout_ui_native_row_visible");}catch(AssertionError failure){captureLogoutFailure();throw failure;}
+        check.verify(touch(row),"logout_ui_native_row_touched");
+        boolean[] blocked={false};
+        try{await(()->{if(systemPromptBlocks()){blocked[0]=true;return false;}if(dialog()!=null)return true;if(blocked[0]){check.verify(touch(row),"logout_ui_row_retouched_after_permission");blocked[0]=false;}return dialog()!=null;},"logout_ui_native_confirmation_shown");}catch(AssertionError failure){captureLogoutFailure();throw failure;}
+        boolean[] started={false};
+        instrumentation.runOnMainSync(()->{currentDialog().getButton(android.content.DialogInterface.BUTTON_POSITIVE).performClick();started[0]=xyz.eclipseofficial.vyrn.compat.VyrnBridge.isLoggingOut(account);});
+        check.verify(started[0],"logout_ui_confirmation_dispatch");
+    }
+    private boolean touch(android.graphics.Rect row){
+        long time=android.os.SystemClock.uptimeMillis();android.view.MotionEvent down=android.view.MotionEvent.obtain(time,time,android.view.MotionEvent.ACTION_DOWN,row.centerX(),row.centerY(),0),up=android.view.MotionEvent.obtain(time,time+50,android.view.MotionEvent.ACTION_UP,row.centerX(),row.centerY(),0);down.setSource(android.view.InputDevice.SOURCE_TOUCHSCREEN);up.setSource(android.view.InputDevice.SOURCE_TOUCHSCREEN);
+        try{return instrumentation.getUiAutomation().injectInputEvent(down,true)&&instrumentation.getUiAutomation().injectInputEvent(up,true);}finally{down.recycle();up.recycle();}
+    }
+    private void captureLogoutFailure() throws Exception {
+        android.graphics.Bitmap screenshot=instrumentation.getUiAutomation().takeScreenshot();
+        if(screenshot!=null){try(java.io.FileOutputStream output=new java.io.FileOutputStream(new java.io.File(instrumentation.getTargetContext().getFilesDir(),"vyrn-test-logout-screen.png"))){screenshot.compress(android.graphics.Bitmap.CompressFormat.PNG,100,output);}finally{screenshot.recycle();}}
+        android.view.accessibility.AccessibilityNodeInfo window=instrumentation.getUiAutomation().getRootInActiveWindow();
+        String owner=window==null?"none":String.valueOf(window.getPackageName());String[] fragment={"none"};instrumentation.runOnMainSync(()->{org.telegram.ui.ActionBar.BaseFragment last=org.telegram.ui.LaunchActivity.getLastFragment();fragment[0]=last==null?"none":last.getClass().getSimpleName();if(last!=null&&last.getParentLayout()!=null)fragment[0]+=" transition="+last.getParentLayout().isTransitionAnimationInProgress()+" swipe="+last.getParentLayout().isSwipeInProgress();});
+        java.nio.file.Files.write(new java.io.File(instrumentation.getTargetContext().getFilesDir(),"vyrn-test-logout-window.txt").toPath(),(owner+"\n"+fragment[0]).getBytes(java.nio.charset.StandardCharsets.UTF_8));
+    }
+    private boolean systemPromptBlocks(){
+        android.view.accessibility.AccessibilityNodeInfo window=instrumentation.getUiAutomation().getRootInActiveWindow();if(window==null)return true;
+        String owner=String.valueOf(window.getPackageName());
+        if(owner.equals("com.android.permissioncontroller")){
+            boolean notifications=!window.findAccessibilityNodeInfosByText("notifications").isEmpty()||!window.findAccessibilityNodeInfosByText("اعلان").isEmpty();
+            boolean photos=!window.findAccessibilityNodeInfosByText("photos").isEmpty()||!window.findAccessibilityNodeInfosByText("عکس").isEmpty();
+            boolean audio=!window.findAccessibilityNodeInfosByText("audio").isEmpty()||!window.findAccessibilityNodeInfosByText("صوت").isEmpty();
+            boolean contacts=!window.findAccessibilityNodeInfosByText("contacts").isEmpty()||!window.findAccessibilityNodeInfosByText("مخاطبین").isEmpty()||!window.findAccessibilityNodeInfosByText("مخاطبان").isEmpty();
+            String kind=notifications?"notifications":photos?"photos":audio?"audio":contacts?"contacts":"";
+            java.util.List<android.view.accessibility.AccessibilityNodeInfo> buttons=window.findAccessibilityNodeInfosByViewId("com.android.permissioncontroller:id/"+(notifications?"permission_allow_button":"permission_deny_button"));
+            if(buttons.isEmpty()&&!kind.isEmpty())for(android.view.accessibility.AccessibilityNodeInfo node:window.findAccessibilityNodeInfosByText("ALLOW")){
+                String text=String.valueOf(node.getText());
+                if(node.isClickable()&&(notifications?text.equalsIgnoreCase("ALLOW"):text.matches("(?i)don.t allow"))){buttons=java.util.Collections.singletonList(node);break;}
+            }
+            if(!kind.isEmpty()&&!buttons.isEmpty())check.verify(buttons.get(0).performAction(android.view.accessibility.AccessibilityNodeInfo.ACTION_CLICK),"logout_ui_permission_"+kind+(notifications?"_allowed":"_denied"));
+        }
+        return !owner.equals(instrumentation.getTargetContext().getPackageName());
+    }
+    private void logout(JSONObject fixture,boolean offline) throws Exception {
+        int account=UserConfig.selectedAccount;
+        check.verify(UserConfig.getInstance(account).isClientActivated(),"logout_ui_active_account");
+        RestRepository current=new RestRepository(new TokenVault(instrumentation.getTargetContext(),account));JSONObject original=current.vault.load();
+        if(offline){
+            confirmLogout(account);await(()->!xyz.eclipseofficial.vyrn.compat.VyrnBridge.isLoggingOut(account),"logout_ui_offline_request_completed");
+            check.verify(UserConfig.getInstance(account).isClientActivated()&&current.vault.load().getString("session_id").equals(original.getString("session_id")),"logout_ui_offline_preserves_session");return;
+        }
+        RestRepository originalProbe=new RestRepository(new TokenVault(instrumentation.getTargetContext(),9012));originalProbe.vault.save(original);
+        RestRepository replacementProbe=new RestRepository(new TokenVault(instrumentation.getTargetContext(),9011));
+        JSONObject replacement=(JSONObject)replacementProbe.request("POST","/v1/auth/login",new JSONObject().put("email",fixture.getString("email")).put("password",fixture.getString("password")+"new").put("device_id",replacementProbe.vault.device()).put("device_name","Logout race fixture"),false);replacementProbe.vault.save(replacement);
+        java.util.concurrent.atomic.AtomicReference<java.util.concurrent.CompletableFuture<Boolean>> pending=new java.util.concurrent.atomic.AtomicReference<>();boolean[] cleaned={false};
+        synchronized(current.vault.guard()){
+            instrumentation.runOnMainSync(()->pending.set(xyz.eclipseofficial.vyrn.compat.VyrnBridge.logout(account,()->cleaned[0]=true)));
+            current.vault.save(replacement);
+        }
+        check.verify(!pending.get().get(45,java.util.concurrent.TimeUnit.SECONDS)&&!cleaned[0],"logout_ui_changed_session_rejected");
+        check.verify(current.vault.load().getString("session_id").equals(replacement.getString("session_id"))&&UserConfig.getInstance(account).isClientActivated(),"logout_ui_replacement_preserved");
+        check.verify(originalProbe.me().id.equals(original.getString("user_id")),"logout_ui_original_not_revoked_by_stale_request");
+        confirmLogout(account);await(()->!xyz.eclipseofficial.vyrn.compat.VyrnBridge.isLoggingOut(account),"logout_ui_confirmed_request_completed");
+        check.verify(!UserConfig.getInstance(account).isClientActivated(),"logout_ui_native_config_cleared");
+        check.verify(current.vault.load().length()==0&&current.vault.cachedSession()==null,"logout_ui_keystore_session_cleared");
+        check.verify(originalProbe.me().id.equals(original.getString("user_id")),"logout_ui_other_session_survives");
+        boolean revoked=false;try{replacementProbe.me();}catch(RestRepository.ApiException failure){revoked=failure.status==401;}check.verify(revoked,"logout_ui_server_session_revoked");
+        String start=org.telegram.messenger.LocaleController.getString(org.telegram.messenger.R.string.StartMessaging);
+        await(()->visible(start),"logout_ui_returns_to_welcome");
+        android.graphics.Rect startBounds=new android.graphics.Rect();
+        try{await(()->{boolean[] ready={false};instrumentation.runOnMainSync(()->{org.telegram.ui.ActionBar.BaseFragment fragment=org.telegram.ui.LaunchActivity.getLastFragment();View view=find(root,start);ready[0]=fragment instanceof org.telegram.ui.IntroActivity&&fragment.getParentLayout()!=null&&!fragment.getParentLayout().isTransitionAnimationInProgress()&&!fragment.getParentLayout().isSwipeInProgress()&&view!=null&&view.getGlobalVisibleRect(startBounds);});return ready[0];},"logout_ui_welcome_ready");}catch(AssertionError failure){captureLogoutFailure();throw failure;}
+        check.verify(touch(startBounds),"logout_ui_start_touched");
+        try{await(()->visible(label("Email","ایمیل")),"logout_ui_welcome_opens_login");}catch(AssertionError failure){captureLogoutFailure();throw failure;}
+        originalProbe.vault.clear();replacementProbe.vault.clear();
     }
 }

@@ -41,6 +41,41 @@ public final class VyrnBridge {
     private static final ExecutorService IO=Executors.newFixedThreadPool(2);
     private static final ExecutorService SEND=Executors.newSingleThreadExecutor();
     private static final Map<Integer,VyrnBridge> INSTANCES=new HashMap<>();
+    private static final java.util.Set<Integer> LOGGING_OUT=ConcurrentHashMap.newKeySet();
+    public static boolean isLoggingOut(int account){return LOGGING_OUT.contains(account);}
+    public static java.util.concurrent.CompletableFuture<Boolean> logout(int account,Runnable cleanup){
+        java.util.concurrent.CompletableFuture<Boolean> result=new java.util.concurrent.CompletableFuture<>();
+        if(!LOGGING_OUT.add(account)){result.complete(false);return result;}
+        VyrnBridge bridge=forAccount(account);
+        final long origin=UserConfig.getInstance(account).getClientUserId();
+        final String session=bridge.repository.vault.cachedSession();
+        execute(()->{
+            boolean confirmed=false;
+            try{
+                synchronized(bridge.repository.vault.guard()){
+                    JSONObject tokens=bridge.repository.vault.load();String user=tokens.getString("user_id");
+                    if(origin==0||session==null||session.isEmpty()||!session.equals(tokens.optString("session_id"))||bridge.ids.local("user",user)!=origin||UserConfig.getInstance(account).getClientUserId()!=origin)throw new SecurityException("session_changed");
+                    try{bridge.repository.requestForSession(user,session,"POST","/v1/auth/logout",null);}catch(RestRepository.ApiException failure){
+                        if(failure.status!=401||!failure.code.equals("invalid_credentials"))throw failure;
+                    }
+                    bridge.repository.vault.clear();
+                    synchronized(VyrnBridge.class){if(INSTANCES.get(account)==bridge)INSTANCES.remove(account);}
+                    confirmed=true;
+                }
+                try{bridge.realtime.close();}finally{bridge.outbox.close();}
+            }catch(Exception failure){/* Keep the session when logout cannot be confirmed. */}
+            final boolean accepted=confirmed;
+            AndroidUtilities.runOnUIThread(()->{
+                try{
+                    if(accepted&&bridge.repository.vault.cachedSession()==null&&UserConfig.getInstance(account).getClientUserId()==origin){cleanup.run();result.complete(true);}
+                    else{
+                        boolean fa="fa".equals(java.util.Locale.getDefault().getLanguage());
+                        android.widget.Toast.makeText(ApplicationLoader.applicationContext,fa?"خروج تأیید نشد. اتصال را بررسی کنید و دوباره تلاش کنید.":"Logout was not confirmed. Check the connection and retry.",android.widget.Toast.LENGTH_LONG).show();result.complete(false);
+                    }
+                }catch(Exception failure){result.completeExceptionally(failure);}finally{LOGGING_OUT.remove(account);}
+            });
+        });return result;
+    }
     private static final Map<MessageObject,EditRequest> EDITS=new java.util.WeakHashMap<>();
     public static final String EDIT_SNAPSHOT="vyrn_edit_snapshot";
     private static String textHash(String text){try{return java.util.Base64.getEncoder().encodeToString(java.security.MessageDigest.getInstance("SHA-256").digest(text.getBytes(StandardCharsets.UTF_8)));}catch(java.security.NoSuchAlgorithmException impossible){throw new AssertionError(impossible);}}

@@ -1,5 +1,21 @@
 # Local Android integration
 
+## Native logout and login persistence — 2026-10-06
+
+After the local TLS setup and x86_64 instrumentation build, run:
+
+```powershell
+./scripts/test-android-integration.ps1 -Phases @('logout-prepare','logout-offline','logout-ui')
+./scripts/test-android-integration.ps1 -Phases auth-ui
+./scripts/test-android-integration.ps1 -Phases registration-ui
+```
+
+The logout sequence clears only the disposable vyrn_api35 app once, then preserves its account across real force-stops and an offline/online network transition. Do not run logout-ui alone against a fresh app: logout-prepare establishes the disposable account. The current report has11 preparation,8 offline and19 online checks; permission-dependent counts can vary. Online checks touch the original LogoutActivity row and confirmation, exercise a controlled stale-session race, verify server revocation/local clearing and preservation of another session, then touch the actual welcome button and verify login. auth-ui passes11 and registration-ui14 checks on the same app. Reports remain separate.
+
+Use specific screen-state waits rather than unbounded waitForIdleSync after intro interactions: the native intro renders continuously. The fixture allows notification permission and denies observed unrelated photos/audio/contacts requests; denied repeated requests can have a different button identifier, so the helper also recognizes the observed English button label. This does not fix unwanted production permission prompts or establish Persian system-permission acceptance.
+
+Login now commits native identity before continuing. A process restart in the logout sequence confirms the stored account; process death before acknowledging the recovery-code dialog remains a separate unfinished flow. Forced logout, cleanup failure/ack loss, complete session-management gestures and two physical devices are not covered by this sequence.
+
 ## Automatic complete-device acquisition — 2026-10-04
 
 The latest network harness passes64 checks (58 initial,6 distinct-process recovery) on APK SHA-2569b0098cd75f40b797ba41a3fc2d1beb2620350f4778e494cd59eff80c732f33a. Automatic prepare reads/validates both complete ready-device rosters, claims only missing sessions and sends actual authenticated copies to two recipient stores plus the sender's other store. Unprepared devices on both users, no extra claims for existing sessions, session-bound/exact retries and accepted retry after sender-other logout pass. All27 Signal storage/restart checks also pass. This uses four isolated stores on one emulator; private UI, offline cold-start key-service construction and lifecycle/retry/verification scheduling remain incomplete.
