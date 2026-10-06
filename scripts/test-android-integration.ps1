@@ -1,5 +1,5 @@
 # Real Android networking/Keystore integration; not a claim of full UI acceptance.
-param([string]$Serial='emulator-5560',[ValidateSet('first','mutations','profile','offline','restart','auth-ui')][string[]]$Phases=@('first','mutations','profile','offline','restart'))
+param([string]$Serial='emulator-5560',[ValidateSet('first','mutations','profile','offline','restart','auth-ui','registration-ui')][string[]]$Phases=@('first','mutations','profile','offline','restart'))
 $ErrorActionPreference='Stop'
 $root=Split-Path $PSScriptRoot -Parent
 $adb=Join-Path $root '.tools/android-sdk/platform-tools/adb.exe'
@@ -71,7 +71,7 @@ try {
         $rounds+=@{phase=$phase;checks=$checks;result='passed'}
         Write-Output "PASS: Android integration phase $phase"
     }
-    $report=if($Phases.Count -eq 1 -and $Phases[0] -eq 'auth-ui'){'artifacts/android-auth-ui.json'}else{'artifacts/android-integration.json'}
+    $report=if($Phases.Count -eq 1 -and $Phases[0] -in @('auth-ui','registration-ui')){"artifacts/android-$($Phases[0]).json"}else{'artifacts/android-integration.json'}
     @{date=[DateTimeOffset]::UtcNow.ToString('o');apk=[IO.Path]::GetFileName($apk);sha256=(Get-FileHash $apk).Hash.ToLowerInvariant();device='vyrn_api35';api=35;transport='HTTPS with scoped local CA';rounds=$rounds;full_ui_e2e='not tested'} | ConvertTo-Json -Depth 6 | Set-Content (Join-Path $root $report) -Encoding utf8
 } finally {
     & $adb -s $Serial reverse tcp:18443 tcp:18443

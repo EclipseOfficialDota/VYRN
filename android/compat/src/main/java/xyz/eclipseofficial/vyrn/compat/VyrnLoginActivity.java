@@ -33,6 +33,8 @@ public final class VyrnLoginActivity extends BaseFragment {
     private EditTextBoldCursor email,password,name,invite;
     private View submit;
     private TextView toggle,recover,status,title,subtitle;
+    private AlertDialog recoveryDialog;
+    @Override public boolean dismissDialogOnPause(android.app.Dialog dialog){return dialog!=recoveryDialog&&super.dismissDialogOnPause(dialog);}
     private boolean fa(){return "fa".equals(Locale.getDefault().getLanguage());}
     private String tr(String en,String fa){return fa()?fa:en;}
     @Override public View createView(Context context){
@@ -98,9 +100,9 @@ public final class VyrnLoginActivity extends BaseFragment {
                     UserConfig config=UserConfig.getInstance(currentAccount);config.syncContacts=false;config.setCurrentUser(user);config.saveConfig(true);MessagesController.getInstance(currentAccount).putUser(user,false);
                     Runnable open=()->{MainTabsActivity main=new MainTabsActivity();main.prepareDialogsActivity(null);presentFragment(main,true);NotificationCenter.getInstance(currentAccount).postNotificationName(NotificationCenter.mainUserInfoChanged);};
                     String recoveryCode=tokens.optString("recovery_code");
-                    if(!recoveryCode.isEmpty()){AlertDialog.Builder dialog=new AlertDialog.Builder(getParentActivity());dialog.setTitle(tr("Save your recovery code","کد بازیابی را ذخیره کنید"));dialog.setMessage(recoveryCode);dialog.setPositiveButton(tr("Saved","ذخیره کردم"),(d,which)->open.run());AlertDialog alert=dialog.create();alert.setCancelable(false);showDialog(alert);}else open.run();
+                    if(!recoveryCode.isEmpty()){AlertDialog.Builder dialog=new AlertDialog.Builder(getParentActivity());dialog.setTitle(tr("Save your recovery code","کد بازیابی را ذخیره کنید"));dialog.setMessage(tr("Keep this code somewhere safe. You need it if you forget your password.\n\n","این کد را در جای امن نگه دارید. اگر رمز را فراموش کنید به آن نیاز دارید.\n\n")+recoveryCode);dialog.setPositiveButton(tr("Saved","ذخیره کردم"),(d,which)->open.run());AlertDialog alert=dialog.create();recoveryDialog=alert;showDialog(alert);alert.setCanceledOnTouchOutside(false);alert.setCancelable(false);if(alert.getMessageTextView()!=null)alert.getMessageTextView().setTextIsSelectable(true);}else open.run();
                 });
-            }catch(Exception failure){AndroidUtilities.runOnUIThread(()->{if(isFinished)return;submit.setEnabled(true);toggle.setEnabled(true);recover.setEnabled(true);status.setText(recovery?tr("Could not reset your password. Check your connection, recovery code and new password.","رمز تغییر نکرد. اتصال، کد بازیابی و رمز جدید را بررسی کنید."):tr("Could not sign in. Check your connection and account details.","ورود انجام نشد. اتصال و مشخصات حساب را بررسی کنید."));});}
+            }catch(Exception failure){AndroidUtilities.runOnUIThread(()->{if(isFinished)return;submit.setEnabled(true);toggle.setEnabled(true);recover.setEnabled(true);status.setText(recovery?tr("Could not reset your password. Check your connection, recovery code and new password.","رمز تغییر نکرد. اتصال، کد بازیابی و رمز جدید را بررسی کنید."):registration?tr("Could not create account. Check your connection, invite code and account details.","حساب ساخته نشد. اتصال، کد دعوت و مشخصات حساب را بررسی کنید."):tr("Could not sign in. Check your connection and account details.","ورود انجام نشد. اتصال و مشخصات حساب را بررسی کنید."));});}
         });
     }
 }

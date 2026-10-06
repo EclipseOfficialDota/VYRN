@@ -101,3 +101,7 @@ The earlier app-UID DNS failure is resolved for the foreground test. Android blo
 ```
 
 The local-only auth-ui phase presses the actual recovery/sign-in controls and fills native fields. It passes10 checks, including wrong-code feedback, successful reset, revoked old session, wrong old password and correct new-password identity. Fixture registration is REST setup, not a registration-screen check. Only the disposable emulator app is cleared; credentials travel privately through stdin and no recovery codes/passwords are logged. Evidence is saved separately to artifacts/android-auth-ui.json. Full account lifecycle and multi-device UI acceptance remain open. The script refuses stale embedded local CAs; run setup before building when the proxy CA changes.
+
+## Registration controls — 2026-10-06
+
+After setup/build as above, run `./scripts/test-android-integration.ps1 -Phases registration-ui`. This clears only the test emulator app and writes artifacts/android-registration-ui.json. All14 checks pass through actual native controls, including real system Home/return, preserving the recovery code until Saved opens the main screen. The code and credentials stay private and are never logged or automatically copied. Existing auth-ui still passes10 checks. Keyboard/touch details, process-death onboarding and physical/multi-device lifecycle are not established by this test.

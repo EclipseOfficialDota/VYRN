@@ -22,6 +22,7 @@ final class AuthUiIntegration {
     private final boolean fa="fa".equals(Locale.getDefault().getLanguage());
     private AuthUiIntegration(Instrumentation instrumentation,Activity activity,Check check){this.instrumentation=instrumentation;root=activity.getWindow().getDecorView();this.check=check;}
     static void run(Instrumentation instrumentation,Activity activity,JSONObject fixture,Check check) throws Exception {new AuthUiIntegration(instrumentation,activity,check).run(fixture);}
+    static void registration(Instrumentation instrumentation,Activity activity,JSONObject fixture,Check check) throws Exception {new AuthUiIntegration(instrumentation,activity,check).register(fixture);}
     private String label(String en,String persian){return fa?persian:en;}
     private View find(View view,String value){
         if(view.getVisibility()!=View.VISIBLE)return null;
@@ -33,6 +34,43 @@ final class AuthUiIntegration {
     private void click(String value){instrumentation.runOnMainSync(()->{View view=find(root,value);if(view==null||!view.isEnabled())throw new AssertionError("control_unavailable");view.performClick();});instrumentation.waitForIdleSync();}
     private void fill(String value,String text){instrumentation.runOnMainSync(()->{View view=find(root,value);if(!(view instanceof EditText))throw new AssertionError("field_unavailable");((EditText)view).setText(text);});}
     private void await(BooleanSupplier predicate,String name) throws Exception {long deadline=System.nanoTime()+java.util.concurrent.TimeUnit.SECONDS.toNanos(25);while(!predicate.getAsBoolean()&&System.nanoTime()<deadline)Thread.sleep(100);check.verify(predicate.getAsBoolean(),name);}
+    private org.telegram.ui.ActionBar.AlertDialog dialog(){
+        org.telegram.ui.ActionBar.AlertDialog[] result={null};
+        instrumentation.runOnMainSync(()->result[0]=currentDialog());
+        return result[0];
+    }
+    private org.telegram.ui.ActionBar.AlertDialog currentDialog(){
+        org.telegram.ui.ActionBar.BaseFragment fragment=org.telegram.ui.LaunchActivity.getLastFragment();
+        return fragment!=null&&fragment.visibleDialog instanceof org.telegram.ui.ActionBar.AlertDialog&&fragment.visibleDialog.isShowing()?(org.telegram.ui.ActionBar.AlertDialog)fragment.visibleDialog:null;
+    }
+    private void register(JSONObject fixture) throws Exception {
+        int account=UserConfig.selectedAccount;
+        check.verify(!UserConfig.getInstance(account).isClientActivated(),"registration_ui_fresh_account");
+        click(label("Create account with invite","ثبت‌نام با دعوت"));
+        check.verify(visible(label("Display name","نام نمایشی"))&&visible(label("Invite code","کد دعوت")),"registration_ui_fields");
+        click(label("Create account","ساخت حساب"));
+        check.verify(visible(label("Complete the account details.","مشخصات حساب را کامل وارد کنید.")),"registration_ui_missing_input_rejected");
+        fill(label("Email","ایمیل"),"registration-"+fixture.getString("email"));fill(label("Password","رمز عبور"),fixture.getString("password"));fill(label("Display name","نام نمایشی"),"Registration UI fixture");fill(label("Invite code","کد دعوت"),"invalid");click(label("Create account","ساخت حساب"));
+        await(()->visible(label("Could not create account. Check your connection, invite code and account details.","حساب ساخته نشد. اتصال، کد دعوت و مشخصات حساب را بررسی کنید.")),"registration_ui_invalid_invite_feedback");
+        check.verify(!UserConfig.getInstance(account).isClientActivated(),"registration_ui_invalid_invite_no_activation");
+        fill(label("Invite code","کد دعوت"),fixture.getString("invite"));click(label("Create account","ساخت حساب"));
+        await(()->dialog()!=null,"registration_ui_recovery_dialog");
+        RestRepository repository=new RestRepository(new TokenVault(instrumentation.getTargetContext(),account));
+        JSONObject tokens=repository.vault.load();String code=tokens.getString("recovery_code");
+        boolean[] message={false},selectable={false},login={false};
+        instrumentation.runOnMainSync(()->{org.telegram.ui.ActionBar.AlertDialog alert=currentDialog();message[0]=code.length()==43&&alert.getMessageTextView().getText().toString().contains(code);selectable[0]=alert.getMessageTextView().isTextSelectable();login[0]=org.telegram.ui.LaunchActivity.getLastFragment() instanceof xyz.eclipseofficial.vyrn.compat.VyrnLoginActivity;});
+        check.verify(message[0],"registration_ui_correct_recovery_code");check.verify(selectable[0],"registration_ui_code_selectable");check.verify(login[0],"registration_ui_confirmation_before_navigation");
+        check.verify(repository.me().id.equals(tokens.getString("user_id")),"registration_ui_server_identity");
+        boolean[] retained={false};instrumentation.runOnMainSync(()->{org.telegram.ui.ActionBar.AlertDialog alert=currentDialog();alert.onBackPressed();retained[0]=alert.isShowing();});
+        check.verify(retained[0],"registration_ui_back_preserves_code");
+        check.verify(instrumentation.getUiAutomation().performGlobalAction(android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_HOME),"registration_ui_home_action");
+        instrumentation.waitForIdleSync();
+        instrumentation.getTargetContext().startActivity(new android.content.Intent(android.content.Intent.ACTION_MAIN).setClassName(instrumentation.getTargetContext(),"org.telegram.ui.LaunchActivity").addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK|android.content.Intent.FLAG_ACTIVITY_REORDER_TO_FRONT));
+        instrumentation.waitForIdleSync();
+        await(()->dialog()!=null,"registration_ui_home_return_preserves_code");
+        instrumentation.runOnMainSync(()->currentDialog().getButton(android.content.DialogInterface.BUTTON_POSITIVE).performClick());
+        await(()->{boolean[] main={false};instrumentation.runOnMainSync(()->main[0]=org.telegram.ui.LaunchActivity.getLastFragment() instanceof org.telegram.ui.MainTabsActivity);return main[0];},"registration_ui_saved_opens_main");
+    }
     private void run(JSONObject fixture) throws Exception {
         int account=UserConfig.selectedAccount;
         check.verify(!UserConfig.getInstance(account).isClientActivated(),"auth_ui_fresh_account");

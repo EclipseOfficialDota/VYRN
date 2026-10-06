@@ -7,7 +7,7 @@ Updated 2026-10-06. A route existing or a build compiling does **not** establish
 | Local repository and memory | Root, main/develop/work branch, confirmed config and ignored secrets established | Keep memory current; no remote yet |
 | Telegram source pin | Exact commit and submodules downloaded | Reproducible source export and full branding audit |
 | Original Telegram UI | Original UI compiled through VyrnApp; login and adapter overlays supplied | Finish all unsupported UI paths and settings; device verification |
-| Recovery/sign-in UI | Actual native controls reset password with saved code;10 local TLS checks verify feedback, old-session/old-password rejection and new authenticated identity | Registration dialog, logout/session management, gestures, process death and two-device account lifecycle |
+| Recovery/sign-in UI | Actual recovery/sign-in controls pass10 checks; registration controls pass14 checks including invitation rejection, exact/selectable recovery code, Back and real Home/return preservation, Saved/main navigation | Proper VYRN logout mapping and session-management UI, gestures/layout, pending-onboarding process death and two-device account lifecycle |
 | Owner branding | Original owner JPG preserved; native Telegram login controls, display-name localization, adaptive/monochrome/splash/notification/QR marks implemented; Debug builds pass | Full upstream visual audit, original SVG and physical device checks |
 | Debug APK | ARM64/ARMv7/Universal built; signatures/ABIs/manifest verified; x86_64 emulator installed and launched | Functional client E2E and physical ARM-device checks |
 | Production release APKs/AAB | Flavors and release signing gate configured | User keystore variables, universal/ABI builds, R8/device tests |
