@@ -91,3 +91,13 @@ Branding checks reset only the disposable vyrn_api35 app, verify localized names
 ## Public connectivity correction — 2026-10-05
 
 The earlier app-UID DNS failure is resolved for the foreground test. Android blocked background instrumentation with APP_BACKGROUND. public-connectivity now launches and waits for LaunchActivity before requesting DNS and HTTPS. All eight read-only checks pass after the script force-stops the old process. Platform DNS, certificate validation and cleartext prohibition remain intact; no networking policy exemption was added. This supersedes the previous DNS-failure paragraph and does not verify background connectivity, authentication or physical ARM devices.
+
+## Actual account recovery/sign-in UI — 2026-10-06
+
+```powershell
+./scripts/setup-dev-tls.ps1
+./scripts/build-android.ps1 -Abis x86_64 -LocalTest -Instrumentation
+./scripts/test-android-integration.ps1 -Phases auth-ui
+```
+
+The local-only auth-ui phase presses the actual recovery/sign-in controls and fills native fields. It passes10 checks, including wrong-code feedback, successful reset, revoked old session, wrong old password and correct new-password identity. Fixture registration is REST setup, not a registration-screen check. Only the disposable emulator app is cleared; credentials travel privately through stdin and no recovery codes/passwords are logged. Evidence is saved separately to artifacts/android-auth-ui.json. Full account lifecycle and multi-device UI acceptance remain open. The script refuses stale embedded local CAs; run setup before building when the proxy CA changes.

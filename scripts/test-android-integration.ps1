@@ -1,5 +1,5 @@
 # Real Android networking/Keystore integration; not a claim of full UI acceptance.
-param([string]$Serial='emulator-5560')
+param([string]$Serial='emulator-5560',[ValidateSet('first','mutations','profile','offline','restart','auth-ui')][string[]]$Phases=@('first','mutations','profile','offline','restart'))
 $ErrorActionPreference='Stop'
 $root=Split-Path $PSScriptRoot -Parent
 $adb=Join-Path $root '.tools/android-sdk/platform-tools/adb.exe'
@@ -8,6 +8,14 @@ $avd=(& $adb -s $Serial emu avd name) -join "`n"
 if($LASTEXITCODE -ne 0 -or $avd -notmatch '(?m)^vyrn_api35\r?$'){throw 'Only the VYRN test emulator is allowed'}
 $apk=Join-Path $root 'artifacts/VyrnApp-dev-x86_64-debug-local-tls.apk'
 $testApk=Join-Path $root 'artifacts/VyrnApp-dev-debug-androidTest.apk'
+$archive=[IO.Compression.ZipFile]::OpenRead($apk)
+try{
+    $certificate=$archive.GetEntry('res/raw/vyrn_dev_ca.crt')
+    if(!$certificate){throw 'Local test CA missing from APK'}
+    $stream=$certificate.Open()
+    try{$embeddedCa=[Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($stream))}finally{$stream.Dispose()}
+    if($embeddedCa -ne (Get-FileHash (Join-Path $root '.local/dev-ca.crt')).Hash){throw 'Local CA changed: rebuild with -LocalTest -Instrumentation after setup-dev-tls.ps1'}
+}finally{$archive.Dispose()}
 foreach($path in @($apk,$testApk)){
     $output=(& $adb -s $Serial install -r -t $path) -join "`n"
     if($LASTEXITCODE -ne 0 -or $output -notmatch 'Success'){throw 'Test APK installation failed'}
@@ -42,7 +50,7 @@ if($process.ExitCode -ne 0){throw 'Private test fixture transfer failed'}
 $fixture=$null
 $rounds=@()
 try {
-    foreach($phase in @('first','mutations','profile','offline','restart')){
+    foreach($phase in $Phases){
         & $adb -s $Serial shell am force-stop $package
         # The full foreground suite shares the production 300-request/minute user
         # limit with realtime reconciliation. Start recovery in a fresh window.
@@ -63,7 +71,8 @@ try {
         $rounds+=@{phase=$phase;checks=$checks;result='passed'}
         Write-Output "PASS: Android integration phase $phase"
     }
-    @{date=[DateTimeOffset]::UtcNow.ToString('o');apk=[IO.Path]::GetFileName($apk);sha256=(Get-FileHash $apk).Hash.ToLowerInvariant();device='vyrn_api35';api=35;transport='HTTPS with scoped local CA';rounds=$rounds;full_ui_e2e='not tested'} | ConvertTo-Json -Depth 6 | Set-Content (Join-Path $root 'artifacts/android-integration.json') -Encoding utf8
+    $report=if($Phases.Count -eq 1 -and $Phases[0] -eq 'auth-ui'){'artifacts/android-auth-ui.json'}else{'artifacts/android-integration.json'}
+    @{date=[DateTimeOffset]::UtcNow.ToString('o');apk=[IO.Path]::GetFileName($apk);sha256=(Get-FileHash $apk).Hash.ToLowerInvariant();device='vyrn_api35';api=35;transport='HTTPS with scoped local CA';rounds=$rounds;full_ui_e2e='not tested'} | ConvertTo-Json -Depth 6 | Set-Content (Join-Path $root $report) -Encoding utf8
 } finally {
     & $adb -s $Serial reverse tcp:18443 tcp:18443
     & $adb -s $Serial shell run-as $package rm -f files/vyrn-test-fixture.json
