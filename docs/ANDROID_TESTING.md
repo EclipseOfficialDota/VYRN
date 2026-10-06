@@ -1,5 +1,22 @@
 # Local Android integration
 
+## Recovery code across real process restarts — 2026-10-06
+
+After local TLS setup and an x86_64 local instrumentation build:
+
+```powershell
+./scripts/test-android-integration.ps1 -Phases @('onboarding-prepare','onboarding-restart','onboarding-gap','onboarding-recover','onboarding-complete')
+./scripts/test-android-integration.ps1 -Phases registration-ui
+./scripts/test-android-integration.ps1 -Phases auth-ui
+./scripts/test-android-integration.ps1 -Phases @('logout-prepare','logout-offline','logout-ui')
+```
+
+Run the five onboarding phases together: only the first clears app data, then each round force-stops the app. Preparation uses actual registration controls, exercises manual/automatic refresh and identity/acknowledgement guards, and saves only public state, PID and a recovery-code hash in app-private test storage. Restart removes the local TLS forwarding and verifies the exact selectable dialog offline. Gap clears native config while retaining encrypted tokens; recovery restores server-confirmed native identity online and presses the actual Saved button. Complete verifies the removed code stays absent and MainTabs opens after another process restart. Finally removes the fixture/state file and restores forwarding.
+
+The final report has45 onboarding checks; the same app passes registration15, recovery/sign-in12 and logout38, total110. Permission-dependent counts can vary. Native syncContacts=false must persist with identity before navigation. This tests one emulator and new registrations; arbitrary crash timing, legacy-format migration, storage/Keystore failures, complete account switching and physical-device acceptance remain open.
+
+For Android's observed old-task-removal race, the harness retries once only when instrumentation reports 'shortMsg=failed to attach', which happens before the runner enters. It saves the first result in ignored .local logs and records startup_attach_retry in the report. Test assertions/application crashes are never automatically retried.
+
 ## Native logout and login persistence — 2026-10-06
 
 After the local TLS setup and x86_64 instrumentation build, run:

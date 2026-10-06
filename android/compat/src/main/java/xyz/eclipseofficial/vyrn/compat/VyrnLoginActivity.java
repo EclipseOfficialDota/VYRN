@@ -26,6 +26,7 @@ import org.telegram.ui.Components.OutlineTextContainerView;
 import org.telegram.ui.Components.TransformableLoginButtonView;
 import org.telegram.ui.Components.LayoutHelper;
 import org.telegram.ui.MainTabsActivity;
+import xyz.eclipseofficial.vyrn.data.TokenVault;
 
 /** Email authentication hosted in Telegram's original navigation and themed controls. */
 public final class VyrnLoginActivity extends BaseFragment {
@@ -34,9 +35,51 @@ public final class VyrnLoginActivity extends BaseFragment {
     private View submit;
     private TextView toggle,recover,status,title,subtitle;
     private AlertDialog recoveryDialog;
+    private boolean restoringRecovery;
+    public static boolean hasPendingRecovery(int account){return new TokenVault(org.telegram.messenger.ApplicationLoader.applicationContext,account).hasPendingRecovery();}
+    @Override public void onResume(){super.onResume();restoreRecovery();}
+    @Override public void onBecomeFullyVisible(){super.onBecomeFullyVisible();restoreRecovery();}
     @Override public boolean dismissDialogOnPause(android.app.Dialog dialog){return dialog!=recoveryDialog&&super.dismissDialogOnPause(dialog);}
     private boolean fa(){return "fa".equals(Locale.getDefault().getLanguage());}
     private String tr(String en,String fa){return fa()?fa:en;}
+    private void openAccount(){MainTabsActivity main=new MainTabsActivity();main.prepareDialogsActivity(null);presentFragment(main,true);NotificationCenter.getInstance(currentAccount).postNotificationName(NotificationCenter.mainUserInfoChanged);}
+    private void recoveryError(){if(isFinished)return;restoringRecovery=false;submit.setEnabled(true);submit.setContentDescription(tr("Retry","تلاش مجدد"));String error=tr("Could not restore or save your recovery code. Check storage and connection, then retry.","نمایش یا ذخیره کد بازیابی انجام نشد. فضای خالی و اتصال را بررسی کنید و دوباره تلاش کنید.");status.setText(error);if(recoveryDialog!=null&&recoveryDialog.isShowing())android.widget.Toast.makeText(getParentActivity(),error,android.widget.Toast.LENGTH_LONG).show();}
+    private void restoreRecovery(){
+        if(fragmentView==null||isFinished||restoringRecovery||recoveryDialog!=null&&recoveryDialog.isShowing()||!hasPendingRecovery(currentAccount)||getParentLayout()==null||getParentLayout().isTransitionAnimationInProgress())return;
+        restoringRecovery=true;submit.setEnabled(false);toggle.setEnabled(false);recover.setEnabled(false);
+        final int account=currentAccount;final long origin=UserConfig.getInstance(account).getClientUserId();
+        VyrnBridge.execute(()->{
+            try{
+                VyrnBridge bridge=VyrnBridge.forAccount(account);JSONObject pending;TLRPC.User restored=null;
+                synchronized(bridge.repository.vault.guard()){
+                    pending=bridge.repository.vault.load();
+                    if(!pending.optBoolean("recovery_pending")||pending.optString("recovery_code").length()!=43)throw new SecurityException("pending_recovery_missing");
+                    if(origin==0){xyz.eclipseofficial.vyrn.domain.Models.User user=bridge.repository.me(pending.getString("user_id"),pending.getString("session_id"));restored=bridge.mapUser(user);}
+                    else if(!bridge.isLocalUser(pending.getString("user_id"),origin))throw new SecurityException("recovery_identity_changed");
+                }
+                final JSONObject snapshot=pending;final TLRPC.User user=restored;
+                AndroidUtilities.runOnUIThread(()->{
+                    restoringRecovery=false;if(isFinished||currentAccount!=account||org.telegram.ui.LaunchActivity.getLastFragment()!=this)return;if(recoveryDialog!=null&&recoveryDialog.isShowing())return;
+                    if(UserConfig.getInstance(account).getClientUserId()!=origin||!snapshot.optString("session_id").equals(bridge.repository.vault.cachedSession())){recoveryError();return;}
+                    if(user!=null){UserConfig config=UserConfig.getInstance(account);config.syncContacts=false;config.setCurrentUser(user);if(!config.vyrnSaveCurrentUser(user)){config.clearConfig();recoveryError();return;}config.saveConfig(true);MessagesController.getInstance(account).putUser(user,false);}
+                    showRecovery(snapshot);
+                });
+            }catch(Exception failure){AndroidUtilities.runOnUIThread(()->{restoringRecovery=false;if(!isFinished&&currentAccount==account&&org.telegram.ui.LaunchActivity.getLastFragment()==this)recoveryError();});}
+        });
+    }
+    private void showRecovery(JSONObject pending){
+        final int account=currentAccount;VyrnBridge bridge=VyrnBridge.forAccount(account);String user=pending.optString("user_id"),session=pending.optString("session_id"),code=pending.optString("recovery_code");final long origin=UserConfig.getInstance(account).getClientUserId();
+        submit.setEnabled(false);toggle.setEnabled(false);recover.setEnabled(false);
+        AlertDialog.Builder builder=new AlertDialog.Builder(getParentActivity());builder.setTitle(tr("Save your recovery code","کد بازیابی را ذخیره کنید"));builder.setMessage(tr("Keep this code somewhere safe. You need it if you forget your password.\n\n","این کد را در جای امن نگه دارید. اگر رمز را فراموش کنید به آن نیاز دارید.\n\n")+code);builder.setPositiveButton(tr("Saved","ذخیره کردم"),null);
+        AlertDialog alert=builder.create();recoveryDialog=alert;showDialog(alert);alert.setCanceledOnTouchOutside(false);alert.setCancelable(false);if(alert.getMessageTextView()!=null)alert.getMessageTextView().setTextIsSelectable(true);
+        View saved=alert.getButton(android.content.DialogInterface.BUTTON_POSITIVE);if(saved==null){recoveryError();return;}
+        saved.setOnClickListener(v->{if(isFinished||currentAccount!=account||org.telegram.ui.LaunchActivity.getLastFragment()!=this)return;saved.setEnabled(false);VyrnBridge.execute(()->{
+            try{
+                bridge.repository.vault.acknowledgeRecovery(user,session,code);
+                AndroidUtilities.runOnUIThread(()->{if(isFinished||currentAccount!=account||org.telegram.ui.LaunchActivity.getLastFragment()!=this)return;if(UserConfig.getInstance(account).getClientUserId()!=origin||!session.equals(bridge.repository.vault.cachedSession())){saved.setEnabled(true);recoveryError();return;}alert.dismiss();recoveryDialog=null;openAccount();});
+            }catch(Exception failure){AndroidUtilities.runOnUIThread(()->{if(isFinished)return;saved.setEnabled(true);recoveryError();});}
+        });});
+    }
     @Override public View createView(Context context){
         actionBar.setAddToContainer(false);
         FrameLayout root=new FrameLayout(context);
@@ -79,32 +122,33 @@ public final class VyrnLoginActivity extends BaseFragment {
         EditTextBoldCursor field=new EditTextBoldCursor(context);field.setSingleLine(true);field.setTextSize(16);field.setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteBlackText));field.setInputType(type);field.setBackground(null);field.setPadding(AndroidUtilities.dp(16),0,AndroidUtilities.dp(16),0);field.setCursorColor(Theme.getColor(Theme.key_windowBackgroundWhiteValueText));field.setContentDescription(hint);field.setGravity((fa()?Gravity.RIGHT:Gravity.LEFT)|Gravity.CENTER_VERTICAL);outline.attachEditText(field);field.setOnFocusChangeListener((v,focused)->outline.animateSelection(focused||field.length()>0));outline.addView(field,LayoutHelper.createFrame(-1,-1));form.addView(outline,LayoutHelper.createLinear(-1,58,0,0,0,14));return field;
     }
     private void authenticate(){
+        if(hasPendingRecovery(currentAccount)){restoreRecovery();return;}
+        final int account=currentAccount;
         final String e=email.getText().toString().trim(),p=password.getText().toString(),n=name.getText().toString().trim(),i=invite.getText().toString();final boolean registration=register,recovery=recovering;
         if(e.isEmpty()||p.isEmpty()||(registration&&(n.isEmpty()||i.isEmpty()))||(recovery&&i.isEmpty())){status.setText(tr("Complete the account details.","مشخصات حساب را کامل وارد کنید."));return;}
         submit.setEnabled(false);toggle.setEnabled(false);recover.setEnabled(false);status.setText(tr("Connecting…","در حال اتصال…"));
         VyrnBridge.execute(()->{
             try{
-                VyrnBridge bridge=VyrnBridge.forAccount(currentAccount);
+                VyrnBridge bridge=VyrnBridge.forAccount(account);
                 if(recovery){
                     JSONObject result=(JSONObject)bridge.repository.request("POST","/v1/auth/recover",new JSONObject().put("email",e).put("recovery_code",i).put("new_password",p),false);
                     if(!result.optBoolean("recovered"))throw new IllegalStateException("recovery_not_confirmed");
-                    AndroidUtilities.runOnUIThread(()->{if(isFinished)return;setMode(false,false);password.setText("");submit.setEnabled(true);toggle.setEnabled(true);recover.setEnabled(true);status.setText(tr("Password changed. Sign in with your new password.","رمز تغییر کرد. با رمز جدید وارد شوید."));});
+                    AndroidUtilities.runOnUIThread(()->{if(isFinished||currentAccount!=account||org.telegram.ui.LaunchActivity.getLastFragment()!=this)return;setMode(false,false);password.setText("");submit.setEnabled(true);toggle.setEnabled(true);recover.setEnabled(true);status.setText(tr("Password changed. Sign in with your new password.","رمز تغییر کرد. با رمز جدید وارد شوید."));});
                     return;
                 }
                 JSONObject input=new JSONObject().put("email",e).put("password",p).put("device_id",bridge.repository.vault.device()).put("device_name",Build.MANUFACTURER+" "+Build.MODEL);
                 if(registration)input.put("display_name",n).put("invite_code",i);
                 JSONObject tokens=(JSONObject)bridge.repository.request("POST",registration?"/v1/auth/register":"/v1/auth/login",input,false);
-                bridge.repository.vault.save(tokens);TLRPC.User user=bridge.mapUser(bridge.repository.me());
+                if(registration){if(tokens.optString("recovery_code").length()!=43)throw new IllegalStateException("recovery_code_missing");tokens.put("recovery_pending",true);}
+                bridge.repository.vault.save(tokens);TLRPC.User user=bridge.mapUser(bridge.repository.me(tokens.getString("user_id"),tokens.getString("session_id")));final JSONObject stored=bridge.repository.vault.load();
                 AndroidUtilities.runOnUIThread(()->{
-                    if(isFinished)return;
-                    UserConfig config=UserConfig.getInstance(currentAccount);config.syncContacts=false;config.setCurrentUser(user);
+                    if(isFinished||currentAccount!=account||org.telegram.ui.LaunchActivity.getLastFragment()!=this)return;
+                    UserConfig config=UserConfig.getInstance(account);config.syncContacts=false;config.setCurrentUser(user);
                     if(!config.vyrnSaveCurrentUser(user)){config.clearConfig();submit.setEnabled(true);toggle.setEnabled(true);recover.setEnabled(true);status.setText(tr("Could not save your account on this device. Check available storage and retry.","حساب روی این دستگاه ذخیره نشد. فضای خالی را بررسی کنید و دوباره تلاش کنید."));return;}
-                    config.saveConfig(true);MessagesController.getInstance(currentAccount).putUser(user,false);
-                    Runnable open=()->{MainTabsActivity main=new MainTabsActivity();main.prepareDialogsActivity(null);presentFragment(main,true);NotificationCenter.getInstance(currentAccount).postNotificationName(NotificationCenter.mainUserInfoChanged);};
-                    String recoveryCode=tokens.optString("recovery_code");
-                    if(!recoveryCode.isEmpty()){AlertDialog.Builder dialog=new AlertDialog.Builder(getParentActivity());dialog.setTitle(tr("Save your recovery code","کد بازیابی را ذخیره کنید"));dialog.setMessage(tr("Keep this code somewhere safe. You need it if you forget your password.\n\n","این کد را در جای امن نگه دارید. اگر رمز را فراموش کنید به آن نیاز دارید.\n\n")+recoveryCode);dialog.setPositiveButton(tr("Saved","ذخیره کردم"),(d,which)->open.run());AlertDialog alert=dialog.create();recoveryDialog=alert;showDialog(alert);alert.setCanceledOnTouchOutside(false);alert.setCancelable(false);if(alert.getMessageTextView()!=null)alert.getMessageTextView().setTextIsSelectable(true);}else open.run();
+                    config.saveConfig(true);MessagesController.getInstance(account).putUser(user,false);
+                    if(stored.optBoolean("recovery_pending"))showRecovery(stored);else openAccount();
                 });
-            }catch(Exception failure){AndroidUtilities.runOnUIThread(()->{if(isFinished)return;submit.setEnabled(true);toggle.setEnabled(true);recover.setEnabled(true);status.setText(recovery?tr("Could not reset your password. Check your connection, recovery code and new password.","رمز تغییر نکرد. اتصال، کد بازیابی و رمز جدید را بررسی کنید."):registration?tr("Could not create account. Check your connection, invite code and account details.","حساب ساخته نشد. اتصال، کد دعوت و مشخصات حساب را بررسی کنید."):tr("Could not sign in. Check your connection and account details.","ورود انجام نشد. اتصال و مشخصات حساب را بررسی کنید."));});}
+            }catch(Exception failure){AndroidUtilities.runOnUIThread(()->{if(isFinished||currentAccount!=account||org.telegram.ui.LaunchActivity.getLastFragment()!=this)return;submit.setEnabled(true);toggle.setEnabled(true);recover.setEnabled(true);status.setText(recovery?tr("Could not reset your password. Check your connection, recovery code and new password.","رمز تغییر نکرد. اتصال، کد بازیابی و رمز جدید را بررسی کنید."):registration?tr("Could not create account. Check your connection, invite code and account details.","حساب ساخته نشد. اتصال، کد دعوت و مشخصات حساب را بررسی کنید."):tr("Could not sign in. Check your connection and account details.","ورود انجام نشد. اتصال و مشخصات حساب را بررسی کنید."));});}
         });
     }
 }

@@ -24,6 +24,7 @@ final class AuthUiIntegration {
     static void run(Instrumentation instrumentation,Activity activity,JSONObject fixture,Check check) throws Exception {new AuthUiIntegration(instrumentation,activity,check).run(fixture);}
     static void registration(Instrumentation instrumentation,Activity activity,JSONObject fixture,Check check) throws Exception {new AuthUiIntegration(instrumentation,activity,check).register(fixture);}
     static void logout(Instrumentation instrumentation,Activity activity,JSONObject fixture,Check check,boolean offline) throws Exception {new AuthUiIntegration(instrumentation,activity,check).logout(fixture,offline);}
+    static void onboarding(Instrumentation instrumentation,Activity activity,JSONObject fixture,Check check,String phase) throws Exception {new AuthUiIntegration(instrumentation,activity,check).onboarding(fixture,phase);}
     private String label(String en,String persian){return fa?persian:en;}
     private View find(View view,String value){
         if(view.getVisibility()!=View.VISIBLE)return null;
@@ -45,6 +46,9 @@ final class AuthUiIntegration {
         return fragment!=null&&fragment.visibleDialog instanceof org.telegram.ui.ActionBar.AlertDialog&&fragment.visibleDialog.isShowing()?(org.telegram.ui.ActionBar.AlertDialog)fragment.visibleDialog:null;
     }
     private void register(JSONObject fixture) throws Exception {
+        register(fixture,false);
+    }
+    private void register(JSONObject fixture,boolean leavePending) throws Exception {
         int account=UserConfig.selectedAccount;
         check.verify(!UserConfig.getInstance(account).isClientActivated(),"registration_ui_fresh_account");
         click(label("Create account with invite","ثبت‌نام با دعوت"));
@@ -69,8 +73,58 @@ final class AuthUiIntegration {
         instrumentation.getTargetContext().startActivity(new android.content.Intent(android.content.Intent.ACTION_MAIN).setClassName(instrumentation.getTargetContext(),"org.telegram.ui.LaunchActivity").addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK|android.content.Intent.FLAG_ACTIVITY_REORDER_TO_FRONT));
         instrumentation.waitForIdleSync();
         await(()->dialog()!=null,"registration_ui_home_return_preserves_code");
+        if(leavePending){
+            check.verify(repository.vault.hasPendingRecovery(),"onboarding_marker_persisted");
+            boolean rejected=false;try{repository.vault.acknowledgeRecovery(tokens.getString("user_id"),"different-session",code);}catch(SecurityException expected){rejected=true;}
+            check.verify(rejected&&repository.vault.hasPendingRecovery()&&repository.vault.load().getString("recovery_code").equals(code),"onboarding_stale_confirmation_preserves_code");
+            JSONObject renewed=(JSONObject)repository.request("POST","/v1/auth/refresh",new JSONObject().put("refresh_token",repository.vault.load().getString("refresh_token")),false);
+            check.verify(!renewed.has("recovery_code"),"onboarding_real_refresh_has_no_code");repository.vault.save(renewed);
+            check.verify(repository.vault.hasPendingRecovery()&&repository.vault.load().getString("recovery_code").equals(code),"onboarding_refresh_preserves_code");
+            JSONObject stale=repository.vault.load();stale.put("access_token","invalid");repository.vault.save(stale);
+            check.verify(repository.me(tokens.getString("user_id"),tokens.getString("session_id")).id.equals(tokens.getString("user_id"))&&repository.vault.hasPendingRecovery()&&repository.vault.load().getString("recovery_code").equals(code),"onboarding_bound_auto_refresh_preserves_code");
+            rejected=false;try{repository.me("different-user",tokens.getString("session_id"));}catch(SecurityException expected){rejected=true;}
+            check.verify(rejected&&repository.vault.hasPendingRecovery()&&repository.vault.load().getString("recovery_code").equals(code),"onboarding_wrong_identity_lookup_preserves_code");
+            boolean encrypted=true;for(Object value:instrumentation.getTargetContext().getSharedPreferences("vyrn_session_"+account,android.content.Context.MODE_PRIVATE).getAll().values())if(String.valueOf(value).contains(code))encrypted=false;
+            check.verify(encrypted,"onboarding_code_not_in_plain_preferences");
+            writeOnboarding(new JSONObject().put("user",tokens.getString("user_id")).put("session",tokens.getString("session_id")).put("native_user",UserConfig.getInstance(account).getClientUserId()).put("code_hash",codeHash(code)).put("pid",android.os.Process.myPid()));return;
+        }
         instrumentation.runOnMainSync(()->currentDialog().getButton(android.content.DialogInterface.BUTTON_POSITIVE).performClick());
         await(()->{boolean[] main={false};instrumentation.runOnMainSync(()->main[0]=org.telegram.ui.LaunchActivity.getLastFragment() instanceof org.telegram.ui.MainTabsActivity);return main[0];},"registration_ui_saved_opens_main");
+        check.verify(!repository.vault.hasPendingRecovery()&&!repository.vault.load().has("recovery_code"),"registration_ui_saved_removes_device_code");
+    }
+    private String codeHash(String code) throws Exception {return android.util.Base64.encodeToString(java.security.MessageDigest.getInstance("SHA-256").digest(code.getBytes(java.nio.charset.StandardCharsets.UTF_8)),android.util.Base64.NO_WRAP);}
+    private java.io.File onboardingFile(){return new java.io.File(instrumentation.getTargetContext().getFilesDir(),"vyrn-test-onboarding.json");}
+    private void writeOnboarding(JSONObject state) throws Exception {java.nio.file.Files.write(onboardingFile().toPath(),state.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8));}
+    private void onboarding(JSONObject fixture,String phase) throws Exception {
+        if(phase.equals("onboarding-prepare")){register(fixture,true);return;}
+        JSONObject state=new JSONObject(new String(java.nio.file.Files.readAllBytes(onboardingFile().toPath()),java.nio.charset.StandardCharsets.UTF_8));int account=UserConfig.selectedAccount;
+        check.verify(state.getInt("pid")!=android.os.Process.myPid(),"onboarding_distinct_process");
+        TokenVault vault=new TokenVault(instrumentation.getTargetContext(),account);
+        if(phase.equals("onboarding-complete")){
+            await(()->UserConfig.getInstance(account).getClientUserId()==state.optLong("native_user"),"onboarding_saved_identity_survives_restart");
+            check.verify(!vault.hasPendingRecovery()&&!vault.load().has("recovery_code"),"onboarding_saved_code_stays_removed");
+            check.verify(!UserConfig.getInstance(account).syncContacts&&!UserConfig.getInstance(account).getPreferences().getBoolean("syncContacts",true),"onboarding_contact_sync_stays_disabled");
+            boolean[] main={false};instrumentation.runOnMainSync(()->main[0]=org.telegram.ui.LaunchActivity.getLastFragment() instanceof org.telegram.ui.MainTabsActivity&&currentDialog()==null);check.verify(main[0],"onboarding_saved_restart_opens_main");return;
+        }
+        await(()->dialog()!=null,"onboarding_restart_restores_dialog");
+        JSONObject tokens=vault.load();String code=tokens.getString("recovery_code");boolean[] shown={false};
+        instrumentation.runOnMainSync(()->shown[0]=org.telegram.ui.LaunchActivity.getLastFragment() instanceof xyz.eclipseofficial.vyrn.compat.VyrnLoginActivity&&currentDialog().getMessageTextView().getText().toString().contains(code)&&currentDialog().getMessageTextView().isTextSelectable());
+        check.verify(shown[0]&&codeHash(code).equals(state.getString("code_hash")),"onboarding_exact_selectable_code_restored");
+        check.verify(vault.hasPendingRecovery()&&tokens.getString("user_id").equals(state.getString("user"))&&tokens.getString("session_id").equals(state.getString("session")),"onboarding_original_session_preserved");
+        check.verify(UserConfig.getInstance(account).getClientUserId()==state.getLong("native_user"),"onboarding_native_identity_restored");
+        if(phase.equals("onboarding-restart")){
+            instrumentation.getTargetContext().startActivity(new android.content.Intent(android.content.Intent.ACTION_VIEW,android.net.Uri.parse("tg://settings/devices")).setClassName(instrumentation.getTargetContext(),"org.telegram.ui.LaunchActivity").addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK|android.content.Intent.FLAG_ACTIVITY_SINGLE_TOP));
+            instrumentation.waitForIdleSync();
+            instrumentation.runOnMainSync(()->shown[0]=org.telegram.ui.LaunchActivity.getLastFragment() instanceof xyz.eclipseofficial.vyrn.compat.VyrnLoginActivity&&currentDialog()!=null);check.verify(shown[0],"onboarding_settings_link_cannot_skip_confirmation");
+        }else if(phase.equals("onboarding-gap")){
+            instrumentation.runOnMainSync(()->{UserConfig config=UserConfig.getInstance(account);config.clearConfig();check.verify(config.getPreferences().edit().commit(),"onboarding_missing_native_config_committed");});
+            check.verify(!UserConfig.getInstance(account).isClientActivated()&&vault.hasPendingRecovery(),"onboarding_gap_keeps_encrypted_code");
+        }else if(phase.equals("onboarding-recover")){
+            instrumentation.runOnMainSync(()->currentDialog().getButton(android.content.DialogInterface.BUTTON_POSITIVE).performClick());
+            await(()->{boolean[] main={false};instrumentation.runOnMainSync(()->main[0]=org.telegram.ui.LaunchActivity.getLastFragment() instanceof org.telegram.ui.MainTabsActivity);return main[0];},"onboarding_saved_opens_main");
+            check.verify(!vault.hasPendingRecovery()&&!vault.load().has("recovery_code"),"onboarding_saved_clears_marker_and_code");
+        }else throw new IllegalArgumentException("onboarding_phase");
+        state.put("pid",android.os.Process.myPid());writeOnboarding(state);
     }
     private void run(JSONObject fixture) throws Exception {
         int account=UserConfig.selectedAccount;
@@ -94,6 +148,7 @@ final class AuthUiIntegration {
         fill(label("Password","رمز عبور"),newPassword);click(label("Sign in","ورود"));
         await(()->UserConfig.getInstance(account).isClientActivated(),"auth_ui_new_password_login");
         await(()->UserConfig.getInstance(account).getPreferences().contains("user"),"auth_ui_native_identity_persisted");
+        check.verify(!UserConfig.getInstance(account).getPreferences().getBoolean("syncContacts",true),"auth_ui_contact_sync_persisted_disabled");
         RestRepository current=new RestRepository(new TokenVault(instrumentation.getTargetContext(),account));
         check.verify(current.me().id.equals(registered.getString("user_id")),"auth_ui_authenticated_identity");setup.vault.clear();
     }

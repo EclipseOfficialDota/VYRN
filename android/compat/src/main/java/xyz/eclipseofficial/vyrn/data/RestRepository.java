@@ -61,6 +61,7 @@ public final class RestRepository implements Models.Repository {
         }finally{connection.disconnect();}
     }
     public Models.User me() throws Exception {return user((JSONObject)request("GET","/v1/me",null,true));}
+    public Models.User me(String expectedUser,String session) throws Exception {Models.User value=user((JSONObject)requestForSession(expectedUser,session,"GET","/v1/me",null));if(!expectedUser.equals(value.id))throw new SecurityException("account_changed");return value;}
     public void renameGroup(String id,String title) throws Exception {request("PATCH","/v1/conversations/"+id,new JSONObject().put("title",title),true);}
     public void inviteMember(String id,String user) throws Exception {request("POST","/v1/conversations/"+id+"/members",new JSONObject().put("user_id",user).put("preserve_existing",true),true);}
     public void setMemberRole(String id,String user,boolean admin) throws Exception {request("POST","/v1/conversations/"+id+"/members",new JSONObject().put("user_id",user).put("role",admin?"admin":"member"),true);}

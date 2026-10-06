@@ -54,7 +54,16 @@ android {
 Edit 'TMessagesProj/src/main/java/org/telegram/ui/LaunchActivity.java' {
  param($t)
  $t=(& git -c "safe.directory=$($upstream.Replace('\','/'))" -C $upstream show "${pin}:TMessagesProj/src/main/java/org/telegram/ui/LaunchActivity.java") -join "`n"
- $t -replace '(?s)private BaseFragment getClientNotActivatedFragment\(\) \{.*?\n    \}', 'private BaseFragment getClientNotActivatedFragment() { return new xyz.eclipseofficial.vyrn.compat.VyrnLoginActivity(); }'
+ $t=$t -replace '(?s)private BaseFragment getClientNotActivatedFragment\(\) \{.*?\n    \}', 'private BaseFragment getClientNotActivatedFragment() { return new xyz.eclipseofficial.vyrn.compat.VyrnLoginActivity(); }'
+ $pending='xyz.eclipseofficial.vyrn.compat.VyrnLoginActivity.hasPendingRecovery(currentAccount)'
+ $startup="if (!UserConfig.getInstance(currentAccount).isClientActivated()) {`n                actionBarLayout.addFragmentToStack(getClientNotActivatedFragment());"
+ if(!$t.Contains($startup)){throw 'Pinned onboarding startup marker missing'}
+ $t=$t.Replace($startup,"if (!UserConfig.getInstance(currentAccount).isClientActivated() || $pending) {`n                actionBarLayout.addFragmentToStack(getClientNotActivatedFragment());")
+ $t=$t.Replace("if (savedInstanceState != null) {`n                    String fragmentName", "if (savedInstanceState != null && !$pending) {`n                    String fragmentName")
+ $t=$t.Replace('MainTabsActivity mainTabsActivity = dialogsActivityProvider.provide(null);',"BaseFragment mainTabsActivity = $pending ? new xyz.eclipseofficial.vyrn.compat.VyrnLoginActivity() : dialogsActivityProvider.provide(null);")
+ $intentSignature='private boolean handleIntent(Intent intent, boolean isNew, boolean restore, boolean fromPassword, Browser.Progress progress, boolean rebuildFragments, boolean openedTelegram) {'
+ if(!$t.Contains($intentSignature)){throw 'Pinned onboarding intent marker missing'}
+ $t.Replace($intentSignature,"$intentSignature`n        if ($pending) { actionBarLayout.showLastFragment(); return false; }")
 }
 Edit 'TMessagesProj/src/main/java/org/telegram/messenger/UserConfig.java' {
  param($t)
@@ -69,7 +78,7 @@ Edit 'TMessagesProj/src/main/java/org/telegram/messenger/UserConfig.java' {
             SerializedData data = new SerializedData();
             try {
                 currentUser.serializeToStream(data);
-                return getPreferences().edit().putString("user", Base64.encodeToString(data.toByteArray(), Base64.DEFAULT)).commit();
+                return getPreferences().edit().putString("user", Base64.encodeToString(data.toByteArray(), Base64.DEFAULT)).putBoolean("syncContacts", syncContacts).commit();
             } catch (Exception failure) { return false; }
             finally { data.cleanup(); }
         }

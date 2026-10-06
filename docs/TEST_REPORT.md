@@ -2,6 +2,22 @@
 
 Updated: 2026-10-06. This records performed checks, not planned tests.
 
+## Pending recovery-code onboarding — 2026-10-06
+
+All110 targeted Android35/local-TLS checks pass on app SHA256 `4b831c1195e7cecbe846d54e205027e483793f0babad75d0cb79bf0f776b3b96`: onboarding45 (20 preparation,6 offline restart,7 missing-native-state setup,7 online recovery/confirmation,5 final restart), registration15, recovery/sign-in12 and logout38 (12 preparation,8 offline,18 online). Separate reports are artifacts/android-onboarding-ui.json, android-registration-ui.json, android-auth-ui.json and android-logout-ui.json. This supersedes prior counts/hashes for these targeted suites; historical broader Android/Signal reports are unchanged.
+
+New native registrations persist an encrypted recovery_pending flag/code in the token payload and a non-secret preference marker in the same commit. Refresh saves retain the code only for the same user/session; Saved validates the displayed user/session/code under the vault guard and removes the stored code before proceeding. Offline cold start restores the exact selectable code without another registration. A controlled missing-native-config state is restored through authenticated, user/session-bound /v1/me before displaying the code. Startup, saved-fragment restoration, account switching and intents route pending accounts to onboarding. The UI callbacks capture their account and check the active fragment before changing screens.
+
+Checks include a real manual refresh response without recovery_code, automatic refresh after an invalid access token, wrong-identity lookup and stale-session acknowledgement rejection without code loss, no plaintext code in token preferences, distinct PIDs, an offline settings-link request while confirmation remains visible, and acknowledgement followed by another process restart with no stored/repeated code. The missing-native-state case is intentionally induced by clearing native config while preserving the vault; it models the activation gap, not a precisely timed OS kill between two writes. The test-state file contains only public identity/session metadata, PID and a code hash; it and fixture credentials are removed in finally.
+
+A real secondary bug was corrected: synchronous native identity persistence now also commits syncContacts=false. The earlier deferred configuration save could lose that choice during immediate force-stop and provoke an unwanted contacts permission prompt. Final restarted-account and login checks verify the persisted choice. Other native startup permissions/screens still need product gating.
+
+The emulator occasionally killed a new process with 'remove task' after pm clear and before attach, confirmed in ActivityManager logs. The harness retries exactly this reported pre-runner failure once and records startup_attach_retry; final registration required that retry, while the other final rounds did not. Assertion failures and application crashes are not retried.
+
+All three final ARM Debug builds pass signature, package/API26/ABI, native Signal and normal TLS/manifest checks; no local test CA is packaged. ARM64 SHA256 `fc388b721adb359a12399dd4d99bc91fa43bf97ac05ba0784ae2c60cb011955c` (artifacts/apk-verification.json). Repository pattern and actual local-credential-value inclusion checks pass.
+
+Limits: one disposable emulator, new-registration format only; no legacy pending-code migration, simulated storage-write/Keystore failure, exhaustive account-switch/late-callback/ack-loss lifecycle, two physical phones or signed Release acceptance. Backend and VPS unchanged. Full project scope remains unfinished.
+
 ## Native logout and durable login — 2026-10-06
 
 The disposable Android35 local-TLS suite passes38 checks across logout-prepare11, logout-offline8 and logout-ui19. It opens the original LogoutActivity, touches the actual logout row, confirms its native dialog, verifies server revocation and local vault/config clearing, and touches Start Messaging on the resulting IntroActivity to reopen Vyrn login. A controlled session replacement rejects stale logout without cleanup or revocation; another session survives successful logout. Offline logout reports failure and preserves the account for retry. These are sessions on one emulator, not two physical-device acceptance.

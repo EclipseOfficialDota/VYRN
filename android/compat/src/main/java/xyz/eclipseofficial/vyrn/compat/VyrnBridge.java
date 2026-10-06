@@ -217,6 +217,7 @@ public final class VyrnBridge {
     }
     public static synchronized VyrnBridge forAccount(int account){VyrnBridge bridge=INSTANCES.get(account);if(bridge==null){bridge=new VyrnBridge(account);INSTANCES.put(account,bridge);}return bridge;}
     public static void execute(Runnable task){IO.execute(task);}
+    boolean isLocalUser(String user,long expected){return expected!=0&&user!=null&&!user.isEmpty()&&ids.local("user",user)==expected;}
     /** Replayed live updates must follow a confirmed deletion through the native delete path. */
     public static boolean filterDeletedUpdates(int account,ArrayList<TLRPC.Update> updates){
         ArrayList<Integer> positions=new ArrayList<>();ArrayList<TLRPC.Message> messages=new ArrayList<>();
