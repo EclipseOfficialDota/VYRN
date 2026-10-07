@@ -1,5 +1,13 @@
 # Verification report
 
+## Native foreground send/receive passes — 2026-10-08
+
+Final ARM64/ARMv7/universal Debug rebuild2m47s and all three signature/package/API/ABI/native Signal/manifest/public TLS checks pass; local CA absent. ARM64 SHA256b95d2324c14af10f88ff4cc06db07a5dd55b42c90a66342e05ef1e65ef38c70c; artifacts/apk-verification.json. No physical installation/release signing evidence.
+
+Missing TL_messages_getPeerDialogs adapter handling blocked first native history load and postponed live new-message notifications. Requested authorized group metadata now uses the existing snapshot mapper; native initial history finishes and deferred messages display. Two actual independent account0 emulator clients pass both directions, native Send view click/cleared composer/positive confirmed outgoing and visible incoming bubbles/exactly-one REST message.47 recorded messaging checks +30 registration checks =77; no attach retry; report artifacts/android-two-client-messaging.json, local app SHA256529a80304327625bf273cab604c76a245454907af3744920bb4ed6bea4072932. Final local/instrumentation build2m9s passes after correcting one abstract-input field compile error.
+
+This supersedes older display failure for this tested flow. REST creates the group, chat entry is programmatic, sender invokes actual native view click; this is not physical touch or two phones. Edit/delete/offline/retry/restart, chat-list discovery/group creation, private UI, background and full remaining goal are not established. Normal ARM rebuild/verification is recorded separately upon completion.
+
 ## Native messaging failure diagnosis — 2026-10-08
 
 Final normal ARM64, ARMv7 and universal Debug APK verification passes signature/package/API/ABI/native Signal/manifest/normal TLS policy, local CA absent; artifacts/apk-verification.json. ARM64 SHA2560f1e5a2224d3dd87b683faf416fd00552180d8ac4658bba65e5220256f9903ba. Phone installation/release signing remain untested. This supersedes the pending-verification note in the diagnostic chronology below.

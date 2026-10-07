@@ -513,8 +513,12 @@ public final class VyrnBridge {
         TLRPC.TL_message out=new TLRPC.TL_message();String snapshot=editSnapshot(m);if(snapshot!=null){out.params=new HashMap<>();out.params.put(EDIT_SNAPSHOT,snapshot);}out.id=ids.message(m.id,m.ordinal);out.peer_id=peer;TLRPC.TL_peerUser sender=new TLRPC.TL_peerUser();sender.user_id=ids.local("user",m.sender);out.from_id=sender;out.flags|=256;out.date=m.date;out.message=m.deleted?"":m.encrypted?(org.telegram.messenger.LocaleController.isRTL?"این پیام در این دستگاه قابل نمایش نیست.":"This message cannot be displayed on this device."):m.text;out.out=sender.user_id==UserConfig.getInstance(account).getClientUserId();out.media=new TLRPC.TL_messageMediaEmpty();out.edit_date=m.editedDate;if(m.editedDate>0)out.flags|=TLRPC.MESSAGE_FLAG_EDITED;return out;
     }
     private TLRPC.TL_messages_dialogs dialogs() throws Exception {
+        return dialogs(null);
+    }
+    private TLRPC.TL_messages_dialogs dialogs(java.util.Set<Long> requested) throws Exception {
         TLRPC.TL_messages_dialogs result=new TLRPC.TL_messages_dialogs();
         for(Models.Conversation c:repository.conversations()){
+            if(requested!=null && (!c.kind.equals("group") || !requested.contains(-(long)ids.local("conversation",c.id))))continue;
             List<Models.User> members=repository.members(c.id);TLRPC.Peer peer=peer(c,members);for(Models.User u:members)result.users.add(mapUser(u));if(c.kind.equals("group"))result.chats.add(chat(c));
             TLRPC.TL_dialog dialog=new TLRPC.TL_dialog();dialog.peer=peer;dialog.id=peer.chat_id!=0?-peer.chat_id:peer.user_id;dialog.notify_settings=new TLRPC.TL_peerNotifySettings();dialog.ttl_period=c.disappearingSeconds;if(c.disappearingSeconds>0)dialog.flags|=32;
             List<Models.Message> messages=repository.liveMessages(c.id,null,1);if(!messages.isEmpty()){TLRPC.Message message=message(messages.get(0),peer);result.messages.add(message);dialog.top_message=message.id;dialog.last_message_date=message.date;}result.dialogs.add(dialog);
@@ -658,6 +662,19 @@ public final class VyrnBridge {
             for(Models.User member:repository.members(created.id))updates.users.add(mapUser(member));TLRPC.TL_messages_invitedUsers result=new TLRPC.TL_messages_invitedUsers();result.updates=updates;return result;
         }
         if(request instanceof TLRPC.TL_messages_getDialogs)return dialogs();
+        if(request instanceof TLRPC.TL_messages_getPeerDialogs){
+            java.util.Set<Long> requested=new java.util.HashSet<>();
+            for(TLRPC.InputDialogPeer input:((TLRPC.TL_messages_getPeerDialogs)request).peers){
+                if(!(input instanceof TLRPC.TL_inputDialogPeer))throw new UnsupportedOperationException();
+                TLRPC.InputPeer peer=((TLRPC.TL_inputDialogPeer)input).peer;
+                if(peer==null || peer.chat_id<=0)throw new UnsupportedOperationException();
+                requested.add(-peer.chat_id);
+            }
+            TLRPC.TL_messages_dialogs snapshot=dialogs(requested);
+            if(snapshot.dialogs.size()!=requested.size())throw new IllegalArgumentException("peer_unavailable");
+            TLRPC.TL_messages_peerDialogs result=new TLRPC.TL_messages_peerDialogs();result.dialogs=snapshot.dialogs;result.messages=snapshot.messages;result.users=snapshot.users;result.chats=snapshot.chats;
+            result.state=new TLRPC.TL_updates_state();result.state.date=(int)(System.currentTimeMillis()/1000);return result;
+        }
         if(request instanceof TLRPC.TL_messages_getHistory){
             TLRPC.TL_messages_getHistory in=(TLRPC.TL_messages_getHistory)request;String conversation=conversation(in.peer);String before=in.offset_id>0?ids.remote("message",in.offset_id):null;
             TLRPC.Peer peer;if(in.peer.chat_id!=0){TLRPC.TL_peerChat p=new TLRPC.TL_peerChat();p.chat_id=in.peer.chat_id;peer=p;}else{TLRPC.TL_peerUser p=new TLRPC.TL_peerUser();p.user_id=in.peer.user_id;peer=p;}

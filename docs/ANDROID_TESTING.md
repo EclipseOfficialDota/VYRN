@@ -1,5 +1,11 @@
 # Local Android integration
 
+## Both foreground delivery directions pass — 2026-10-08
+
+`scripts/test-two-client-messaging.ps1` now passes47 messaging checks plus30 native registration checks on two independent account0 Android35 clients. APK SHA256529a80304327625bf273cab604c76a245454907af3744920bb4ed6bea4072932; report artifacts/android-two-client-messaging.json. This supersedes the earlier sender-bubble failure below for the tested foreground scenario.
+
+The native initial history path requests peer-dialog metadata before history; the shared adapter now returns authorized requested group snapshots instead of rejecting that request. Initial-history completion is checked before receiver readiness. Each direction clicks the real visible/enabled Send view, verifies cleared text, positive confirmed sender bubble and visible incoming recipient bubble, then exactly one server message. Receiver stays in one live process throughout its direction. REST group fixture and programmatic native chat entry remain explicit test setup; physical touch, chat-list/group gestures, edit/delete/offline/retry/restarts and background/phones remain untested.
+
 ## Current messaging failure — 2026-10-08
 
 Monitored launchers identified host emulator access violation0xC0000005. `start-emulator.ps1` now uses host GPU with Vulkan disabled; `-GpuMode auto|software` are explicit alternatives, and `-Monitor` keeps a newly started launcher observable until exit. Software mode also crashed here; host mode remained connected through subsequent tests/builds. Reusing an already running AVD does not change its GPU settings. Verify AVD identity before restarting to apply a different mode.
