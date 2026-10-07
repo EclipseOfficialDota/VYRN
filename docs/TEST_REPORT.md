@@ -2,6 +2,20 @@
 
 Updated: 2026-10-07. This records performed checks, not planned tests.
 
+## Actual settings entry and offline session recovery — 2026-10-07
+
+Final sessions-network passes95 recorded checks,78 distinct names, no pre-runner attach retry. Report artifacts/android-sessions-network.json; local-TLS app SHA256 `3a69e98208e7927a55447ee5dc5e13594923fbcd12865dbd20f989740469e026`. This supersedes the older69-check session evidence for the tested paths; it is not an additional independent95-test suite to sum with that report.
+
+The test now touches the actual MainTabs Settings tab and Devices setting. It waits for the pager animation and scrolls Devices above the floating bottom tabs. All previous registration/session confirmation, cancellation, controlled invalid-hash failure/retry and individual/bulk revocation checks run through this entry.
+
+Four externally acknowledged network changes occur in one instrumented process. Initial cached-list load failure retains the list/account; the actual Retry dispatch is observed before the second offline failure. Actual Back and Devices reopen an empty session screen while disconnected, with a specific visible native error/Retry row. Reconnection and Retry load the two server sessions on that same reopened page. A subsequent offline individual-revoke confirmation displays an error and retains its row. After reconnect, authenticated requests confirm both devices remain active, then the normal individual/bulk controls revoke them successfully while preserving the current device.
+
+The dedicated localhost proxy must actually stop to close existing TLS streams; removing adb reverse alone did not invalidate every established connection. The driver verifies its exact PID/executable and private-IP:8080 upstream, stops/restarts only that test proxy, preserves the certificate, restores forwarding/proxy in finally and removes app-private fixture/step files. This suite requires the existing native local test proxy; it does not support controlling an arbitrary proxy/container. No backend/VPS change or public trust relaxation. TextCell messages are checked through actual accessibility node text; the suite runs in English. Persian strings are implemented but full RTL visual acceptance remains open.
+
+Remaining: full session/account/late-callback/forced-logout/expiry/storage/Keystore cases, actual two-client messaging and physical devices, background/media/private UI and the unchanged full release scope. Previous auth/onboarding/Signal/broad reports were not rerun on this APK.
+
+All three normal ARM Debug APKs built and passed signature/package/API/ABI/native Signal/TLS/manifest checks; no local test CA. ARM64 SHA256 `db8b94958f7aeeb7e45e8cc59e20cefd824154be1a1562304e0cf1bc46ac64f9`, artifacts/apk-verification.json. Scanner154 tracked files and actual local credential inclusion checks pass. Build/test jobs terminal; no physical installation or final signing claimed.
+
 ## Native session-management controls — 2026-10-07
 
 The final sessions-ui run passes69 recorded checks (57 distinct names, including registration15; repeated permission/row/probe checks are counted in the raw total), without startup attach retry. Report artifacts/android-sessions-ui.json; local-TLS APK SHA256 `107772c2087aa44dc2daef996ed33788df7ca469e0ebb681ead2784d01bd4498`.

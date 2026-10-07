@@ -729,7 +729,26 @@ Edit 'TMessagesProj/src/main/java/org/telegram/ui/SessionsActivity.java' {
                             });
 '@
  if(!$t.Contains($bulk)){throw 'Pinned bulk session revocation callback changed'}
- $t.Replace($bulk,$bulk.Replace("                                }`n                            });", "                                } else { $feedback }`n                            });"))
+ $t=$t.Replace($bulk,$bulk.Replace("                                }`n                            });", "                                } else { $feedback }`n                            });"))
+ foreach($marker in @('private int ttlDays;','if (position == ttlRow) {','loading = false;','//                itemsEnterAnimator.showItemsAnimated(oldItemsCount + 1);','qrCodeRow = -1;','if (position == terminateAllSessionsRow) {')){if(!$t.Contains($marker)){throw 'Pinned session retry marker changed'}}
+ $t=$t.Replace('private int ttlDays;',"private int ttlDays;`n    private boolean sessionLoadFailed;`n    private int sessionRetryRow = -1;`n    private String sessionLoadError() { return java.util.Locale.getDefault().getLanguage().equals(`"fa`") ? `"فهرست دستگاه‌ها دریافت نشد`" : `"Could not load devices`"; }")
+ $click="listView.setOnItemClickListener((view, position) -> {`n            if (position == ttlRow) {"
+ if(!$t.Contains($click)){throw 'Pinned session row click marker changed'}
+ $t=$t.Replace($click,"listView.setOnItemClickListener((view, position) -> {`n            if (position == sessionRetryRow) { loadSessions(false); } else if (position == ttlRow) {")
+ $t=$t.Replace('loading = false;', 'loading = false; sessionLoadFailed = currentType == 0 && error != null;')
+ $t=$t.Replace('//                itemsEnterAnimator.showItemsAnimated(oldItemsCount + 1);','if (error != null) updateRows();')
+ $t=$t.Replace('qrCodeRow = -1;',"sessionRetryRow = sessionLoadFailed ? rowCount++ : -1;`n        qrCodeRow = -1;")
+ $t=$t.Replace('return position == terminateAllSessionsRow ||', 'return position == sessionRetryRow && !loading || position == terminateAllSessionsRow ||')
+ $bind="TextCell textCell = (TextCell) holder.itemView;`n                    if (position == terminateAllSessionsRow) {"
+ if(!$t.Contains($bind)){throw 'Pinned session retry binding changed'}
+ $t=$t.Replace($bind,"TextCell textCell = (TextCell) holder.itemView;`n                    if (position == sessionRetryRow) { textCell.setColors(Theme.key_text_RedRegular, Theme.key_text_RedRegular); textCell.setTag(Theme.key_text_RedRegular); textCell.setTextAndValue(sessionLoadError(), getString(R.string.Retry), false); } else if (position == terminateAllSessionsRow) {")
+ foreach($method in @('public long getItemId(int position) {','public int getItemViewType(int position) {')){
+  $marker="$method`n            if (position == terminateAllSessionsRow) {"
+  if(!$t.Contains($marker)){throw 'Pinned session retry adapter changed'}
+  if($method.StartsWith('public long')){$t=$t.Replace($marker,"$method`n            if (position == sessionRetryRow) return Objects.hash(0, 14);`n            if (position == terminateAllSessionsRow) {")}
+  else{$t=$t.Replace($marker,"$method`n            if (position == sessionRetryRow || position == terminateAllSessionsRow) {")}
+ }
+ $t
 }
 Get-ChildItem (Join-Path $upstream 'TMessagesProj/src/main/res') -Filter strings.xml -Recurse | ForEach-Object {
  $t=[IO.File]::ReadAllText($_.FullName)

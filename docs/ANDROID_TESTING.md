@@ -1,5 +1,15 @@
 # Local Android integration
 
+## Live disconnection on the original session screen — 2026-10-07
+
+```powershell
+./scripts/test-android-integration.ps1 -Phases sessions-network
+```
+
+Requires the x86_64 local-TLS instrumentation APK and the existing dedicated native localhost proxy: .local/devtls-native.exe, its matching PID file and an HTTP private-IP:8080 upstream. The helper verifies the process path/arguments before stopping it; normal phases continue to support their existing TLS setup. It restores the same proxy/certificate and forwarding in finally. Native-proxy bootstrap portability is not established by this suite.
+
+One live runner coordinates four public step/ack files with the host. Actual Settings/Devices entry, cached-load failure, offline Retry dispatch, initial empty-screen failure after Back/Devices, successful connected Retry and failed offline revocation are verified. Closing the proxy terminates already-open TLS streams; reverse removal alone is insufficient for this live case. Final report95 recorded checks/78 distinct names, no attach retry, includes the normal registration/session UI cases. Fixture/step files are removed afterward. This is local transport loss on one emulator, not two physical phones, mobile network transitions or background acceptance.
+
 ## Original session-management screen — 2026-10-07
 
 ```powershell

@@ -1,5 +1,5 @@
 # Real Android networking/Keystore integration; not a claim of full UI acceptance.
-param([string]$Serial='emulator-5560',[ValidateSet('first','mutations','profile','offline','restart','auth-ui','registration-ui','sessions-ui','logout-prepare','logout-offline','logout-ui','onboarding-prepare','onboarding-restart','onboarding-gap','onboarding-recover','onboarding-complete')][string[]]$Phases=@('first','mutations','profile','offline','restart'))
+param([string]$Serial='emulator-5560',[ValidateSet('first','mutations','profile','offline','restart','auth-ui','registration-ui','sessions-ui','sessions-network','logout-prepare','logout-offline','logout-ui','onboarding-prepare','onboarding-restart','onboarding-gap','onboarding-recover','onboarding-complete')][string[]]$Phases=@('first','mutations','profile','offline','restart'))
 $ErrorActionPreference='Stop'
 $root=Split-Path $PSScriptRoot -Parent
 $adb=Join-Path $root '.tools/android-sdk/platform-tools/adb.exe'
@@ -49,6 +49,43 @@ $process.WaitForExit()
 if($process.ExitCode -ne 0){throw 'Private test fixture transfer failed'}
 $fixture=$null
 $rounds=@()
+$script:liveTestProxy=$null
+function Restore-TestProxy {
+    if(!$script:liveTestProxy -or (Get-Process -Id $script:liveTestProxy.pid -ErrorAction SilentlyContinue)){return}
+    $proxy=Start-Process -FilePath $script:liveTestProxy.exe -ArgumentList @('-upstream',$script:liveTestProxy.upstream) -WorkingDirectory $root -WindowStyle Hidden -RedirectStandardOutput (Join-Path $root '.local/devtls-native.log') -RedirectStandardError (Join-Path $root '.local/devtls-native-error.log') -PassThru
+    $script:liveTestProxy.pid=$proxy.Id
+    [IO.File]::WriteAllText((Join-Path $root '.local/devtls-native.pid'),[string]$proxy.Id)
+}
+function Run-Instrumentation([string]$Phase){
+    if($Phase -ne 'sessions-network'){return ((& $adb -s $Serial shell am instrument -w -e phase $Phase "$package.test/xyz.eclipseofficial.vyrn.test.LocalIntegrationRunner") -join "`n")}
+    if(!$script:liveTestProxy){
+        $exe=Join-Path $root '.local/devtls-native.exe';$proxyId=[int][IO.File]::ReadAllText((Join-Path $root '.local/devtls-native.pid'));$proxy=Get-Process -Id $proxyId
+        $command=(Get-CimInstance Win32_Process -Filter "ProcessId=$proxyId").CommandLine
+        if($proxy.Path -ne $exe -or $command -notmatch '-upstream\s+(http://(?:127\.[0-9.]+|172\.(?:1[6-9]|2[0-9]|3[01])\.[0-9.]+):8080)'){throw 'Live network suite requires the existing dedicated native local TLS proxy'}
+        $script:liveTestProxy=@{exe=$exe;pid=$proxyId;upstream=$matches[1]}
+    }
+    & $adb -s $Serial shell run-as $package rm -f files/vyrn-test-network-request.txt files/vyrn-test-network-ack.txt
+    $launch=[Diagnostics.ProcessStartInfo]::new($adb);$launch.UseShellExecute=$false;$launch.RedirectStandardOutput=$true;$launch.RedirectStandardError=$true;$launch.CreateNoWindow=$true
+    foreach($argument in @('-s',$Serial,'shell','am','instrument','-w','-e','phase',$Phase,"$package.test/xyz.eclipseofficial.vyrn.test.LocalIntegrationRunner")){$launch.ArgumentList.Add($argument)}
+    $runner=[Diagnostics.Process]::Start($launch);$stdout=$runner.StandardOutput.ReadToEndAsync();$stderr=$runner.StandardError.ReadToEndAsync();$handled='';$deadline=[DateTimeOffset]::UtcNow.AddMinutes(4)
+    while(!$runner.WaitForExit(500)){
+        if([DateTimeOffset]::UtcNow -gt $deadline){& $adb -s $Serial shell am force-stop $package; if(!$runner.WaitForExit(10000)){$runner.Kill()};throw 'Session network instrumentation deadline exceeded'}
+        $step=((& $adb -s $Serial shell run-as $package cat files/vyrn-test-network-request.txt 2>$null) -join '').Trim()
+        if(!$step -or $step -eq $handled){continue}
+        if($step -notin @('offline-load','online-retry','offline-revoke','online-confirm')){throw 'Unexpected test network step'}
+        if($step.StartsWith('offline-')){
+            $proxy=Get-Process -Id $script:liveTestProxy.pid
+            if($proxy.Path -ne $script:liveTestProxy.exe){throw 'Unexpected local TLS proxy process'}
+            Stop-Process -Id $proxy.Id;$proxy.WaitForExit()
+            & $adb -s $Serial reverse --remove tcp:18443 | Out-Null
+        }else{Restore-TestProxy; & $adb -s $Serial reverse tcp:18443 tcp:18443 | Out-Null}
+        if($LASTEXITCODE -ne 0){throw 'Live test network transition failed'}
+        & $adb -s $Serial shell run-as $package sh -c "'printf $step > files/vyrn-test-network-ack.txt'"
+        if($LASTEXITCODE -ne 0){throw 'Test network acknowledgement failed'}
+        $handled=$step
+    }
+    return ($stdout.GetAwaiter().GetResult()+$stderr.GetAwaiter().GetResult())
+}
 try {
     foreach($phase in $Phases){
         & $adb -s $Serial shell am force-stop $package
@@ -57,7 +94,7 @@ try {
         if($phase -in @('mutations','profile','restart')){Write-Output "Waiting 60 seconds for the API rate-limit window before $phase tests.";Start-Sleep -Seconds 60}
         if($phase -in @('offline','logout-offline','onboarding-restart')){& $adb -s $Serial reverse --remove tcp:18443}else{& $adb -s $Serial reverse tcp:18443 tcp:18443}
         if($LASTEXITCODE -ne 0){throw 'Test network transition failed'}
-        $result=(& $adb -s $Serial shell am instrument -w -e phase $phase "$package.test/xyz.eclipseofficial.vyrn.test.LocalIntegrationRunner") -join "`n"
+        $result=Run-Instrumentation $phase
         $attachRetried=$false
         # Android can finish an old task removal after pm clear and kill the new
         # process before attach. Retry only this confirmed pre-runner failure.
@@ -67,7 +104,7 @@ try {
             if($LASTEXITCODE -ne 0){throw 'Failed-attach cleanup failed'}
             Write-Output "Retrying pre-runner Android attach once for $phase."
             $attachRetried=$true
-            $result=(& $adb -s $Serial shell am instrument -w -e phase $phase "$package.test/xyz.eclipseofficial.vyrn.test.LocalIntegrationRunner") -join "`n"
+            $result=Run-Instrumentation $phase
         }
         [IO.File]::WriteAllText((Join-Path $root ".local/android-integration-$phase.log"),$result)
         if($LASTEXITCODE -ne 0 -or $result -notmatch 'vyrn_result=passed'){
@@ -82,9 +119,10 @@ try {
         $rounds+=@{phase=$phase;checks=$checks;result='passed';startup_attach_retry=$attachRetried}
         Write-Output "PASS: Android integration phase $phase"
     }
-    $report=if(@($Phases | Where-Object {$_ -notlike 'onboarding-*'}).Count -eq 0){'artifacts/android-onboarding-ui.json'}elseif(@($Phases | Where-Object {$_ -notlike 'logout-*'}).Count -eq 0){'artifacts/android-logout-ui.json'}elseif($Phases.Count -eq 1 -and $Phases[0] -in @('auth-ui','registration-ui','sessions-ui')){"artifacts/android-$($Phases[0]).json"}else{'artifacts/android-integration.json'}
+    $report=if(@($Phases | Where-Object {$_ -notlike 'onboarding-*'}).Count -eq 0){'artifacts/android-onboarding-ui.json'}elseif(@($Phases | Where-Object {$_ -notlike 'logout-*'}).Count -eq 0){'artifacts/android-logout-ui.json'}elseif($Phases.Count -eq 1 -and $Phases[0] -in @('auth-ui','registration-ui','sessions-ui','sessions-network')){"artifacts/android-$($Phases[0]).json"}else{'artifacts/android-integration.json'}
     @{date=[DateTimeOffset]::UtcNow.ToString('o');apk=[IO.Path]::GetFileName($apk);sha256=(Get-FileHash $apk).Hash.ToLowerInvariant();device='vyrn_api35';api=35;transport='HTTPS with scoped local CA';rounds=$rounds;full_ui_e2e='not tested'} | ConvertTo-Json -Depth 6 | Set-Content (Join-Path $root $report) -Encoding utf8
 } finally {
+    Restore-TestProxy
     & $adb -s $Serial reverse tcp:18443 tcp:18443
-    & $adb -s $Serial shell run-as $package rm -f files/vyrn-test-fixture.json files/vyrn-test-onboarding.json
+    & $adb -s $Serial shell run-as $package rm -f files/vyrn-test-fixture.json files/vyrn-test-onboarding.json files/vyrn-test-network-request.txt files/vyrn-test-network-ack.txt
 }
