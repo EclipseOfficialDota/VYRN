@@ -1,5 +1,5 @@
-# Native foreground composer/delivery and optional edit. Delete/offline/phone acceptance remains separate.
-param([switch]$Edit)
+# Native foreground send/edit/shared-delete and cold reopens. Offline/phone acceptance remains separate.
+param([switch]$Edit,[switch]$Delete)
 $ErrorActionPreference='Stop'
 $root=Split-Path $PSScriptRoot -Parent
 $adb=Join-Path $root '.tools/android-sdk/platform-tools/adb.exe'
@@ -55,7 +55,7 @@ try{
         if(!$ready){$rounds+=Finish-Phase $receiver;throw 'Receiver chat did not become ready'}
         $rounds+=Finish-Phase (Start-Phase $direction.sender 'chat-send');$rounds+=Finish-Phase $receiver
     }
-    if($Edit){
+    if($Edit -or $Delete){
         $edited='متن ویرایش‌شده '+[guid]::NewGuid().ToString('N')
         foreach($serial in @('emulator-5560','emulator-5562')){Write-Fixture $serial @{group=$group;text=$text;edited_text=$edited}}
         $receiver=Start-Phase 'emulator-5560' 'chat-watch-edit';$deadline=[DateTimeOffset]::UtcNow.AddSeconds(60);$ready=$false
@@ -63,12 +63,21 @@ try{
         if(!$ready){$rounds+=Finish-Phase $receiver;throw 'Edit receiver did not become ready'}
         $rounds+=Finish-Phase (Start-Phase 'emulator-5562' 'chat-edit');$rounds+=Finish-Phase $receiver
     }
+    if($Delete){
+        foreach($serial in @('emulator-5560','emulator-5562')){Write-Fixture $serial @{group=$group;text=$edited}}
+        $receiver=Start-Phase 'emulator-5560' 'chat-watch-delete';$deadline=[DateTimeOffset]::UtcNow.AddSeconds(60);$ready=$false;$deletedId=$null
+        while(!$receiver.process.HasExited -and [DateTimeOffset]::UtcNow -lt $deadline){$state=Read-State 'emulator-5560';if($state -and $state.ready -and $state.message_id){$ready=$true;$deletedId=$state.message_id;break};Start-Sleep -Milliseconds 250}
+        if(!$ready){$rounds+=Finish-Phase $receiver;throw 'Delete receiver did not become ready'}
+        $rounds+=Finish-Phase (Start-Phase 'emulator-5562' 'chat-delete');$rounds+=Finish-Phase $receiver
+        foreach($serial in @('emulator-5560','emulator-5562')){Write-Fixture $serial @{group=$group;text=$edited;message_id=$deletedId};$rounds+=Finish-Phase (Start-Phase $serial 'chat-deleted-reopen')}
+    }
     $registration=Get-Content (Join-Path $root 'artifacts/android-two-client-registration.json') -Raw | ConvertFrom-Json
-    $report=if($Edit){'artifacts/android-two-client-editing.json'}else{'artifacts/android-two-client-messaging.json'}
+    $report=if($Delete){'artifacts/android-two-client-deletion.json'}elseif($Edit){'artifacts/android-two-client-editing.json'}else{'artifacts/android-two-client-messaging.json'}
     $scope='Native button-click send and visible confirmed bubbles in both directions while both clients are foreground; REST group fixture, programmatic chat entry'
-    if($Edit){$scope+='; native message menu/Edit/Done, same-process receiver edit, same server identity/ordinal with newer revision and no duplicate'}
-    @{date=[DateTimeOffset]::UtcNow.ToString('o');result='passed';apk_sha256=$registration.devices[0].apk_sha256;devices=$registration.devices;rounds=$rounds;scope=$scope;edit_ui=[bool]$Edit;delete_offline_restart='not tested';physical_devices='not tested'} | ConvertTo-Json -Depth 7 | Set-Content (Join-Path $root $report) -Encoding utf8
-    Write-Output ('PASS: native composer send and foreground receipt on two independent clients.'+$(if($Edit){' Native edit and receiver update also passed.'}))
+    if($Edit -or $Delete){$scope+='; native message menu/Edit/Done, same-process receiver edit, same server identity/ordinal with newer revision and no duplicate'}
+    if($Delete){$scope+='; native shared deletion confirmation/cancellation, receiver removal and both cold app reopens without resurrection'}
+    @{date=[DateTimeOffset]::UtcNow.ToString('o');result='passed';apk_sha256=$registration.devices[0].apk_sha256;devices=$registration.devices;rounds=$rounds;scope=$scope;edit_ui=[bool]($Edit -or $Delete);delete_ui=[bool]$Delete;delete_process_restart=[bool]$Delete;offline_retry='not tested';physical_devices='not tested'} | ConvertTo-Json -Depth 7 | Set-Content (Join-Path $root $report) -Encoding utf8
+    Write-Output ('PASS: native composer send and foreground receipt on two independent clients.'+$(if($Edit -or $Delete){' Native edit and receiver update also passed.'})+$(if($Delete){' Shared deletion, cancellation and both cold reopens passed.'}))
 }finally{
     if($receiver -and !$receiver.process.HasExited){& $adb -s $receiver.serial shell am force-stop $package | Out-Null;if(!$receiver.process.WaitForExit(10000)){$receiver.process.Kill()}}
     foreach($serial in @('emulator-5560','emulator-5562')){

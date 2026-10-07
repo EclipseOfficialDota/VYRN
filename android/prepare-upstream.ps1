@@ -468,6 +468,23 @@ Edit 'TMessagesProj/src/main/java/org/telegram/messenger/SendMessagesHelper.java
 '@
  $t.Replace('    public boolean retrySendMessage(MessageObject messageObject, boolean unsent, long payStars) {',$proof+'    public boolean retrySendMessage(MessageObject messageObject, boolean unsent, long payStars) {')
 }
+Edit 'TMessagesProj/src/main/java/org/telegram/ui/Components/AlertsCreator.java' {
+ param($t)
+ $t=(& git -c "safe.directory=$($upstream.Replace('\','/'))" -C $upstream show "${pin}:TMessagesProj/src/main/java/org/telegram/ui/Components/AlertsCreator.java") -join "`n"
+ $start=$t.IndexOf('    public static void createDeleteMessagesAlert(')
+ $end=$t.IndexOf('        boolean isActiveGiveawayAndOwner = false;', $start)
+ if($start -lt 0 -or $end -lt 0){throw 'Pinned delete confirmation markers missing'}
+ $section=$t.Substring($start,$end-$start)
+ $state='        final boolean[] deleteForAll = new boolean[1];'
+ $options='} else if (!scheduled && !isSavedMessages && !ChatObject.isChannel(chat) && encryptedChat == null) {'
+ if(!$section.Contains($state) -or !$section.Contains($options)){throw 'Pinned group deletion options missing'}
+ $section=$section.Replace($state,@'
+        final boolean vyrnSharedGroupDelete = chat != null && !ChatObject.isChannel(chat) && encryptedChat == null && !scheduled && !isSavedMessages && mode == 0 && topicId == 0;
+        final boolean[] deleteForAll = new boolean[]{vyrnSharedGroupDelete};
+'@).Replace($options,'} else if (!vyrnSharedGroupDelete && !scheduled && !isSavedMessages && !ChatObject.isChannel(chat) && encryptedChat == null) {')
+ $section+="        if (vyrnSharedGroupDelete) builder.setMessage(LocaleController.isRTL ? `"این پیام‌ها برای همهٔ اعضای گروه حذف می‌شوند. ادامه می‌دهید؟`" : `"These messages will be deleted for everyone in the group. Continue?`");`n`n"
+ $t.Substring(0,$start)+$section+$t.Substring($end)
+}
 Edit 'TMessagesProj/src/main/java/org/telegram/ui/Components/ChatActivityEnterView.java' {
  param($t)
  $t=(& git -c "safe.directory=$($upstream.Replace('\','/'))" -C $upstream show "${pin}:TMessagesProj/src/main/java/org/telegram/ui/Components/ChatActivityEnterView.java") -join "`n"

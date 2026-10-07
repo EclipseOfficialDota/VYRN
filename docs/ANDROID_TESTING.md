@@ -1,5 +1,11 @@
 # Local Android integration
 
+## Shared deletion and cold reopens — 2026-10-08
+
+`scripts/test-two-client-messaging.ps1 -Delete` includes registration, bidirectional text delivery and edit, then native Delete menu cancellation/confirmation, receiver removal in the same process and fresh app-process/native-history entry on both clients. The supported normal-group dialog explains shared deletion without a local-only checkbox; backend/adapter still enforce permissions and server-confirmed deletion. Cancellation verifies actor bubble and unchanged server revision; confirmation verifies same-identity newer tombstone, native entry/bubble absence and absence from live server history. Cold reopens repeat absence checks.
+
+Pass162 recorded checks (registration30 + messaging/edit78 + deletion54), report artifacts/android-two-client-deletion.json; local APK SHA256ba2e92f67985cf877eb272e31d08d7d371f1cc604d4943ae6ba712458ea088c5. Initial test asserted the message-options action boolean, but upstream opens the menu and returns inherited result; corrected to verify actual menu/confirmation instead. Final corrected build48s passes, final test no retry. Does not prove offline/retry/reconnect, physical devices/touch, mutation-interrupted process death or other deletion modes/permission/account race acceptance. Group fixture remains REST-created and ChatActivity entry programmatic.
+
 ## Native edit on two clients — 2026-10-08
 
 Run `scripts/test-two-client-messaging.ps1 -Edit` after a local-TLS x86_64 instrumentation build. Uses distinct native account0 registrations, creates a REST group fixture and enters ChatActivity programmatically. Baseline foreground send/receive runs both directions; editor invokes actual message options accessibility action, native Edit menu, waits for preflight, changes native field and clicks Done. Receiver observes the edited bubble in the same live process. Both assert old bubble absent and unchanged server ID/ordinal with a newer revision/edited timestamp, no duplicate or old server text.

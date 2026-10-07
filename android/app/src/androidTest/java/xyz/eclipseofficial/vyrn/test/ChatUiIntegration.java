@@ -45,6 +45,7 @@ final class ChatUiIntegration {
         await(()->{if(AuthUiIntegration.handlePrompts(instrumentation,activity,check))return false;boolean[] ready={false};instrumentation.runOnMainSync(()->ready[0]=LaunchActivity.getLastFragment() instanceof ChatActivity&&!LaunchActivity.getLastFragment().getParentLayout().isTransitionAnimationInProgress());return ready[0];},check,"chat_native_screen_ready");
         instrumentation.runOnMainSync(()->check.verify(org.telegram.messenger.ChatObject.canSendPlain(MessagesController.getInstance(account).getChat(local)),"chat_member_can_send_plain"));
         await(()->{boolean[] ready={false};instrumentation.runOnMainSync(()->{try{java.lang.reflect.Field field=ChatActivity.class.getDeclaredField("firstLoading");field.setAccessible(true);ready[0]=!field.getBoolean(LaunchActivity.getLastFragment());}catch(Exception failure){throw new AssertionError("chat_loading_state_unavailable");}});return ready[0];},check,"chat_initial_history_complete");
+        if(phase.equals("chat-delete")||phase.equals("chat-watch-delete")||phase.equals("chat-deleted-reopen")){delete(instrumentation,activity,fixture,repository,phase,check);return;}
         if(phase.equals("chat-edit")||phase.equals("chat-watch-edit")){edit(instrumentation,activity,fixture,repository,phase.equals("chat-edit"),check);return;}
         if(phase.equals("chat-receive"))write(instrumentation,new JSONObject().put("ready",true));
         if(phase.equals("chat-send")){
@@ -107,6 +108,36 @@ final class ChatUiIntegration {
         java.util.List<xyz.eclipseofficial.vyrn.domain.Models.Message> after=repository.liveMessages(group,null,100);xyz.eclipseofficial.vyrn.domain.Models.Message changed=after.stream().filter(message->edited.equals(message.text)).findFirst().orElseThrow(AssertionError::new);
         check.verify(changed.id.equals(original.id)&&changed.ordinal==original.ordinal&&changed.revision>original.revision&&changed.editedDate>0,"edit_same_message_identity_new_revision");
         check.verify(after.stream().filter(message->edited.equals(message.text)).count()==1&&after.stream().noneMatch(message->old.equals(message.text)),"edit_no_duplicate_or_old_server_text");
+    }
+    private static org.telegram.ui.ActionBar.AlertDialog dialog(){org.telegram.ui.ActionBar.BaseFragment fragment=LaunchActivity.getLastFragment();return fragment!=null&&fragment.visibleDialog instanceof org.telegram.ui.ActionBar.AlertDialog&&fragment.visibleDialog.isShowing()?(org.telegram.ui.ActionBar.AlertDialog)fragment.visibleDialog:null;}
+    private static boolean hasCheckbox(View view){if(view instanceof org.telegram.ui.Cells.CheckBoxCell)return true;if(view instanceof ViewGroup)for(int i=0;i<((ViewGroup)view).getChildCount();i++)if(hasCheckbox(((ViewGroup)view).getChildAt(i)))return true;return false;}
+    private static void deleteMenu(Instrumentation instrumentation,Activity activity,String text,AuthUiIntegration.Check check) throws Exception {
+        instrumentation.runOnMainSync(()->cell(activity.getWindow().getDecorView(),text).performAccessibilityAction(org.telegram.messenger.R.id.acc_action_msg_options,new Bundle()));
+        AuthUiIntegration.clickWindow(instrumentation,activity,org.telegram.messenger.LocaleController.getString(org.telegram.messenger.R.string.Delete),check);
+        await(()->{boolean[] showing={false};instrumentation.runOnMainSync(()->showing[0]=dialog()!=null);return showing[0];},check,"delete_native_confirmation_visible");
+        instrumentation.runOnMainSync(()->{org.telegram.ui.ActionBar.AlertDialog alert=dialog();String expected=org.telegram.messenger.LocaleController.isRTL?"این پیام‌ها برای همهٔ اعضای گروه حذف می‌شوند. ادامه می‌دهید؟":"These messages will be deleted for everyone in the group. Continue?";check.verify(expected.contentEquals(alert.getMessageTextView().getText())&&!hasCheckbox(alert.getWindow().getDecorView()),"delete_shared_semantics_no_local_only_option");});
+    }
+    private static void delete(Instrumentation instrumentation,Activity activity,JSONObject fixture,RestRepository repository,String phase,AuthUiIntegration.Check check) throws Exception {
+        String group=fixture.getString("group"),text=fixture.getString("text");boolean actor=phase.equals("chat-delete"),reopen=phase.equals("chat-deleted-reopen");View root=activity.getWindow().getDecorView();
+        xyz.eclipseofficial.vyrn.domain.Models.Message original;
+        if(reopen){original=repository.messageForUser(repository.me().id,fixture.getString("message_id"));check.verify(original.deleted,"delete_reopen_server_tombstone");}
+        else{
+            await(()->{boolean[] shown={false};instrumentation.runOnMainSync(()->shown[0]=bubble(root,text,actor));return shown[0];},check,"delete_original_visible");
+            java.util.List<xyz.eclipseofficial.vyrn.domain.Models.Message> live=repository.liveMessages(group,null,100);original=live.stream().filter(message->text.equals(message.text)).findFirst().orElseThrow(AssertionError::new);check.verify(live.stream().filter(message->text.equals(message.text)).count()==1,"delete_original_unique");
+            if(actor){
+                deleteMenu(instrumentation,activity,text,check);
+                instrumentation.runOnMainSync(()->check.verify(dialog().getButton(android.content.DialogInterface.BUTTON_NEGATIVE).performClick(),"delete_native_cancel_clicked"));
+                await(()->{boolean[] closed={false};instrumentation.runOnMainSync(()->closed[0]=dialog()==null&&bubble(root,text,true));return closed[0];},check,"delete_cancel_preserves_native_bubble");
+                xyz.eclipseofficial.vyrn.domain.Models.Message preserved=repository.messageForUser(repository.me().id,original.id);check.verify(!preserved.deleted&&preserved.revision==original.revision&&text.equals(preserved.text),"delete_cancel_preserves_server_revision");
+                deleteMenu(instrumentation,activity,text,check);
+                instrumentation.runOnMainSync(()->check.verify(dialog().getButton(android.content.DialogInterface.BUTTON_POSITIVE).performClick(),"delete_native_confirm_clicked"));
+            }else{write(instrumentation,new JSONObject().put("ready",true).put("message_id",original.id));}
+        }
+        int id=original.ordinal;
+        await(()->{boolean[] absent={false};instrumentation.runOnMainSync(()->{ChatActivity chat=(ChatActivity)LaunchActivity.getLastFragment();absent[0]=cell(root,text)==null&&chat.messages.stream().noneMatch(message->message.getId()==id);});return absent[0];},check,reopen?"delete_no_resurrection_after_process_restart":actor?"delete_sender_native_removed":"delete_receiver_removed_same_process");
+        xyz.eclipseofficial.vyrn.domain.Models.Message tombstone=repository.messageForUser(repository.me().id,original.id);
+        check.verify(tombstone.deleted&&tombstone.id.equals(original.id)&&tombstone.ordinal==id&&(reopen||tombstone.revision>original.revision),"delete_confirmed_same_identity_tombstone");
+        check.verify(repository.liveMessages(group,null,100).stream().noneMatch(message->message.id.equals(original.id)||text.equals(message.text)),"delete_absent_from_live_history");
     }
     private static void await(BooleanSupplier condition,AuthUiIntegration.Check check,String name) throws Exception {long deadline=System.nanoTime()+java.util.concurrent.TimeUnit.SECONDS.toNanos(40);while(!condition.getAsBoolean()&&System.nanoTime()<deadline)Thread.sleep(100);check.verify(condition.getAsBoolean(),name);}
     private static void write(Instrumentation instrumentation,JSONObject state) throws Exception {Files.write(new java.io.File(instrumentation.getTargetContext().getFilesDir(),"vyrn-test-chat-state.json").toPath(),state.toString().getBytes(StandardCharsets.UTF_8));}
