@@ -1,5 +1,13 @@
 # VYRN project memory
 
+## Latest independent-client checkpoint — 2026-10-08
+
+Previous turn made progress in session-network UI and emulator preparation. On continuation both emulator/Core/proxy processes were absent; authoritative ADB/process/listener checks preceded restarting. Existing WSL PostgreSQL data and Core binary reused without reset. Core foreground handle16056, local native TLS proxy reused matching CA with upstream172.19.233.132:8080. Revalidate runtime before actions.
+
+Added independent vyrn_api35_peer AVD/serial5562,1536MB memory, separate log/PID paths and strict serial-to-AVD matching. Starter validates every connected emulator before already-running reuse. Standard integration harness supports only the two known pairs, with separate peer logs/reports and truthful device/serial metadata. New scripts/test-two-client-registration.ps1 verifies distinct Android IDs, fresh matching evidence and identical APK hashes. Actual native invite registration/recovery acknowledgement passes15 checks on each, total30, no attach retries; report artifacts/android-two-client-registration.json. APK unchanged, SHA2563a69e98208e7927a55447ee5dc5e13594923fbcd12865dbd20f989740469e026. Two isolated emulators and separate disposable account credentials; not physical-phone or messaging evidence. Existing account setup helper reused, no new dependency/backend/VPS/app change.
+
+Full objective remains active. Next: actual chat composer and received bubbles across these two native account0 clients, then edit/delete/offline/retry/process restart invariants. Private UI, background/notifications, media/voice, remaining screens, physical/release/update/external backup and TURN gates remain unchanged. Do not mistake the registration prerequisite for completed two-device messaging.
+
 ## Latest actual-entry/offline-session checkpoint — 2026-10-07
 
 Supersedes the older69-check session checkpoint below for tested entry/network paths. Actual MainTabs Settings tab is touched; await the pager animation and position Devices above the floating tab bar before touching it. The former programmatic Settings entry is gone. Native SessionsActivity retains its last confirmed list on load failure, displays a dedicated localized load-error/Retry row, handles initial failure without an endless blank loading screen, disables the retry while loading and removes the row after confirmed successful reload. Text messages supplied for English/Persian; final native accessibility checks run in English, Persian visual layout remains open.

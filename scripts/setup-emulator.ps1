@@ -1,3 +1,4 @@
+param([ValidateSet('vyrn_api35','vyrn_api35_peer')][string]$AvdName='vyrn_api35')
 $ErrorActionPreference='Stop'
 $ProgressPreference='SilentlyContinue'
 $root=Split-Path $PSScriptRoot -Parent
@@ -54,9 +55,9 @@ if(!(Test-Path -LiteralPath (Join-Path $target 'source.properties'))){
 $proxy=[Net.WebRequest]::GetSystemWebProxy().GetProxy([uri]'https://dl.google.com')
 $env:JAVA_TOOL_OPTIONS='-Djavax.net.ssl.trustStoreType=Windows-ROOT -Djavax.net.ssl.trustStore=NONE'
 if($proxy.Host -ne 'dl.google.com'){$env:JAVA_TOOL_OPTIONS+=" -Dhttps.proxyHost=$($proxy.Host) -Dhttps.proxyPort=$($proxy.Port) -Dhttp.proxyHost=$($proxy.Host) -Dhttp.proxyPort=$($proxy.Port)"}
-$avd=Join-Path $env:ANDROID_AVD_HOME 'vyrn_api35.avd'
+$avd=Join-Path $env:ANDROID_AVD_HOME "$AvdName.avd"
 if(!(Test-Path -LiteralPath (Join-Path $avd 'config.ini'))){
-    'no' | & (Join-Path $sdk 'cmdline-tools/latest/bin/avdmanager.bat') create avd --name vyrn_api35 --package 'system-images;android-35;default;x86_64' --path $avd
+    'no' | & (Join-Path $sdk 'cmdline-tools/latest/bin/avdmanager.bat') create avd --name $AvdName --package 'system-images;android-35;default;x86_64' --path $avd
     if($LASTEXITCODE -ne 0){throw 'AVD creation failed'}
 }
 Write-Output 'Verified Android 35 x86_64 system image and local VYRN AVD are ready.'

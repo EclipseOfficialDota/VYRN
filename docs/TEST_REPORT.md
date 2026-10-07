@@ -1,5 +1,9 @@
 # Verification report
 
+## Independent Android client setup — 2026-10-08
+
+`scripts/test-two-client-registration.ps1` passed against two distinct Android35 AVDs (vyrn_api35/5560 and vyrn_api35_peer/5562), checking different Android IDs and the same APK SHA2563a69e98208e7927a55447ee5dc5e13594923fbcd12865dbd20f989740469e026. Native invite-registration and recovery-code acknowledgement:15 checks each,30 total, no startup attach retry. Fresh separate reports combined in artifacts/android-two-client-registration.json. Local Core/TLS reused existing DB and certificates. No app/backend/VPS source change or new phone APK required. Messaging, physical phones and full account lifecycle are not proven by this run; historical evidence below retains its original scope.
+
 Updated: 2026-10-07. This records performed checks, not planned tests.
 
 ## Actual settings entry and offline session recovery — 2026-10-07

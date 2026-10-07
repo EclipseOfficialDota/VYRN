@@ -1,5 +1,15 @@
 # Local Android integration
 
+## Two independent client registrations — 2026-10-08
+
+```powershell
+./scripts/test-two-client-registration.ps1
+```
+
+Requires the existing local Core/TLS service and matching x86_64 instrumentation APK. Starts or reuses only the exact `vyrn_api35`/5560 and `vyrn_api35_peer`/5562 AVD pairs, verifies different Android IDs and runs actual invite-registration/recovery-acknowledgement controls on each with separate disposable credentials. Each run resets only that emulator's VYRN debug app. Peer AVD uses1536MB RAM. All connected emulator identities are checked before reuse; unrelated emulators are rejected.
+
+The same app passed15 checks on each device, total30, without attach retries. Per-device logs/reports stay separate; `artifacts/android-two-client-registration.json` requires fresh matching reports and identical APK hashes. This establishes two independent Android clients and account setup. Message sending/receiving/edit/delete, offline/restart behavior and physical phones still need their own evidence. Do not run the live shared-proxy disconnection suite concurrently with another client test.
+
 ## Live disconnection on the original session screen — 2026-10-07
 
 ```powershell

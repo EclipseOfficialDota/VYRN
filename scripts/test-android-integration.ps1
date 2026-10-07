@@ -1,11 +1,13 @@
 # Real Android networking/Keystore integration; not a claim of full UI acceptance.
-param([string]$Serial='emulator-5560',[ValidateSet('first','mutations','profile','offline','restart','auth-ui','registration-ui','sessions-ui','sessions-network','logout-prepare','logout-offline','logout-ui','onboarding-prepare','onboarding-restart','onboarding-gap','onboarding-recover','onboarding-complete')][string[]]$Phases=@('first','mutations','profile','offline','restart'))
+param([ValidateSet('emulator-5560','emulator-5562')][string]$Serial='emulator-5560',[ValidateSet('first','mutations','profile','offline','restart','auth-ui','registration-ui','sessions-ui','sessions-network','logout-prepare','logout-offline','logout-ui','onboarding-prepare','onboarding-restart','onboarding-gap','onboarding-recover','onboarding-complete')][string[]]$Phases=@('first','mutations','profile','offline','restart'))
 $ErrorActionPreference='Stop'
 $root=Split-Path $PSScriptRoot -Parent
 $adb=Join-Path $root '.tools/android-sdk/platform-tools/adb.exe'
 $package='xyz.eclipseofficial.vyrn.dev'
+$avdName=if($Serial -eq 'emulator-5560'){'vyrn_api35'}else{'vyrn_api35_peer'}
+$deviceSuffix=if($Serial -eq 'emulator-5560'){''}else{'-peer'}
 $avd=(& $adb -s $Serial emu avd name) -join "`n"
-if($LASTEXITCODE -ne 0 -or $avd -notmatch '(?m)^vyrn_api35\r?$'){throw 'Only the VYRN test emulator is allowed'}
+if($LASTEXITCODE -ne 0 -or $avd -notmatch "(?m)^$avdName\r?$"){throw 'Only the matching VYRN test emulator is allowed'}
 $apk=Join-Path $root 'artifacts/VyrnApp-dev-x86_64-debug-local-tls.apk'
 $testApk=Join-Path $root 'artifacts/VyrnApp-dev-debug-androidTest.apk'
 $archive=[IO.Compression.ZipFile]::OpenRead($apk)
@@ -99,14 +101,14 @@ try {
         # Android can finish an old task removal after pm clear and kill the new
         # process before attach. Retry only this confirmed pre-runner failure.
         if($result -match '(?m)^INSTRUMENTATION_RESULT: shortMsg=failed to attach\r?$'){
-            [IO.File]::WriteAllText((Join-Path $root ".local/android-integration-$phase-attach-failure.log"),$result)
+            [IO.File]::WriteAllText((Join-Path $root ".local/android-integration-$phase$deviceSuffix-attach-failure.log"),$result)
             & $adb -s $Serial shell am force-stop $package
             if($LASTEXITCODE -ne 0){throw 'Failed-attach cleanup failed'}
             Write-Output "Retrying pre-runner Android attach once for $phase."
             $attachRetried=$true
             $result=Run-Instrumentation $phase
         }
-        [IO.File]::WriteAllText((Join-Path $root ".local/android-integration-$phase.log"),$result)
+        [IO.File]::WriteAllText((Join-Path $root ".local/android-integration-$phase$deviceSuffix.log"),$result)
         if($LASTEXITCODE -ne 0 -or $result -notmatch 'vyrn_result=passed'){
             $stage='instrumentation_start';$failure='unknown'
             if($result -match 'stage=([a-zA-Z0-9_]+)'){$stage=$Matches[1]}
@@ -120,7 +122,8 @@ try {
         Write-Output "PASS: Android integration phase $phase"
     }
     $report=if(@($Phases | Where-Object {$_ -notlike 'onboarding-*'}).Count -eq 0){'artifacts/android-onboarding-ui.json'}elseif(@($Phases | Where-Object {$_ -notlike 'logout-*'}).Count -eq 0){'artifacts/android-logout-ui.json'}elseif($Phases.Count -eq 1 -and $Phases[0] -in @('auth-ui','registration-ui','sessions-ui','sessions-network')){"artifacts/android-$($Phases[0]).json"}else{'artifacts/android-integration.json'}
-    @{date=[DateTimeOffset]::UtcNow.ToString('o');apk=[IO.Path]::GetFileName($apk);sha256=(Get-FileHash $apk).Hash.ToLowerInvariant();device='vyrn_api35';api=35;transport='HTTPS with scoped local CA';rounds=$rounds;full_ui_e2e='not tested'} | ConvertTo-Json -Depth 6 | Set-Content (Join-Path $root $report) -Encoding utf8
+    if($deviceSuffix){$report=$report.Replace('.json',"$deviceSuffix.json")}
+    @{date=[DateTimeOffset]::UtcNow.ToString('o');apk=[IO.Path]::GetFileName($apk);sha256=(Get-FileHash $apk).Hash.ToLowerInvariant();device=$avdName;serial=$Serial;api=35;transport='HTTPS with scoped local CA';rounds=$rounds;full_ui_e2e='not tested'} | ConvertTo-Json -Depth 6 | Set-Content (Join-Path $root $report) -Encoding utf8
 } finally {
     Restore-TestProxy
     & $adb -s $Serial reverse tcp:18443 tcp:18443
