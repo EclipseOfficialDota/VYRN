@@ -1,5 +1,13 @@
 # VYRN project memory
 
+## Latest session-screen checkpoint — 2026-10-07
+
+Native SessionsActivity now hides unsupported QR authorization and session-lifetime rows; ordinary individual/bulk failures show the native localized error bulletin. Reproducible changes live in prepare-upstream.ps1, not only the generated upstream tree. New sessions-ui suite passes69 recorded checks/57 distinct names (includes registration15 and repeated permission/row/probe events), no attach retry, report artifacts/android-sessions-ui.json, local-TLS app SHA256107772c2087aa44dc2daef996ed33788df7ca469e0ebb681ead2784d01bd4498. Settings opened programmatically after MainTabs transition; actual Devices/session rows touched; current details/no-self-revoke, real second metadata, individual/bulk cancellation, individual revoke/access+refresh denial, three sessions then bulk revoke/current preservation pass. Actual sheet buttons use accessibility and confirmation buttons use native views. Controlled unknown displayed hash rejects, shows error, preserves list/access, then restored-hash UI retry succeeds; not offline HTTP proof.
+
+Earlier attempts failed transition/detail/bulk assertions. Exact bulk-dialog message and dismissal synchronization added. Cause of earlier bulk failures not established; no backend fix claimed. After interrupted execution emulator/proxy were absent. Existing native TLS leaf mismatched debug CA; regenerated local-only certificates and rebuilt debug tests. Existing WSL Core binary/database reused (current foreground handle87425, PID339; inspect before actions), native proxy targets verified WSL172.19.233.132:8080, emulator5560 restored. No database reset/backend source/VPS change. Historic reports keep original APK evidence; prior110 onboarding/auth/logout and broad/Signal suites not rerun on this APK.
+
+All three normal ARM Debug APK builds and signature/package/API/ABI/native Signal/normal TLS/manifest verification pass; local CA absent. ARM64 SHA256e42e3f9d74bdf37c548d183341bb9eac467abea632ce3c3e1727138924ac9d65. Scanner154 tracked files and actual local credential inclusion checks pass. Build/test jobs terminal; local Core/proxy/emulator remain services. Full goal remains open. Next: actual MainTabs entry, session load failure/Retry, offline revocation and account/session/late-callback cases; then two-client messaging. Private UI, background notifications, media/voice, remaining screens, physical/release/update/external-backup work and TURN gate unchanged.
+
 Updated 2026-10-06. Development is unfinished. VPS Core/PostgreSQL, public API DNS/TLS and private owner panel are deployed; full production Android acceptance and release remain pending. See the latest activation updates below.
 
 ## Latest onboarding checkpoint — 2026-10-06

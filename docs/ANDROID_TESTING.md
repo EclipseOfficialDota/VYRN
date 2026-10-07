@@ -1,5 +1,13 @@
 # Local Android integration
 
+## Original session-management screen — 2026-10-07
+
+```powershell
+./scripts/test-android-integration.ps1 -Phases sessions-ui
+```
+
+Requires a ready local Core/TLS proxy and the x86_64 local instrumentation APK. The script clears only the dedicated test app, creates a disposable invite registration via actual controls, opens Settings programmatically and touches Devices/session rows. It exercises individual and bulk confirmation/cancellation, revoked access/refresh rejection, current-session preservation, hidden unsupported QR/lifetime controls and a controlled unknown-hash error followed by a successful UI retry. Buttons in detail sheets use accessibility; confirmation uses actual native views. Final report:69 recorded checks,57 distinct names, no attach retry. This does not establish physical-device, actual settings-tab entry, offline or complete lifecycle acceptance.
+
 ## Recovery code across real process restarts — 2026-10-06
 
 After local TLS setup and an x86_64 local instrumentation build:

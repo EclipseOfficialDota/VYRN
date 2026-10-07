@@ -1,6 +1,20 @@
 # Verification report
 
-Updated: 2026-10-06. This records performed checks, not planned tests.
+Updated: 2026-10-07. This records performed checks, not planned tests.
+
+## Native session-management controls — 2026-10-07
+
+The final sessions-ui run passes69 recorded checks (57 distinct names, including registration15; repeated permission/row/probe checks are counted in the raw total), without startup attach retry. Report artifacts/android-sessions-ui.json; local-TLS APK SHA256 `107772c2087aa44dc2daef996ed33788df7ca469e0ebb681ead2784d01bd4498`.
+
+Actual registration/Saved controls establish the account. Settings is opened programmatically after MainTabs finishes its transition; the actual Devices setting and session rows are touched. Tests inspect the current-device details without a revoke button, real other-device metadata, cancellation of individual/bulk revocation, individual revocation with access/automatic-refresh rejection, three real server sessions followed by bulk revocation and preservation of the current account. Detail-sheet buttons use Android accessibility clicks; confirmation buttons use their actual native views. Window-dismissal and exact bulk-confirmation-message checks prevent stale dialogs from satisfying the next operation.
+
+QR login and session-lifetime changes have no backend implementation and are now absent from this screen. Individual and ordinary bulk revocation failures show the native localized error bulletin instead of silently doing nothing. The error test deliberately substitutes an unknown authorization hash in the displayed model: the real confirmation produces adapter rejection, displays the bulletin and retains both the list/device access, then restores the hash and successfully retries through the actual controls. This is a controlled adapter failure, not proof of offline HTTP revocation.
+
+Earlier attempts failed transition/detail/bulk assertions. The final sequence passes after explicit window/confirmation synchronization and restoration of the local test runtime. The cause of the earlier bulk failures is not established; no backend fix is claimed. After an interrupted run, the emulator/proxy were absent and the existing proxy certificate did not match the debug CA; a fresh localhost-only test CA/certificate and test APK restored local TLS. The existing WSL Core binary/database were used; no backend source or VPS change.
+
+Remaining: entry through the actual MainTabs settings tab, screen load failure/Retry, offline revocation, forced logout, session/account/late-callback races, expiry/lifetime implementation, two physical devices and full product acceptance. Older onboarding/auth/logout/broad/Signal reports retain their original APK hashes and were not rerun on this APK.
+
+All three normal ARM Debug APKs built and passed signature/package/API/ABI/native Signal/TLS/manifest verification; no local test CA. ARM64 SHA256 `e42e3f9d74bdf37c548d183341bb9eac467abea632ce3c3e1727138924ac9d65`, report artifacts/apk-verification.json. Repository scanner154 files and actual local credential inclusion checks pass. All build/test jobs terminal; no physical installation or release signing claimed.
 
 ## Pending recovery-code onboarding — 2026-10-06
 

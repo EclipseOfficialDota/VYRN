@@ -1,5 +1,5 @@
 # Real Android networking/Keystore integration; not a claim of full UI acceptance.
-param([string]$Serial='emulator-5560',[ValidateSet('first','mutations','profile','offline','restart','auth-ui','registration-ui','logout-prepare','logout-offline','logout-ui','onboarding-prepare','onboarding-restart','onboarding-gap','onboarding-recover','onboarding-complete')][string[]]$Phases=@('first','mutations','profile','offline','restart'))
+param([string]$Serial='emulator-5560',[ValidateSet('first','mutations','profile','offline','restart','auth-ui','registration-ui','sessions-ui','logout-prepare','logout-offline','logout-ui','onboarding-prepare','onboarding-restart','onboarding-gap','onboarding-recover','onboarding-complete')][string[]]$Phases=@('first','mutations','profile','offline','restart'))
 $ErrorActionPreference='Stop'
 $root=Split-Path $PSScriptRoot -Parent
 $adb=Join-Path $root '.tools/android-sdk/platform-tools/adb.exe'
@@ -82,7 +82,7 @@ try {
         $rounds+=@{phase=$phase;checks=$checks;result='passed';startup_attach_retry=$attachRetried}
         Write-Output "PASS: Android integration phase $phase"
     }
-    $report=if(@($Phases | Where-Object {$_ -notlike 'onboarding-*'}).Count -eq 0){'artifacts/android-onboarding-ui.json'}elseif(@($Phases | Where-Object {$_ -notlike 'logout-*'}).Count -eq 0){'artifacts/android-logout-ui.json'}elseif($Phases.Count -eq 1 -and $Phases[0] -in @('auth-ui','registration-ui')){"artifacts/android-$($Phases[0]).json"}else{'artifacts/android-integration.json'}
+    $report=if(@($Phases | Where-Object {$_ -notlike 'onboarding-*'}).Count -eq 0){'artifacts/android-onboarding-ui.json'}elseif(@($Phases | Where-Object {$_ -notlike 'logout-*'}).Count -eq 0){'artifacts/android-logout-ui.json'}elseif($Phases.Count -eq 1 -and $Phases[0] -in @('auth-ui','registration-ui','sessions-ui')){"artifacts/android-$($Phases[0]).json"}else{'artifacts/android-integration.json'}
     @{date=[DateTimeOffset]::UtcNow.ToString('o');apk=[IO.Path]::GetFileName($apk);sha256=(Get-FileHash $apk).Hash.ToLowerInvariant();device='vyrn_api35';api=35;transport='HTTPS with scoped local CA';rounds=$rounds;full_ui_e2e='not tested'} | ConvertTo-Json -Depth 6 | Set-Content (Join-Path $root $report) -Encoding utf8
 } finally {
     & $adb -s $Serial reverse tcp:18443 tcp:18443

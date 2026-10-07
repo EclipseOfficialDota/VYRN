@@ -704,6 +704,33 @@ Edit 'TMessagesProj/src/main/java/org/telegram/messenger/TelegramQRCodeWriter.ja
  $t=(& git -c "safe.directory=$($upstream.Replace('\','/'))" -C $upstream show "${pin}:TMessagesProj/src/main/java/org/telegram/messenger/TelegramQRCodeWriter.java") -join "`n"
  $t.Replace('SvgHelper.getBitmap(readRes(R.raw.qr_logo), imageSize, imageSize, false)','Bitmap.createScaledBitmap(xyz.eclipseofficial.vyrn.compat.VyrnBrand.notificationBitmap(ApplicationLoader.applicationContext), imageSize, imageSize, true).copy(Bitmap.Config.ARGB_8888, true)')
 }
+Edit 'TMessagesProj/src/main/java/org/telegram/ui/SessionsActivity.java' {
+ param($t)
+ $t=(& git -c "safe.directory=$($upstream.Replace('\','/'))" -C $upstream show "${pin}:TMessagesProj/src/main/java/org/telegram/ui/SessionsActivity.java") -join "`n"
+ foreach($marker in @('if (currentType == 0 && getMessagesController().qrLoginCamera) {','ttlDays = res.authorization_ttl_days;')){if(!$t.Contains($marker)){throw 'Pinned session feature gate changed'}}
+ $t=$t.Replace('if (currentType == 0 && getMessagesController().qrLoginCamera) {','if (false) { // VYRN QR authorization is unavailable.')
+ $t=$t.Replace('ttlDays = res.authorization_ttl_days;','ttlDays = 0; // VYRN session lifetime changes are unavailable.')
+ $single=@'
+                        if (listAdapter != null) {
+                            listAdapter.notifyDataSetChanged();
+                        }
+                    }
+                }));
+            }
+        });
+        bottomSheet.show();
+'@
+ if(!$t.Contains($single)){throw 'Pinned session revocation callback changed'}
+ $feedback='BulletinFactory.of(SessionsActivity.this).createSimpleBulletin(R.raw.error, getString(R.string.UnknownError)).show();'
+ $t=$t.Replace($single,$single.Replace("                    }`n                }));", "                    } else { $feedback }`n                }));"))
+ $bulk=@'
+                                    loadSessions(false);
+                                }
+                            });
+'@
+ if(!$t.Contains($bulk)){throw 'Pinned bulk session revocation callback changed'}
+ $t.Replace($bulk,$bulk.Replace("                                }`n                            });", "                                } else { $feedback }`n                            });"))
+}
 Get-ChildItem (Join-Path $upstream 'TMessagesProj/src/main/res') -Filter strings.xml -Recurse | ForEach-Object {
  $t=[IO.File]::ReadAllText($_.FullName)
  $t=$t -replace '(<string name="AppName">)[^<]+','$1Vyrn' -replace '(<string name="AppNameBeta">)[^<]+','$1Vyrn Dev'
