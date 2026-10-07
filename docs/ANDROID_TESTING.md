@@ -1,5 +1,11 @@
 # Local Android integration
 
+## Current messaging failure — 2026-10-08
+
+Monitored launchers identified host emulator access violation0xC0000005. `start-emulator.ps1` now uses host GPU with Vulkan disabled; `-GpuMode auto|software` are explicit alternatives, and `-Monitor` keeps a newly started launcher observable until exit. Software mode also crashed here; host mode remained connected through subsequent tests/builds. Reusing an already running AVD does not change its GPU settings. Verify AVD identity before restarting to apply a different mode.
+
+Native group mapping now permits ordinary members to send text; unsupported member media/admin actions have explicit default restrictions. Harness checks native text permission on each client, clicks the actual visible/enabled Send view and intends both directions. This replaces unreliable coordinate injection and does not prove physical touch behavior. Actual native Send clears the composer, but the sender bubble assertion still fails. Latest private diagnostic: server_matches1, native_messages0, matching_native_messages empty. No successful messaging report. Counts/IDs/state diagnostics are copied into ignored .local/chat-diagnostic-*.json before cleanup. Investigate native history/update/render delivery next; do not weaken the bubble assertion or count this REST acceptance as screen delivery.
+
 ## Two-client foreground messaging — in progress, 2026-10-08
 
 ```powershell

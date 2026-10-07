@@ -1,5 +1,11 @@
 # Verification report
 
+## Native messaging failure diagnosis — 2026-10-08
+
+Final normal ARM64, ARMv7 and universal Debug APK verification passes signature/package/API/ABI/native Signal/manifest/normal TLS policy, local CA absent; artifacts/apk-verification.json. ARM64 SHA2560f1e5a2224d3dd87b683faf416fd00552180d8ac4658bba65e5220256f9903ba. Phone installation/release signing remain untested. This supersedes the pending-verification note in the diagnostic chronology below.
+
+Host emulator monitoring reproduced exit0xC0000005; software mode with Vulkan disabled also failed. Host GPU mode remained alive in subsequent failed UI runs and builds. Shared native group mapping now provides default rights: ordinary member text allowed, unsupported member media/admin actions restricted. Native text-permission checks passed on both clients. Native button performClick clears the composer but chat_sender_confirmed_bubble fails. Latest diagnostic reads server_matches1/native_messages0/empty native matches. This is a reproducible display/update failure, not a passing messaging suite. Both-direction sequence has been added but reverse direction remains unexecuted. Latest native registrations15+15 pass; local app hash8be8c1b7ef1b9bc4390c8a4b1f4fcf2716cd90a05e4fe1b352be16e13924b1db. Final x86 test build39s and normal ARM build3m8s pass. Phone signing/packaging verification is recorded separately when complete; physical/release/full permission behavior remains unverified.
+
 ## Independent Android client setup — 2026-10-08
 
 `scripts/test-two-client-registration.ps1` passed against two distinct Android35 AVDs (vyrn_api35/5560 and vyrn_api35_peer/5562), checking different Android IDs and the same APK SHA2563a69e98208e7927a55447ee5dc5e13594923fbcd12865dbd20f989740469e026. Native invite-registration and recovery-code acknowledgement:15 checks each,30 total, no startup attach retry. Fresh separate reports combined in artifacts/android-two-client-registration.json. Local Core/TLS reused existing DB and certificates. No app/backend/VPS source change or new phone APK required. Messaging, physical phones and full account lifecycle are not proven by this run; historical evidence below retains its original scope.

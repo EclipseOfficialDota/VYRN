@@ -494,7 +494,15 @@ public final class VyrnBridge {
         if(conversation.kind.equals("group")){TLRPC.TL_peerChat peer=new TLRPC.TL_peerChat();peer.chat_id=ids.local("conversation",conversation.id);return peer;}
         String self=repository.vault.load().getString("user_id");for(Models.User user:members){if(!user.id.equals(self)){TLRPC.TL_peerUser peer=new TLRPC.TL_peerUser();peer.user_id=ids.local("user",user.id);privateConversations.put(peer.user_id,conversation.id);return peer;}}throw new IllegalStateException("private_member_missing");
     }
-    private TLRPC.Chat chat(Models.Conversation c){TLRPC.TL_chat chat=new TLRPC.TL_chat();chat.id=ids.local("conversation",c.id);chat.title=c.title;chat.photo=new TLRPC.TL_chatPhotoEmpty();chat.participants_count=c.members;chat.creator=c.role.equals("owner");chat.version=1;chat.date=(int)(System.currentTimeMillis()/1000);return chat;}
+    private TLRPC.Chat chat(Models.Conversation c){
+        TLRPC.TL_chat chat=new TLRPC.TL_chat();chat.id=ids.local("conversation",c.id);chat.title=c.title;chat.photo=new TLRPC.TL_chatPhotoEmpty();chat.participants_count=c.members;chat.creator=c.role.equals("owner");chat.version=1;chat.date=(int)(System.currentTimeMillis()/1000);
+        // Modern native chats treat absent default rights as no member sending permission.
+        chat.default_banned_rights=new TLRPC.TL_chatBannedRights();chat.flags|=1<<18;
+        TLRPC.TL_chatBannedRights rights=chat.default_banned_rights;
+        rights.send_media=rights.send_photos=rights.send_videos=rights.send_roundvideos=rights.send_audios=rights.send_voices=rights.send_docs=rights.send_polls=rights.send_stickers=rights.send_gifs=rights.send_games=rights.send_inline=true;
+        rights.change_info=rights.invite_users=rights.pin_messages=true;
+        return chat;
+    }
     private String conversation(TLRPC.InputPeer peer) throws Exception{
         if(peer.chat_id!=0)return ids.remote("conversation",peer.chat_id);
         String id=privateConversations.get(peer.user_id);if(id==null){dialogs();id=privateConversations.get(peer.user_id);}if(id==null)throw new UnsupportedOperationException();return id;

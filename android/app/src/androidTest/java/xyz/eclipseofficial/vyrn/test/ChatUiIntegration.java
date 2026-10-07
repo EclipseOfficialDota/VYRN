@@ -43,19 +43,26 @@ final class ChatUiIntegration {
         await(()->{boolean[] ready={false};instrumentation.runOnMainSync(()->ready[0]=MessagesController.getInstance(account).getChat(local)!=null);return ready[0];},check,"chat_native_group_loaded");
         instrumentation.runOnMainSync(()->{Bundle args=new Bundle();args.putLong("chat_id",local);LaunchActivity.getLastFragment().presentFragment(new ChatActivity(args));});
         await(()->{if(AuthUiIntegration.handlePrompts(instrumentation,activity,check))return false;boolean[] ready={false};instrumentation.runOnMainSync(()->ready[0]=LaunchActivity.getLastFragment() instanceof ChatActivity&&!LaunchActivity.getLastFragment().getParentLayout().isTransitionAnimationInProgress());return ready[0];},check,"chat_native_screen_ready");
+        instrumentation.runOnMainSync(()->check.verify(org.telegram.messenger.ChatObject.canSendPlain(MessagesController.getInstance(account).getChat(local)),"chat_member_can_send_plain"));
         if(phase.equals("chat-receive"))write(instrumentation,new JSONObject().put("ready",true));
         if(phase.equals("chat-send")){
             ChatActivityEnterView[] composer={null};
             instrumentation.runOnMainSync(()->{try{java.lang.reflect.Field field=ChatActivity.class.getDeclaredField("chatActivityEnterView");field.setAccessible(true);composer[0]=(ChatActivityEnterView)field.get(LaunchActivity.getLastFragment());}catch(Exception failure){throw new AssertionError("composer_unavailable");}composer[0].getEditField().setText(text);});
             Rect bounds=new Rect();
-            await(()->{boolean[] ready={false};instrumentation.runOnMainSync(()->{View button=composer[0].getSendButtonInternal();ready[0]=button.isShown()&&button.isEnabled()&&button.getAlpha()>=0.99f&&button.getGlobalVisibleRect(bounds);});return ready[0];},check,"chat_send_button_visible");
-            long time=android.os.SystemClock.uptimeMillis();
-            android.view.MotionEvent down=android.view.MotionEvent.obtain(time,time,0,bounds.centerX(),bounds.centerY(),0),up=android.view.MotionEvent.obtain(time,time+50,1,bounds.centerX(),bounds.centerY(),0);
-            down.setSource(android.view.InputDevice.SOURCE_TOUCHSCREEN);up.setSource(android.view.InputDevice.SOURCE_TOUCHSCREEN);
-            try{check.verify(instrumentation.getUiAutomation().injectInputEvent(down,true)&&instrumentation.getUiAutomation().injectInputEvent(up,true),"chat_send_button_touched");}finally{down.recycle();up.recycle();}
+            Rect previous=new Rect();long[] stableSince={0};
+            await(()->{boolean[] ready={false};instrumentation.runOnMainSync(()->{View button=composer[0].getSendButtonInternal();ready[0]=button.isShown()&&button.isEnabled()&&button.getAlpha()>=0.99f&&!button.isLayoutRequested()&&button.getGlobalVisibleRect(bounds);});long now=android.os.SystemClock.uptimeMillis();if(!ready[0]||!bounds.equals(previous)){previous.set(bounds);stableSince[0]=now;return false;}return now-stableSince[0]>=600;},check,"chat_send_button_visible_and_stable");
+            instrumentation.runOnMainSync(()->check.verify(composer[0].getSendButtonInternal().performClick(),"chat_native_send_button_clicked"));
             await(()->{boolean[] empty={false};instrumentation.runOnMainSync(()->empty[0]=composer[0].getEditField().length()==0);return empty[0];},check,"chat_composer_cleared");
         }else if(!phase.equals("chat-receive")){throw new IllegalArgumentException();}
-        await(()->{boolean[] shown={false};instrumentation.runOnMainSync(()->shown[0]=bubble(activity.getWindow().getDecorView(),text,phase.equals("chat-send")));return shown[0];},check,phase.equals("chat-send")?"chat_sender_confirmed_bubble":"chat_receiver_visible_bubble");
+        try{await(()->{boolean[] shown={false};instrumentation.runOnMainSync(()->shown[0]=bubble(activity.getWindow().getDecorView(),text,phase.equals("chat-send")));return shown[0];},check,phase.equals("chat-send")?"chat_sender_confirmed_bubble":"chat_receiver_visible_bubble");}
+        catch(AssertionError failure){
+            JSONObject diagnostic=new JSONObject();
+            int[] size={0};long[] dialog={0};java.util.ArrayList<int[]> matched=new java.util.ArrayList<>();
+            instrumentation.runOnMainSync(()->{ChatActivity chat=(ChatActivity)LaunchActivity.getLastFragment();size[0]=chat.messages.size();dialog[0]=chat.getDialogId();for(org.telegram.messenger.MessageObject message:chat.messages)if(text.equals(message.messageOwner.message))matched.add(new int[]{message.getId(),message.messageOwner.send_state,message.isOutOwner()?1:0});});
+            org.json.JSONArray states=new org.json.JSONArray();for(int[] message:matched)states.put(new JSONObject().put("id",message[0]).put("state",message[1]).put("outgoing",message[2]==1));diagnostic.put("native_messages",size[0]).put("matching_native_messages",states).put("native_dialog",dialog[0]);
+            try{diagnostic.put("server_matches",repository.liveMessages(group,null,100).stream().filter(message->text.equals(message.text)).count());}catch(Exception unavailable){diagnostic.put("server_probe","unavailable");}
+            write(instrumentation,diagnostic);throw failure;
+        }
         long count=repository.liveMessages(group,null,100).stream().filter(message->text.equals(message.text)).count();
         check.verify(count==1,"chat_server_exactly_one_message");
     }

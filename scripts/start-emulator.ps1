@@ -1,4 +1,4 @@
-param([ValidateSet('emulator-5560','emulator-5562')][string]$Serial='emulator-5560',[string]$DnsServers='')
+param([ValidateSet('emulator-5560','emulator-5562')][string]$Serial='emulator-5560',[string]$DnsServers='',[switch]$Monitor,[ValidateSet('auto','host','software')][string]$GpuMode='host')
 $ErrorActionPreference='Stop'
 $root=Split-Path $PSScriptRoot -Parent
 $avdName=if($Serial -eq 'emulator-5560'){'vyrn_api35'}else{'vyrn_api35_peer'}
@@ -21,7 +21,7 @@ foreach($line in $existing.Split("`n")){
 if($alreadyRunning){Write-Output 'Verified VYRN emulator is already running.';exit 0}
 $logName=if($Serial -eq 'emulator-5560'){'emulator'}else{'emulator-peer'}
 $stdout=Join-Path $root ".local/$logName.log";$stderr=Join-Path $root ".local/$logName-error.log"
-$arguments=@('-avd',$avdName,'-port',$port,'-no-window','-no-audio','-no-boot-anim','-gpu','swiftshader_indirect','-no-snapshot-save')
+$arguments=@('-avd',$avdName,'-port',$port,'-no-window','-no-audio','-no-boot-anim','-gpu',$GpuMode,'-feature','-Vulkan','-no-snapshot-save')
 if($Serial -eq 'emulator-5562'){$arguments+=@('-memory','1536')}
 if($DnsServers){foreach($server in $DnsServers.Split(',')){$parsed=$null;if(![Net.IPAddress]::TryParse($server,[ref]$parsed)){throw 'Invalid emulator DNS server'}};$arguments+=@('-dns-server',$DnsServers)}
 $process=Start-Process -FilePath $emulator -ArgumentList $arguments -WindowStyle Hidden -RedirectStandardOutput $stdout -RedirectStandardError $stderr -PassThru
@@ -39,3 +39,4 @@ for($attempt=0;$attempt -lt 180;$attempt++){
 if(!$ready){throw 'VYRN emulator did not finish booting'}
 [IO.File]::WriteAllText((Join-Path $root ".local/$logName.pid"),[string]$process.Id)
 Write-Output "VYRN Android35 emulator ready on $Serial."
+if($Monitor){$process.WaitForExit();throw "VYRN emulator launcher exited with code $($process.ExitCode)"}
