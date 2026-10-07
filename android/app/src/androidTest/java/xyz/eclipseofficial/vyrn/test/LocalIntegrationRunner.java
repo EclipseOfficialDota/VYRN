@@ -48,7 +48,8 @@ import xyz.eclipseofficial.vyrn.domain.Models;
 
 /** Stateful suites require local TLS; public-connectivity is read-only. No test secrets in release code. */
 public final class LocalIntegrationRunner extends Instrumentation {
-    private String phase, stage = "initialization";
+    private String phase;
+    private volatile String stage = "initialization";
     private Context context;
     private final JSONArray passed = new JSONArray();
 
@@ -57,6 +58,10 @@ public final class LocalIntegrationRunner extends Instrumentation {
     @Override public void onStart() {
         context=getTargetContext();
         Bundle result=new Bundle();
+        Thread diagnostic=null;
+        if(phase.equals("chat-offline-reopen")){
+            diagnostic=new Thread(()->{try{Thread.sleep(50000);StringBuilder trace=new StringBuilder("stage=").append(stage).append('\n');for(java.util.Map.Entry<Thread,StackTraceElement[]> entry:Thread.getAllStackTraces().entrySet()){trace.append(entry.getKey().getName().equals("main")?"main":"worker").append(' ').append(entry.getKey().getState()).append('\n');for(StackTraceElement frame:entry.getValue())trace.append(frame).append('\n');}java.nio.file.Files.write(file("vyrn-test-thread-state.txt").toPath(),trace.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8));}catch(Exception ignored){}},"vyrn-test-diagnostic");diagnostic.setDaemon(true);diagnostic.start();
+        }
         try {
             if(phase.equals("branding")) {
                 branding();
@@ -66,9 +71,16 @@ public final class LocalIntegrationRunner extends Instrumentation {
             check(BuildConfig.VYRN_API_URL.equals("https://localhost:18443"), "local_endpoint_required");
             stage="foreground_activity";
             Intent launch=new Intent(Intent.ACTION_MAIN).setClassName(context,"org.telegram.ui.LaunchActivity").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-            Activity foreground=startActivitySync(launch);
+            Activity foreground;
+            if(phase.equals("chat-offline-reopen")){
+                context.startActivity(launch);
+                long deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(30);boolean[] visible={false};
+                while(!visible[0]&&System.nanoTime()<deadline){runOnMainSync(()->{org.telegram.ui.LaunchActivity current=org.telegram.ui.LaunchActivity.instance;visible[0]=current!=null&&!current.isFinishing()&&!current.isDestroyed()&&current.hasWindowFocus()&&org.telegram.ui.LaunchActivity.getLastFragment()!=null;});if(!visible[0])Thread.sleep(100);}
+                check(visible[0],"offline_foreground_activity_visible");foreground=org.telegram.ui.LaunchActivity.instance;
+            }else{foreground=startActivitySync(launch);}
             check(foreground!=null,"foreground_activity");
-            waitForIdleSync();
+            stage="foreground_idle";
+            if(!phase.equals("chat-offline-reopen"))waitForIdleSync();
             if(phase.startsWith("chat-")){
                 stage="chat_ui";
                 ChatUiIntegration.run(this,foreground,read("vyrn-test-fixture.json"),phase,(condition,name)->{check(condition,name);passed.put(name);});
@@ -99,7 +111,7 @@ public final class LocalIntegrationRunner extends Instrumentation {
             for(StackTraceElement frame:failure.getStackTrace()) if(frame.getClassName().startsWith("xyz.eclipseofficial")) trace.append(frame.toString()).append(";");
             result.putString("failure_location",trace.toString());
             finish(Activity.RESULT_CANCELED, result);
-        }
+        } finally {if(diagnostic!=null)diagnostic.interrupt();}
     }
 
     private void branding() throws Exception {

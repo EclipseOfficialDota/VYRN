@@ -29,6 +29,7 @@ final class AuthUiIntegration {
     static void sessionNetwork(Instrumentation instrumentation,Activity activity,JSONObject fixture,Check check) throws Exception {new AuthUiIntegration(instrumentation,activity,check).sessions(fixture,true);}
     static boolean handlePrompts(Instrumentation instrumentation,Activity activity,Check check){return new AuthUiIntegration(instrumentation,activity,check).systemPromptBlocks();}
     static void clickWindow(Instrumentation instrumentation,Activity activity,String text,Check check) throws Exception {new AuthUiIntegration(instrumentation,activity,check).windowClick(text);}
+    static void networkStep(Instrumentation instrumentation,Activity activity,String step,Check check) throws Exception {new AuthUiIntegration(instrumentation,activity,check).networkStep(step);}
     private String label(String en,String persian){return fa?persian:en;}
     private View find(View view,String value){
         if(view.getVisibility()!=View.VISIBLE)return null;

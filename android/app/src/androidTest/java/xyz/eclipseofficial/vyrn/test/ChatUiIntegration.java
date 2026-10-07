@@ -26,7 +26,8 @@ final class ChatUiIntegration {
         int account=UserConfig.selectedAccount;
         check.verify(account==0&&UserConfig.getInstance(account).isClientActivated(),"chat_native_account0_active");
         RestRepository repository=new RestRepository(new TokenVault(instrumentation.getTargetContext(),account));
-        String user=repository.me().id;
+        boolean offlineReopen=phase.equals("chat-offline-reopen");
+        String user=offlineReopen?repository.vault.load().getString("user_id"):repository.me().id;
         if(phase.equals("chat-identity")){write(instrumentation,new JSONObject().put("user",user));return;}
         if(phase.equals("chat-create")){
             String peer=fixture.getString("peer_user");check.verify(!user.equals(peer),"chat_distinct_accounts");
@@ -36,19 +37,24 @@ final class ChatUiIntegration {
         String group=fixture.getString("group"),text=fixture.getString("text");
         long local;try(IdMap map=new IdMap(instrumentation.getTargetContext(),account)){local=map.local("conversation",group);}
         await(()->!AuthUiIntegration.handlePrompts(instrumentation,activity,check),check,"chat_startup_permissions_handled");
+        if(!offlineReopen){
         java.util.concurrent.CompletableFuture<org.telegram.tgnet.TLObject> loaded=new java.util.concurrent.CompletableFuture<>();
         org.telegram.tgnet.ConnectionsManager.getInstance(account).sendRequest(new org.telegram.tgnet.TLRPC.TL_messages_getDialogs(),(value,error)->{if(error!=null)loaded.completeExceptionally(new AssertionError());else loaded.complete(value);});
         org.telegram.tgnet.TLRPC.TL_messages_dialogs dialogs=(org.telegram.tgnet.TLRPC.TL_messages_dialogs)loaded.get(30,java.util.concurrent.TimeUnit.SECONDS);
         instrumentation.runOnMainSync(()->{MessagesController.getInstance(account).putChats(dialogs.chats,false);MessagesController.getInstance(account).putUsers(dialogs.users,false);});
+        }
         await(()->{boolean[] ready={false};instrumentation.runOnMainSync(()->ready[0]=MessagesController.getInstance(account).getChat(local)!=null);return ready[0];},check,"chat_native_group_loaded");
         instrumentation.runOnMainSync(()->{Bundle args=new Bundle();args.putLong("chat_id",local);LaunchActivity.getLastFragment().presentFragment(new ChatActivity(args));});
         await(()->{if(AuthUiIntegration.handlePrompts(instrumentation,activity,check))return false;boolean[] ready={false};instrumentation.runOnMainSync(()->ready[0]=LaunchActivity.getLastFragment() instanceof ChatActivity&&!LaunchActivity.getLastFragment().getParentLayout().isTransitionAnimationInProgress());return ready[0];},check,"chat_native_screen_ready");
         instrumentation.runOnMainSync(()->check.verify(org.telegram.messenger.ChatObject.canSendPlain(MessagesController.getInstance(account).getChat(local)),"chat_member_can_send_plain"));
-        await(()->{boolean[] ready={false};instrumentation.runOnMainSync(()->{try{java.lang.reflect.Field field=ChatActivity.class.getDeclaredField("firstLoading");field.setAccessible(true);ready[0]=!field.getBoolean(LaunchActivity.getLastFragment());}catch(Exception failure){throw new AssertionError("chat_loading_state_unavailable");}});return ready[0];},check,"chat_initial_history_complete");
+        if(!offlineReopen)await(()->{boolean[] ready={false};instrumentation.runOnMainSync(()->{try{java.lang.reflect.Field field=ChatActivity.class.getDeclaredField("firstLoading");field.setAccessible(true);ready[0]=!field.getBoolean(LaunchActivity.getLastFragment());}catch(Exception failure){throw new AssertionError("chat_loading_state_unavailable");}});return ready[0];},check,"chat_initial_history_complete");
+        if(offlineReopen){pending(instrumentation,activity,fixture,repository,check,true);return;}
         if(phase.equals("chat-delete")||phase.equals("chat-watch-delete")||phase.equals("chat-deleted-reopen")){delete(instrumentation,activity,fixture,repository,phase,check);return;}
         if(phase.equals("chat-edit")||phase.equals("chat-watch-edit")){edit(instrumentation,activity,fixture,repository,phase.equals("chat-edit"),check);return;}
         if(phase.equals("chat-receive"))write(instrumentation,new JSONObject().put("ready",true));
-        if(phase.equals("chat-send")){
+        boolean sending=phase.equals("chat-send")||phase.equals("chat-offline-send");
+        if(phase.equals("chat-offline-send"))AuthUiIntegration.networkStep(instrumentation,activity,"offline-send",check);
+        if(sending){
             ChatActivityEnterView[] composer={null};
             instrumentation.runOnMainSync(()->{try{java.lang.reflect.Field field=ChatActivity.class.getDeclaredField("chatActivityEnterView");field.setAccessible(true);composer[0]=(ChatActivityEnterView)field.get(LaunchActivity.getLastFragment());}catch(Exception failure){throw new AssertionError("composer_unavailable");}composer[0].getEditField().setText(text);});
             Rect bounds=new Rect();
@@ -56,8 +62,10 @@ final class ChatUiIntegration {
             await(()->{boolean[] ready={false};instrumentation.runOnMainSync(()->{View button=composer[0].getSendButtonInternal();ready[0]=button.isShown()&&button.isEnabled()&&button.getAlpha()>=0.99f&&!button.isLayoutRequested()&&button.getGlobalVisibleRect(bounds);});long now=android.os.SystemClock.uptimeMillis();if(!ready[0]||!bounds.equals(previous)){previous.set(bounds);stableSince[0]=now;return false;}return now-stableSince[0]>=600;},check,"chat_send_button_visible_and_stable");
             instrumentation.runOnMainSync(()->check.verify(composer[0].getSendButtonInternal().performClick(),"chat_native_send_button_clicked"));
             await(()->{boolean[] empty={false};instrumentation.runOnMainSync(()->empty[0]=composer[0].getEditField().length()==0);return empty[0];},check,"chat_composer_cleared");
-        }else if(!phase.equals("chat-receive")){throw new IllegalArgumentException();}
-        try{await(()->{boolean[] shown={false};instrumentation.runOnMainSync(()->shown[0]=bubble(activity.getWindow().getDecorView(),text,phase.equals("chat-send")));return shown[0];},check,phase.equals("chat-send")?"chat_sender_confirmed_bubble":"chat_receiver_visible_bubble");}
+        }else if(!phase.equals("chat-receive")&&!phase.equals("chat-recover")&&!phase.equals("chat-recovered-reopen")){throw new IllegalArgumentException();}
+        if(phase.equals("chat-offline-send")){pending(instrumentation,activity,fixture,repository,check,false);return;}
+        boolean outgoing=!phase.equals("chat-receive");
+        try{await(()->{boolean[] shown={false};instrumentation.runOnMainSync(()->shown[0]=bubble(activity.getWindow().getDecorView(),text,outgoing));return shown[0];},check,outgoing?"chat_sender_confirmed_bubble":"chat_receiver_visible_bubble");}
         catch(AssertionError failure){
             JSONObject diagnostic=new JSONObject();
             int[] size={0};long[] dialog={0};java.util.ArrayList<int[]> matched=new java.util.ArrayList<>();
@@ -68,6 +76,21 @@ final class ChatUiIntegration {
         }
         long count=repository.liveMessages(group,null,100).stream().filter(message->text.equals(message.text)).count();
         check.verify(count==1,"chat_server_exactly_one_message");
+        if(phase.equals("chat-recover")||phase.equals("chat-recovered-reopen")){
+            instrumentation.runOnMainSync(()->check.verify(((ChatActivity)LaunchActivity.getLastFragment()).messages.stream().filter(message->text.equals(message.messageOwner.message)).count()==1,"offline_recovery_exactly_one_native_message"));
+            String client=fixture.getString("client_id");try(xyz.eclipseofficial.vyrn.data.OutboxStore store=new xyz.eclipseofficial.vyrn.data.OutboxStore(instrumentation.getTargetContext(),account)){xyz.eclipseofficial.vyrn.data.OutboxStore.Entry entry=store.get(user,client);check.verify(entry!=null&&entry.state==xyz.eclipseofficial.vyrn.data.OutboxStore.SENT,"offline_recovery_original_queue_entry_sent");check.verify(repository.liveMessages(group,null,100).stream().anyMatch(message->text.equals(message.text)&&message.id.equals(entry.server)),"offline_recovery_server_identity_matches_queue");}
+        }
+    }
+    private static void pending(Instrumentation instrumentation,Activity activity,JSONObject fixture,RestRepository repository,AuthUiIntegration.Check check,boolean reopen) throws Exception {
+        String text=fixture.getString("text"),group=fixture.getString("group"),user=repository.vault.load().getString("user_id");
+        await(()->{boolean[] shown={false};instrumentation.runOnMainSync(()->{ChatMessageCell value=cell(activity.getWindow().getDecorView(),text);shown[0]=value!=null&&value.getMessageObject().getId()<0&&value.getMessageObject().messageOwner.send_state!=0;});return shown[0];},check,reopen?"offline_pending_bubble_survives_process_restart":"offline_native_pending_bubble_visible");
+        try(xyz.eclipseofficial.vyrn.data.OutboxStore store=new xyz.eclipseofficial.vyrn.data.OutboxStore(instrumentation.getTargetContext(),UserConfig.selectedAccount)){
+            await(()->{try(android.database.Cursor cursor=store.getReadableDatabase().rawQuery("SELECT count(*) FROM outbox WHERE user_id=? AND conversation_id=? AND body=?",new String[]{user,group,text})){return cursor.moveToFirst()&&cursor.getInt(0)==1;}},check,"offline_pending_persisted");
+            String client;try(android.database.Cursor cursor=store.getReadableDatabase().rawQuery("SELECT client_id FROM outbox WHERE user_id=? AND conversation_id=? AND body=?",new String[]{user,group,text})){check.verify(cursor.getCount()==1&&cursor.moveToFirst(),"offline_exactly_one_durable_queue_entry");client=cursor.getString(0);}
+            xyz.eclipseofficial.vyrn.data.OutboxStore.Entry entry=store.get(user,client);check.verify(entry.state==xyz.eclipseofficial.vyrn.data.OutboxStore.QUEUED||entry.state==xyz.eclipseofficial.vyrn.data.OutboxStore.SENDING,"offline_queue_retryable_not_sent");
+            if(reopen)check.verify(client.equals(fixture.getString("client_id")),"offline_restart_keeps_same_client_id");
+            write(instrumentation,new JSONObject().put("client_id",client).put("pending",true));
+        }
     }
     private static boolean bubble(View view,String text,boolean outgoing){
         if(!view.isShown())return false;

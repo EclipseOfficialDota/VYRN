@@ -1,5 +1,11 @@
 # Local Android integration
 
+## Offline queued send and recovery — 2026-10-08
+
+Use `scripts/test-two-client-messaging.ps1 -Offline` with the dedicated matching local TLS proxy and both known clients. Runs the complete send/edit/delete prerequisites before a network-step handshake stops only the validated proxy, closing all test TLS connections. Actual Send creates visible pending bubble and one durable queue entry. Offline cold app entry skips online metadata setup and verifies cached native pending bubble/same client ID. Restore proxy, await recipient readiness, start sender recovery and check visible confirmed bubbles, original queue SENT/server ID and exactly-one native/server message; cold confirmed sender reopen and both deleted-message histories repeat these checks. Proxy is restored in cleanup; no production service stopped.
+
+Pass236 recorded checks (30 registration +206 messaging/lifecycle), local APK SHA256869e844123020e0bc9821b30531d60430ee6eb5418f816169904eec5788f9e45; artifacts/android-two-client-offline.json. Offline launch uses bounded real window focus/fragment readiness rather than startActivitySync/global idle, which hung in the observed trace while main processed frames. Test-only50s final build. Counts/stack-only private diagnostics capture long offline-launch waits; timeout preserves phase logs. REST fixture/programmatic native chat entry and accessibility/View clicks remain explicit. Manual retry, lost acknowledgement, interrupted mutation, physical phones/touch and broader races/background/media/E2EE/release acceptance remain required.
+
 ## Shared deletion and cold reopens — 2026-10-08
 
 `scripts/test-two-client-messaging.ps1 -Delete` includes registration, bidirectional text delivery and edit, then native Delete menu cancellation/confirmation, receiver removal in the same process and fresh app-process/native-history entry on both clients. The supported normal-group dialog explains shared deletion without a local-only checkbox; backend/adapter still enforce permissions and server-confirmed deletion. Cancellation verifies actor bubble and unchanged server revision; confirmation verifies same-identity newer tombstone, native entry/bubble absence and absence from live server history. Cold reopens repeat absence checks.
