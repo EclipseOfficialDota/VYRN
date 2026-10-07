@@ -1,5 +1,16 @@
 # Local Android integration
 
+## Two-client foreground messaging — in progress, 2026-10-08
+
+```powershell
+./scripts/build-android.ps1 -Abis x86_64 -LocalTest -Instrumentation
+./scripts/test-two-client-messaging.ps1
+```
+
+This resets only the two dedicated debug clients, reruns native registration and uses distinct server accounts. REST creates the group fixture; a native request loads group metadata and ChatActivity is opened programmatically. The receiver stays live in its original instrumentation process while the sender touches Send. Intended assertions check visible confirmed outgoing/incoming bubbles and exactly one server message. Fixtures go through stdin and are removed finally. This does not test group creation/chat-list gestures, edit/delete/offline/restarts or physical phones.
+
+Builds pass, but messaging is not yet verified: initial run failed native group loading; after setup adjustment, the peer emulator disappeared in two executions before receiver readiness. Both registration suites and identity/group-fixture phases passed. There is no successful messaging report; use sanitized .local/chat-*.log and actual ADB/process state to diagnose the peer termination before continuing.
+
 ## Two independent client registrations — 2026-10-08
 
 ```powershell

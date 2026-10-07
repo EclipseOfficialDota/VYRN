@@ -27,6 +27,7 @@ final class AuthUiIntegration {
     static void onboarding(Instrumentation instrumentation,Activity activity,JSONObject fixture,Check check,String phase) throws Exception {new AuthUiIntegration(instrumentation,activity,check).onboarding(fixture,phase);}
     static void sessions(Instrumentation instrumentation,Activity activity,JSONObject fixture,Check check) throws Exception {new AuthUiIntegration(instrumentation,activity,check).sessions(fixture);}
     static void sessionNetwork(Instrumentation instrumentation,Activity activity,JSONObject fixture,Check check) throws Exception {new AuthUiIntegration(instrumentation,activity,check).sessions(fixture,true);}
+    static boolean handlePrompts(Instrumentation instrumentation,Activity activity,Check check){return new AuthUiIntegration(instrumentation,activity,check).systemPromptBlocks();}
     private String label(String en,String persian){return fa?persian:en;}
     private View find(View view,String value){
         if(view.getVisibility()!=View.VISIBLE)return null;

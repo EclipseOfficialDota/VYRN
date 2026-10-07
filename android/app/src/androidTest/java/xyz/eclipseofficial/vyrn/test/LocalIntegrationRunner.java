@@ -69,7 +69,10 @@ public final class LocalIntegrationRunner extends Instrumentation {
             Activity foreground=startActivitySync(launch);
             check(foreground!=null,"foreground_activity");
             waitForIdleSync();
-            if(phase.equals("sessions-network")||phase.equals("sessions-ui")||phase.equals("auth-ui")||phase.equals("registration-ui")||phase.startsWith("logout-")||phase.startsWith("onboarding-")){
+            if(phase.startsWith("chat-")){
+                stage="chat_ui";
+                ChatUiIntegration.run(this,foreground,read("vyrn-test-fixture.json"),phase,(condition,name)->{check(condition,name);passed.put(name);});
+            } else if(phase.equals("sessions-network")||phase.equals("sessions-ui")||phase.equals("auth-ui")||phase.equals("registration-ui")||phase.startsWith("logout-")||phase.startsWith("onboarding-")){
                 stage="auth_ui";
                 AuthUiIntegration.Check verification=(condition,name)->{check(condition,name);passed.put(name);};
                 if(phase.equals("sessions-network"))AuthUiIntegration.sessionNetwork(this,foreground,read("vyrn-test-fixture.json"),verification);
