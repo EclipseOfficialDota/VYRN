@@ -1,5 +1,11 @@
 # Local Android integration
 
+## Real failed-send and native Retry scenario — 2026-10-08
+
+`scripts/test-two-client-messaging.ps1 -ManualRetry` includes the previous offline lifecycle, then holds the dedicated proxy offline until real eight-attempt retry exhaustion. Native Send must become an error bubble, journal must be FAILED with8 attempts, cold offline reopen must preserve the same failed bubble/client ID. Restore proxy, start receiving client, open native failed-message menu/Retry and require original queue row SENT plus one native/server message, matching server identity and confirmed cold reopen. Failed-send runner gets300s host bound/200s native exhaustion bound; other phases retain normal bounds. No injected failure or shorter production retry settings.
+
+Build51s passes; scenario remains unverified because peer ADB/control became unresponsive during earlier deletion. Bounded helper regressions (real stdin and real timeout) pass; no success report for ManualRetry. Current peer remains offline with qemu process present; preserve guest data and diagnose before rerun. Exact owned test helpers were stopped, primary reverse restored/fixtures cleaned, proxy retained. Do not reuse older logs/report as evidence for the new scenario.
+
 ## Offline queued send and recovery — 2026-10-08
 
 Use `scripts/test-two-client-messaging.ps1 -Offline` with the dedicated matching local TLS proxy and both known clients. Runs the complete send/edit/delete prerequisites before a network-step handshake stops only the validated proxy, closing all test TLS connections. Actual Send creates visible pending bubble and one durable queue entry. Offline cold app entry skips online metadata setup and verifies cached native pending bubble/same client ID. Restore proxy, await recipient readiness, start sender recovery and check visible confirmed bubbles, original queue SENT/server ID and exactly-one native/server message; cold confirmed sender reopen and both deleted-message histories repeat these checks. Proxy is restored in cleanup; no production service stopped.

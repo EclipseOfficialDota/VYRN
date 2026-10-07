@@ -26,7 +26,7 @@ final class ChatUiIntegration {
         int account=UserConfig.selectedAccount;
         check.verify(account==0&&UserConfig.getInstance(account).isClientActivated(),"chat_native_account0_active");
         RestRepository repository=new RestRepository(new TokenVault(instrumentation.getTargetContext(),account));
-        boolean offlineReopen=phase.equals("chat-offline-reopen");
+        boolean offlineReopen=phase.equals("chat-offline-reopen")||phase.equals("chat-failed-reopen");
         String user=offlineReopen?repository.vault.load().getString("user_id"):repository.me().id;
         if(phase.equals("chat-identity")){write(instrumentation,new JSONObject().put("user",user));return;}
         if(phase.equals("chat-create")){
@@ -52,8 +52,8 @@ final class ChatUiIntegration {
         if(phase.equals("chat-delete")||phase.equals("chat-watch-delete")||phase.equals("chat-deleted-reopen")){delete(instrumentation,activity,fixture,repository,phase,check);return;}
         if(phase.equals("chat-edit")||phase.equals("chat-watch-edit")){edit(instrumentation,activity,fixture,repository,phase.equals("chat-edit"),check);return;}
         if(phase.equals("chat-receive"))write(instrumentation,new JSONObject().put("ready",true));
-        boolean sending=phase.equals("chat-send")||phase.equals("chat-offline-send");
-        if(phase.equals("chat-offline-send"))AuthUiIntegration.networkStep(instrumentation,activity,"offline-send",check);
+        boolean sending=phase.equals("chat-send")||phase.equals("chat-offline-send")||phase.equals("chat-failed-send");
+        if(phase.equals("chat-offline-send")||phase.equals("chat-failed-send"))AuthUiIntegration.networkStep(instrumentation,activity,"offline-send",check);
         if(sending){
             ChatActivityEnterView[] composer={null};
             instrumentation.runOnMainSync(()->{try{java.lang.reflect.Field field=ChatActivity.class.getDeclaredField("chatActivityEnterView");field.setAccessible(true);composer[0]=(ChatActivityEnterView)field.get(LaunchActivity.getLastFragment());}catch(Exception failure){throw new AssertionError("composer_unavailable");}composer[0].getEditField().setText(text);});
@@ -62,8 +62,19 @@ final class ChatUiIntegration {
             await(()->{boolean[] ready={false};instrumentation.runOnMainSync(()->{View button=composer[0].getSendButtonInternal();ready[0]=button.isShown()&&button.isEnabled()&&button.getAlpha()>=0.99f&&!button.isLayoutRequested()&&button.getGlobalVisibleRect(bounds);});long now=android.os.SystemClock.uptimeMillis();if(!ready[0]||!bounds.equals(previous)){previous.set(bounds);stableSince[0]=now;return false;}return now-stableSince[0]>=600;},check,"chat_send_button_visible_and_stable");
             instrumentation.runOnMainSync(()->check.verify(composer[0].getSendButtonInternal().performClick(),"chat_native_send_button_clicked"));
             await(()->{boolean[] empty={false};instrumentation.runOnMainSync(()->empty[0]=composer[0].getEditField().length()==0);return empty[0];},check,"chat_composer_cleared");
-        }else if(!phase.equals("chat-receive")&&!phase.equals("chat-recover")&&!phase.equals("chat-recovered-reopen")){throw new IllegalArgumentException();}
+        }else if(!phase.equals("chat-receive")&&!phase.equals("chat-recover")&&!phase.equals("chat-recovered-reopen")&&!phase.equals("chat-manual-retry")){throw new IllegalArgumentException();}
         if(phase.equals("chat-offline-send")){pending(instrumentation,activity,fixture,repository,check,false);return;}
+        if(phase.equals("chat-failed-send")){
+            pending(instrumentation,activity,fixture,repository,check,false);
+            await(()->{boolean[] failed={false};instrumentation.runOnMainSync(()->{ChatMessageCell value=cell(activity.getWindow().getDecorView(),text);failed[0]=value!=null&&value.getMessageObject().getId()<0&&value.getMessageObject().isSendError();});return failed[0];},check,"retry_real_network_attempts_exhausted_native_error",200);
+            pending(instrumentation,activity,new JSONObject(fixture.toString()).put("expect_failed",true),repository,check,false);return;
+        }
+        if(phase.equals("chat-manual-retry")){
+            await(()->{boolean[] failed={false};instrumentation.runOnMainSync(()->{ChatMessageCell value=cell(activity.getWindow().getDecorView(),text);failed[0]=value!=null&&value.getMessageObject().getId()<0&&value.getMessageObject().isSendError();});return failed[0];},check,"retry_original_failed_bubble_visible");
+            try(xyz.eclipseofficial.vyrn.data.OutboxStore store=new xyz.eclipseofficial.vyrn.data.OutboxStore(instrumentation.getTargetContext(),account)){xyz.eclipseofficial.vyrn.data.OutboxStore.Entry entry=store.get(user,fixture.getString("client_id"));check.verify(entry!=null&&entry.state==xyz.eclipseofficial.vyrn.data.OutboxStore.FAILED&&entry.attempts==8,"retry_original_durable_entry_failed");}
+            instrumentation.runOnMainSync(()->cell(activity.getWindow().getDecorView(),text).performAccessibilityAction(org.telegram.messenger.R.id.acc_action_msg_options,new Bundle()));
+            AuthUiIntegration.clickWindow(instrumentation,activity,org.telegram.messenger.LocaleController.getString(org.telegram.messenger.R.string.Retry),check);
+        }
         boolean outgoing=!phase.equals("chat-receive");
         try{await(()->{boolean[] shown={false};instrumentation.runOnMainSync(()->shown[0]=bubble(activity.getWindow().getDecorView(),text,outgoing));return shown[0];},check,outgoing?"chat_sender_confirmed_bubble":"chat_receiver_visible_bubble");}
         catch(AssertionError failure){
@@ -76,18 +87,19 @@ final class ChatUiIntegration {
         }
         long count=repository.liveMessages(group,null,100).stream().filter(message->text.equals(message.text)).count();
         check.verify(count==1,"chat_server_exactly_one_message");
-        if(phase.equals("chat-recover")||phase.equals("chat-recovered-reopen")){
+        if(phase.equals("chat-recover")||phase.equals("chat-recovered-reopen")||phase.equals("chat-manual-retry")){
             instrumentation.runOnMainSync(()->check.verify(((ChatActivity)LaunchActivity.getLastFragment()).messages.stream().filter(message->text.equals(message.messageOwner.message)).count()==1,"offline_recovery_exactly_one_native_message"));
             String client=fixture.getString("client_id");try(xyz.eclipseofficial.vyrn.data.OutboxStore store=new xyz.eclipseofficial.vyrn.data.OutboxStore(instrumentation.getTargetContext(),account)){xyz.eclipseofficial.vyrn.data.OutboxStore.Entry entry=store.get(user,client);check.verify(entry!=null&&entry.state==xyz.eclipseofficial.vyrn.data.OutboxStore.SENT,"offline_recovery_original_queue_entry_sent");check.verify(repository.liveMessages(group,null,100).stream().anyMatch(message->text.equals(message.text)&&message.id.equals(entry.server)),"offline_recovery_server_identity_matches_queue");}
         }
     }
     private static void pending(Instrumentation instrumentation,Activity activity,JSONObject fixture,RestRepository repository,AuthUiIntegration.Check check,boolean reopen) throws Exception {
         String text=fixture.getString("text"),group=fixture.getString("group"),user=repository.vault.load().getString("user_id");
-        await(()->{boolean[] shown={false};instrumentation.runOnMainSync(()->{ChatMessageCell value=cell(activity.getWindow().getDecorView(),text);shown[0]=value!=null&&value.getMessageObject().getId()<0&&value.getMessageObject().messageOwner.send_state!=0;});return shown[0];},check,reopen?"offline_pending_bubble_survives_process_restart":"offline_native_pending_bubble_visible");
+        boolean failed=fixture.optBoolean("expect_failed");
+        await(()->{boolean[] shown={false};instrumentation.runOnMainSync(()->{ChatMessageCell value=cell(activity.getWindow().getDecorView(),text);shown[0]=value!=null&&value.getMessageObject().getId()<0&&(failed?value.getMessageObject().isSendError():value.getMessageObject().messageOwner.send_state!=0);});return shown[0];},check,reopen?(failed?"retry_failed_bubble_survives_process_restart":"offline_pending_bubble_survives_process_restart"):(failed?"retry_failed_bubble_visible":"offline_native_pending_bubble_visible"));
         try(xyz.eclipseofficial.vyrn.data.OutboxStore store=new xyz.eclipseofficial.vyrn.data.OutboxStore(instrumentation.getTargetContext(),UserConfig.selectedAccount)){
             await(()->{try(android.database.Cursor cursor=store.getReadableDatabase().rawQuery("SELECT count(*) FROM outbox WHERE user_id=? AND conversation_id=? AND body=?",new String[]{user,group,text})){return cursor.moveToFirst()&&cursor.getInt(0)==1;}},check,"offline_pending_persisted");
             String client;try(android.database.Cursor cursor=store.getReadableDatabase().rawQuery("SELECT client_id FROM outbox WHERE user_id=? AND conversation_id=? AND body=?",new String[]{user,group,text})){check.verify(cursor.getCount()==1&&cursor.moveToFirst(),"offline_exactly_one_durable_queue_entry");client=cursor.getString(0);}
-            xyz.eclipseofficial.vyrn.data.OutboxStore.Entry entry=store.get(user,client);check.verify(entry.state==xyz.eclipseofficial.vyrn.data.OutboxStore.QUEUED||entry.state==xyz.eclipseofficial.vyrn.data.OutboxStore.SENDING,"offline_queue_retryable_not_sent");
+            xyz.eclipseofficial.vyrn.data.OutboxStore.Entry entry=store.get(user,client);check.verify(failed?entry.state==xyz.eclipseofficial.vyrn.data.OutboxStore.FAILED&&entry.attempts==8:entry.state==xyz.eclipseofficial.vyrn.data.OutboxStore.QUEUED||entry.state==xyz.eclipseofficial.vyrn.data.OutboxStore.SENDING,failed?"retry_queue_failed_after_eight_attempts":"offline_queue_retryable_not_sent");
             if(reopen)check.verify(client.equals(fixture.getString("client_id")),"offline_restart_keeps_same_client_id");
             write(instrumentation,new JSONObject().put("client_id",client).put("pending",true));
         }
@@ -162,6 +174,7 @@ final class ChatUiIntegration {
         check.verify(tombstone.deleted&&tombstone.id.equals(original.id)&&tombstone.ordinal==id&&(reopen||tombstone.revision>original.revision),"delete_confirmed_same_identity_tombstone");
         check.verify(repository.liveMessages(group,null,100).stream().noneMatch(message->message.id.equals(original.id)||text.equals(message.text)),"delete_absent_from_live_history");
     }
-    private static void await(BooleanSupplier condition,AuthUiIntegration.Check check,String name) throws Exception {long deadline=System.nanoTime()+java.util.concurrent.TimeUnit.SECONDS.toNanos(40);while(!condition.getAsBoolean()&&System.nanoTime()<deadline)Thread.sleep(100);check.verify(condition.getAsBoolean(),name);}
+    private static void await(BooleanSupplier condition,AuthUiIntegration.Check check,String name) throws Exception {await(condition,check,name,40);}
+    private static void await(BooleanSupplier condition,AuthUiIntegration.Check check,String name,int seconds) throws Exception {long deadline=System.nanoTime()+java.util.concurrent.TimeUnit.SECONDS.toNanos(seconds);while(!condition.getAsBoolean()&&System.nanoTime()<deadline)Thread.sleep(100);check.verify(condition.getAsBoolean(),name);}
     private static void write(Instrumentation instrumentation,JSONObject state) throws Exception {Files.write(new java.io.File(instrumentation.getTargetContext().getFilesDir(),"vyrn-test-chat-state.json").toPath(),state.toString().getBytes(StandardCharsets.UTF_8));}
 }
