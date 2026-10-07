@@ -1,5 +1,13 @@
 # Verification report
 
+## Native menu and composer edit passes — 2026-10-08
+
+Local/instrumentation build2m49s passes. Two independent account0 Android35 emulator clients pass108 recorded checks:30 native invite registrations,47 bidirectional foreground messaging,19 editor and12 same-process edit receiver. Report artifacts/android-two-client-editing.json, local APK SHA256428aeed1764f09479ba12b55541cb47d39c274154fe8c0848568291f3feb2b3d. Native message options/Edit/Done are used; preflight completes before editing. Both visible bubbles replace old text; REST confirms same ID/ordinal, newer revision, positive edited timestamp and exactly one changed text/no original text. No attach retry.
+
+Two product defects found by this UI scenario: missing getMessageEditData reset the editor, then generic composer submission used a request without immutable revision and was rejected. Adapter preflight now checks bound server state, and pinned composer uses the existing revision-bound text helper for normal group plain text. Other edit/media branches are unverified. Negative preflight authorization acceptance remains. Failure diagnostics record only counts and matching states, never fixture secrets.
+
+The group is a REST fixture and ChatActivity entry is programmatic. Tests use native accessibility/menu and actual View clicks, not physical coordinate touch. Delete/offline/retry/restarts, background and physical-phone acceptance remain; shared-menu-helper session regression was not rerun. Normal ARM64/ARMv7/universal Debug build3m passes; all three copied APKs verify signature/package/API26/ABI/native Signal/manifest/public TLS, local CA absent. ARM64 SHA256a1dd82d5539abfe70d5c5d11ce6c3097c57de0b7e0dff5b691d886c94f5fa6ee; artifacts/apk-verification.json written after all three APK timestamps. Build/test/verification helpers terminal. No release signing or physical installation.
+
 ## Native foreground send/receive passes — 2026-10-08
 
 Final ARM64/ARMv7/universal Debug rebuild2m47s and all three signature/package/API/ABI/native Signal/manifest/public TLS checks pass; local CA absent. ARM64 SHA256b95d2324c14af10f88ff4cc06db07a5dd55b42c90a66342e05ef1e65ef38c70c; artifacts/apk-verification.json. No physical installation/release signing evidence.

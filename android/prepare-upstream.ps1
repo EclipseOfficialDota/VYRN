@@ -473,7 +473,16 @@ Edit 'TMessagesProj/src/main/java/org/telegram/ui/Components/ChatActivityEnterVi
  $t=(& git -c "safe.directory=$($upstream.Replace('\','/'))" -C $upstream show "${pin}:TMessagesProj/src/main/java/org/telegram/ui/Components/ChatActivityEnterView.java") -join "`n"
  $marker='        editingMessageObject = messageObject;'
  if(!$t.Contains($marker)){throw 'Pinned composer edit marker missing'}
- $t.Replace($marker,$marker+"`n        xyz.eclipseofficial.vyrn.compat.VyrnBridge.captureEdit(currentAccount, messageObject);")
+ $t=$t.Replace($marker,$marker+"`n        xyz.eclipseofficial.vyrn.compat.VyrnBridge.captureEdit(currentAccount, messageObject);")
+ $submit='SendMessagesHelper.getInstance(currentAccount).editMessage(editingMessageObject, null, null, null, null, null, null, false, editingMessageObject.hasMediaSpoilers(), null);'
+ if(!$t.Contains($submit)){throw 'Pinned composer edit submit marker missing'}
+ $t.Replace($submit,@'
+if (dialog_id < 0 && !DialogObject.isEncryptedDialog(dialog_id) && !editingMessageObject.scheduled && (editingMessageObject.messageOwner.media == null || editingMessageObject.messageOwner.media instanceof TLRPC.TL_messageMediaEmpty)) {
+                    SendMessagesHelper.getInstance(currentAccount).editMessage(editingMessageObject, message[0].toString(), messageWebPageSearch, parentFragment, entities, 0, 0);
+                } else {
+                    SendMessagesHelper.getInstance(currentAccount).editMessage(editingMessageObject, null, null, null, null, null, null, false, editingMessageObject.hasMediaSpoilers(), null);
+                }
+'@)
 }
 Edit 'TMessagesProj/src/main/java/org/telegram/messenger/NotificationCenter.java' {
  param($t)

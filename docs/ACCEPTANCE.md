@@ -2,6 +2,8 @@
 
 Updated 2026-10-07. A route existing or a build compiling does **not** establish end-to-end completion.
 
+2026-10-08 evidence update: two independent native account0 emulators pass foreground send/receive in both directions and native message-menu/Edit/Done with a same-process recipient update. Latest report artifacts/android-two-client-editing.json has78 recorded messaging/edit checks plus30 native registrations (108 total); identity/ordinal preserved, revision increases and no duplicate/old server text. This supersedes pending foreground text edit/receipt acceptance in the older table only for this scenario. Group setup/entry is a fixture; physical touch/phones, deletion UI, offline/retry/restart UI, adversarial preflight/session races and all other remaining requirements still need verification.
+
 | Requirement | Current evidence | Remaining work |
 |---|---|---|
 | Local repository and memory | Root, main/develop/work branch, confirmed config and ignored secrets established | Keep memory current; no remote yet |

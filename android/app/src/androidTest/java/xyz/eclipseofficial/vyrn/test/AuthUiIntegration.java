@@ -28,6 +28,7 @@ final class AuthUiIntegration {
     static void sessions(Instrumentation instrumentation,Activity activity,JSONObject fixture,Check check) throws Exception {new AuthUiIntegration(instrumentation,activity,check).sessions(fixture);}
     static void sessionNetwork(Instrumentation instrumentation,Activity activity,JSONObject fixture,Check check) throws Exception {new AuthUiIntegration(instrumentation,activity,check).sessions(fixture,true);}
     static boolean handlePrompts(Instrumentation instrumentation,Activity activity,Check check){return new AuthUiIntegration(instrumentation,activity,check).systemPromptBlocks();}
+    static void clickWindow(Instrumentation instrumentation,Activity activity,String text,Check check) throws Exception {new AuthUiIntegration(instrumentation,activity,check).windowClick(text);}
     private String label(String en,String persian){return fa?persian:en;}
     private View find(View view,String value){
         if(view.getVisibility()!=View.VISIBLE)return null;
@@ -192,9 +193,22 @@ final class AuthUiIntegration {
     private boolean confirmation(int message){boolean[] matches={false};instrumentation.runOnMainSync(()->{org.telegram.ui.ActionBar.AlertDialog alert=currentDialog();matches[0]=alert!=null&&org.telegram.messenger.LocaleController.getString(message).contentEquals(alert.getMessageTextView().getText());});return matches[0];}
     private void windowClick(String text) throws Exception {
         try{await(()->windowText(text),"sessions_ui_sheet_control_visible");}catch(AssertionError failure){captureLogoutFailure();throw failure;}
-        android.view.accessibility.AccessibilityNodeInfo window=instrumentation.getUiAutomation().getRootInActiveWindow();
-        for(android.view.accessibility.AccessibilityNodeInfo node:window.findAccessibilityNodeInfosByText(text))if(text.contentEquals(node.getText()==null?"":node.getText())&&node.isEnabled()&&node.isClickable()){boolean accepted=node.performAction(android.view.accessibility.AccessibilityNodeInfo.ACTION_CLICK);if(!accepted)captureLogoutFailure();check.verify(accepted,"sessions_ui_sheet_control_clicked");return;}
-        throw new AssertionError("session_sheet_control_missing");
+        boolean accepted=nodeClick(instrumentation.getUiAutomation().getRootInActiveWindow(),text);
+        if(!accepted)captureLogoutFailure();check.verify(accepted,"sessions_ui_sheet_control_clicked");
+    }
+    private boolean nodeClick(android.view.accessibility.AccessibilityNodeInfo node,String text){
+        if(node==null)return false;
+        try{
+            if(node.isVisibleToUser()&&(text.contentEquals(node.getText()==null?"":node.getText())||text.contentEquals(node.getContentDescription()==null?"":node.getContentDescription()))){
+                android.view.accessibility.AccessibilityNodeInfo target=node;
+                while(target!=null){
+                    if(target.isEnabled()&&target.isClickable()){boolean accepted=target.performAction(android.view.accessibility.AccessibilityNodeInfo.ACTION_CLICK);if(target!=node)target.recycle();return accepted;}
+                    android.view.accessibility.AccessibilityNodeInfo parent=target.getParent();if(target!=node)target.recycle();target=parent;
+                }
+            }
+            for(int i=0;i<node.getChildCount();i++)if(nodeClick(node.getChild(i),text))return true;
+            return false;
+        }finally{node.recycle();}
     }
     private RestRepository loginSession(JSONObject fixture,int slot,String name) throws Exception {
         RestRepository other=new RestRepository(new TokenVault(instrumentation.getTargetContext(),slot));other.vault.clear();

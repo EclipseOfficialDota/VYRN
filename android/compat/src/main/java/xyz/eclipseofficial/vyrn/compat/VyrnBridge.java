@@ -680,6 +680,14 @@ public final class VyrnBridge {
             TLRPC.Peer peer;if(in.peer.chat_id!=0){TLRPC.TL_peerChat p=new TLRPC.TL_peerChat();p.chat_id=in.peer.chat_id;peer=p;}else{TLRPC.TL_peerUser p=new TLRPC.TL_peerUser();p.user_id=in.peer.user_id;peer=p;}
             TLRPC.TL_messages_messages result=new TLRPC.TL_messages_messages();for(Models.User user:repository.members(conversation))result.users.add(mapUser(user));for(Models.Message m:repository.liveMessages(conversation,before,in.limit))result.messages.add(message(m,peer));return result;
         }
+        if(request instanceof TLRPC.TL_messages_getMessageEditData){
+            TLRPC.TL_messages_getMessageEditData in=(TLRPC.TL_messages_getMessageEditData)request;
+            if(in.peer==null || in.peer.chat_id<=0 || in.id<=0)throw new UnsupportedOperationException();
+            String user=repository.vault.load().getString("user_id"),group=conversation(in.peer);
+            Models.Message value=repository.messageForUser(user,ids.remote("message",in.id));
+            if(value.deleted || value.encrypted || !user.equals(value.sender) || !group.equals(value.conversation))throw new SecurityException("message_not_editable");
+            return new TLRPC.TL_messages_messageEditData();
+        }
         if(request instanceof TLRPC.TL_messages_setTyping){TLRPC.TL_messages_setTyping in=(TLRPC.TL_messages_setTyping)request;repository.request("POST","/v1/conversations/"+conversation(in.peer)+"/typing",new JSONObject(),true);return new TLRPC.TL_boolTrue();}
         if(request instanceof TLRPC.TL_updates_getState){TLRPC.TL_updates_state state=new TLRPC.TL_updates_state();state.date=(int)(System.currentTimeMillis()/1000);return state;}
         if(request instanceof TLRPC.TL_contacts_getContacts){TLRPC.TL_contacts_contacts contacts=new TLRPC.TL_contacts_contacts();return contacts;}

@@ -1,5 +1,11 @@
 # Local Android integration
 
+## Native edit on two clients — 2026-10-08
+
+Run `scripts/test-two-client-messaging.ps1 -Edit` after a local-TLS x86_64 instrumentation build. Uses distinct native account0 registrations, creates a REST group fixture and enters ChatActivity programmatically. Baseline foreground send/receive runs both directions; editor invokes actual message options accessibility action, native Edit menu, waits for preflight, changes native field and clicks Done. Receiver observes the edited bubble in the same live process. Both assert old bubble absent and unchanged server ID/ordinal with a newer revision/edited timestamp, no duplicate or old server text.
+
+Final pass:108 recorded checks (registration30 + messaging47 + edit31), local APK SHA256428aeed1764f09479ba12b55541cb47d39c274154fe8c0848568291f3feb2b3d; artifacts/android-two-client-editing.json. Local build2m49s. Reports remain separate from baseline messaging. Native composer previously called a different generic edit overload than the existing tested revision-bound helper; preparation now routes plain nonscheduled group-text edits to that helper. getMessageEditData handling also added. Counts-only failure diagnostics remain ignored/private. This is emulator UI evidence, not physical touch, phones, deletion/offline/restarts or general edit authorization/unsupported-media acceptance.
+
 ## Both foreground delivery directions pass — 2026-10-08
 
 `scripts/test-two-client-messaging.ps1` now passes47 messaging checks plus30 native registration checks on two independent account0 Android35 clients. APK SHA256529a80304327625bf273cab604c76a245454907af3744920bb4ed6bea4072932; report artifacts/android-two-client-messaging.json. This supersedes the earlier sender-bubble failure below for the tested foreground scenario.

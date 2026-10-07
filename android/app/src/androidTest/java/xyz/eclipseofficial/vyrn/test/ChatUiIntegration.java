@@ -45,6 +45,7 @@ final class ChatUiIntegration {
         await(()->{if(AuthUiIntegration.handlePrompts(instrumentation,activity,check))return false;boolean[] ready={false};instrumentation.runOnMainSync(()->ready[0]=LaunchActivity.getLastFragment() instanceof ChatActivity&&!LaunchActivity.getLastFragment().getParentLayout().isTransitionAnimationInProgress());return ready[0];},check,"chat_native_screen_ready");
         instrumentation.runOnMainSync(()->check.verify(org.telegram.messenger.ChatObject.canSendPlain(MessagesController.getInstance(account).getChat(local)),"chat_member_can_send_plain"));
         await(()->{boolean[] ready={false};instrumentation.runOnMainSync(()->{try{java.lang.reflect.Field field=ChatActivity.class.getDeclaredField("firstLoading");field.setAccessible(true);ready[0]=!field.getBoolean(LaunchActivity.getLastFragment());}catch(Exception failure){throw new AssertionError("chat_loading_state_unavailable");}});return ready[0];},check,"chat_initial_history_complete");
+        if(phase.equals("chat-edit")||phase.equals("chat-watch-edit")){edit(instrumentation,activity,fixture,repository,phase.equals("chat-edit"),check);return;}
         if(phase.equals("chat-receive"))write(instrumentation,new JSONObject().put("ready",true));
         if(phase.equals("chat-send")){
             ChatActivityEnterView[] composer={null};
@@ -72,6 +73,40 @@ final class ChatUiIntegration {
         if(view instanceof ChatMessageCell){org.telegram.messenger.MessageObject message=((ChatMessageCell)view).getMessageObject();Rect visible=new Rect();if(message!=null&&text.equals(message.messageOwner.message)&&message.isOutOwner()==outgoing&&message.messageOwner.send_state==0&&message.getId()>0&&view.getGlobalVisibleRect(visible))return true;}
         if(view instanceof ViewGroup)for(int i=0;i<((ViewGroup)view).getChildCount();i++)if(bubble(((ViewGroup)view).getChildAt(i),text,outgoing))return true;
         return false;
+    }
+    private static ChatMessageCell cell(View view,String text){
+        if(!view.isShown())return null;
+        if(view instanceof ChatMessageCell){org.telegram.messenger.MessageObject message=((ChatMessageCell)view).getMessageObject();if(message!=null&&text.equals(message.messageOwner.message))return (ChatMessageCell)view;}
+        if(view instanceof ViewGroup)for(int i=0;i<((ViewGroup)view).getChildCount();i++){ChatMessageCell found=cell(((ViewGroup)view).getChildAt(i),text);if(found!=null)return found;}
+        return null;
+    }
+    private static ChatActivityEnterView composer(){try{java.lang.reflect.Field field=ChatActivity.class.getDeclaredField("chatActivityEnterView");field.setAccessible(true);return (ChatActivityEnterView)field.get(LaunchActivity.getLastFragment());}catch(Exception failure){throw new AssertionError("composer_unavailable");}}
+    private static void edit(Instrumentation instrumentation,Activity activity,JSONObject fixture,RestRepository repository,boolean sender,AuthUiIntegration.Check check) throws Exception {
+        String group=fixture.getString("group"),old=fixture.getString("text"),edited=fixture.getString("edited_text");View root=activity.getWindow().getDecorView();
+        await(()->{boolean[] shown={false};instrumentation.runOnMainSync(()->shown[0]=bubble(root,old,sender));return shown[0];},check,"edit_original_visible");
+        java.util.List<xyz.eclipseofficial.vyrn.domain.Models.Message> before=repository.liveMessages(group,null,100);xyz.eclipseofficial.vyrn.domain.Models.Message original=before.stream().filter(message->old.equals(message.text)).findFirst().orElseThrow(AssertionError::new);
+        check.verify(before.stream().filter(message->old.equals(message.text)).count()==1,"edit_original_unique");
+        if(sender){
+            instrumentation.runOnMainSync(()->cell(root,old).performAccessibilityAction(org.telegram.messenger.R.id.acc_action_msg_options,new Bundle()));
+            AuthUiIntegration.clickWindow(instrumentation,activity,org.telegram.messenger.LocaleController.getString(org.telegram.messenger.R.string.Edit),check);
+            await(()->{boolean[] editing={false};instrumentation.runOnMainSync(()->editing[0]=composer().getEditingMessageObject()!=null&&old.contentEquals(composer().getEditField().getText()));return editing[0];},check,"edit_native_editor_loaded_original");
+            await(()->{boolean[] ready={false};instrumentation.runOnMainSync(()->{try{java.lang.reflect.Field field=ChatActivity.class.getDeclaredField("editingMessageObjectReqId");field.setAccessible(true);ready[0]=field.getInt(LaunchActivity.getLastFragment())==0&&composer().getEditingMessageObject()!=null;}catch(Exception failure){throw new AssertionError("edit_preflight_state_unavailable");}});return ready[0];},check,"edit_native_preflight_complete");
+            instrumentation.runOnMainSync(()->composer().getEditField().setText(edited));
+            View[] done={null};instrumentation.runOnMainSync(()->{try{java.lang.reflect.Field field=ChatActivityEnterView.class.getDeclaredField("doneButton");field.setAccessible(true);done[0]=(View)field.get(composer());}catch(Exception failure){throw new AssertionError("edit_done_unavailable");}});
+            await(()->{boolean[] ready={false};instrumentation.runOnMainSync(()->ready[0]=done[0].isShown()&&done[0].isEnabled());return ready[0];},check,"edit_native_done_visible");
+            instrumentation.runOnMainSync(()->check.verify(done[0].performClick(),"edit_native_done_clicked"));
+            await(()->{boolean[] finished={false};instrumentation.runOnMainSync(()->finished[0]=composer().getEditingMessageObject()==null);return finished[0];},check,"edit_native_editor_closed");
+        }else{write(instrumentation,new JSONObject().put("ready",true));}
+        try{await(()->{boolean[] changed={false};instrumentation.runOnMainSync(()->changed[0]=bubble(root,edited,sender)&&!bubble(root,old,sender));return changed[0];},check,sender?"edit_sender_new_bubble":"edit_receiver_new_bubble_same_process");}
+        catch(AssertionError failure){
+            int[] counts={0,0,0};instrumentation.runOnMainSync(()->{ChatActivity chat=(ChatActivity)LaunchActivity.getLastFragment();counts[0]=chat.messages.size();for(org.telegram.messenger.MessageObject message:chat.messages){if(old.equals(message.messageOwner.message))counts[1]++;if(edited.equals(message.messageOwner.message))counts[2]++;}});
+            JSONObject state=new JSONObject().put("native_messages",counts[0]).put("native_old_matches",counts[1]).put("native_edited_matches",counts[2]);
+            try{java.util.List<xyz.eclipseofficial.vyrn.domain.Models.Message> live=repository.liveMessages(group,null,100);state.put("server_old_matches",live.stream().filter(message->old.equals(message.text)).count()).put("server_edited_matches",live.stream().filter(message->edited.equals(message.text)).count());}catch(Exception unavailable){state.put("server_probe","unavailable");}
+            write(instrumentation,state);throw failure;
+        }
+        java.util.List<xyz.eclipseofficial.vyrn.domain.Models.Message> after=repository.liveMessages(group,null,100);xyz.eclipseofficial.vyrn.domain.Models.Message changed=after.stream().filter(message->edited.equals(message.text)).findFirst().orElseThrow(AssertionError::new);
+        check.verify(changed.id.equals(original.id)&&changed.ordinal==original.ordinal&&changed.revision>original.revision&&changed.editedDate>0,"edit_same_message_identity_new_revision");
+        check.verify(after.stream().filter(message->edited.equals(message.text)).count()==1&&after.stream().noneMatch(message->old.equals(message.text)),"edit_no_duplicate_or_old_server_text");
     }
     private static void await(BooleanSupplier condition,AuthUiIntegration.Check check,String name) throws Exception {long deadline=System.nanoTime()+java.util.concurrent.TimeUnit.SECONDS.toNanos(40);while(!condition.getAsBoolean()&&System.nanoTime()<deadline)Thread.sleep(100);check.verify(condition.getAsBoolean(),name);}
     private static void write(Instrumentation instrumentation,JSONObject state) throws Exception {Files.write(new java.io.File(instrumentation.getTargetContext().getFilesDir(),"vyrn-test-chat-state.json").toPath(),state.toString().getBytes(StandardCharsets.UTF_8));}
