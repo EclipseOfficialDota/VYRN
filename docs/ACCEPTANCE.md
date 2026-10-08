@@ -1,6 +1,8 @@
 # Acceptance matrix
 
-Updated 2026-10-07. A route existing or a build compiling does **not** establish end-to-end completion.
+Updated 2026-10-08. A route existing or a build compiling does **not** establish end-to-end completion.
+
+2026-10-08 verified ManualRetry update: artifacts/android-two-client-manual-retry.json passes301 recorded checks, including real eight-attempt network exhaustion, cold failed-message/native identity persistence, native Retry on the original durable queue ID, SENT/server-ID agreement, exactly one native/server message and confirmed cold reopen. Fixed normal-group history losing the persisted random ID on reopen. This supersedes the manual-retry-pending statements below for this foreground emulator fixture only. Unknown/lost acknowledgements, mid-mutation interruption, physical devices and the other full-goal requirements remain incomplete.
 
 2026-10-08 manual-retry update: real failed-send/cold-failed-reopen/native Retry assertions compile, but the full scenario did not reach Retry because peer ADB/console stopped responding during deletion; peer remains offline with process present. Bounded host stdin/timeout helpers verified. Manual retry and unknown-send/interrupted-mutation acceptance remain unproven; older236-check foreground/offline success does not cover them.
 

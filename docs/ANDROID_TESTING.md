@@ -1,10 +1,20 @@
 # Local Android integration
 
+## Verified native Retry after failed cold reopen — 2026-10-08
+
+`./scripts/test-two-client-messaging.ps1 -ManualRetry` now passes301 recorded checks (registration30 + messaging/lifecycle271), saved in artifacts/android-two-client-manual-retry.json. Local APK SHA2564bfd095e15efab8bbbf5d741d2a45df05aa3fe8550b24f64596e6494485fc025. The first recovered run exposed a real identity regression: normal-group history discarded the persisted native random ID, so Retry delivered under a new queue client ID. The pinned-source overlay restores that ID for negative group messages. Both cold pending/failed reopens now verify the native ID derives the original account-bound client ID; native Retry confirms the original row SENT, matching server identity, one native/server message and cold confirmed reopen. Physical phones, lost acknowledgements/mid-mutation interruption and broader E2EE/background/media/release scope remain separate requirements.
+
+## Alternate runtime and bounded SDK probes — 2026-10-08
+
+The peer's persistent unresponsive shell/console was recovered by stopping only its verified host process and preserving guest data. A subsequent Canary37.3.2 swangle cold launch really crashed with0xC0000005 (monitored launcher plus Windows Application Event1000, unknown module). Do not infer this root cause from earlier timeout-only observations.
+
+The official Stable37.2.12 Windows archive is verified and extracted separately in ignored .tools/android-emulator-37.2.12. Launch the existing peer with `./scripts/start-emulator.ps1 -Serial emulator-5562 -GpuMode host -ColdBoot -Monitor -EmulatorPath ./.tools/android-emulator-37.2.12/emulator/emulator.exe`. The selected runtime uses the existing SDK images and isolated AVD data; it does not replace the primary runtime. ColdBoot disables snapshot loading and does not wipe data. Starter uses shared bounded SDK probes and rejects unknown emulator identities. A boot observation timeout leaves the owned emulator running; recheck that process before recovery. `./scripts/test-android-test-tools.ps1` verifies stdin, exit propagation and bounded helper termination without a device. The successful301-check ManualRetry report above establishes this fixture only.
+
 ## Real failed-send and native Retry scenario — 2026-10-08
 
 `scripts/test-two-client-messaging.ps1 -ManualRetry` includes the previous offline lifecycle, then holds the dedicated proxy offline until real eight-attempt retry exhaustion. Native Send must become an error bubble, journal must be FAILED with8 attempts, cold offline reopen must preserve the same failed bubble/client ID. Restore proxy, start receiving client, open native failed-message menu/Retry and require original queue row SENT plus one native/server message, matching server identity and confirmed cold reopen. Failed-send runner gets300s host bound/200s native exhaustion bound; other phases retain normal bounds. No injected failure or shorter production retry settings.
 
-Build51s passes; scenario remains unverified because peer ADB/control became unresponsive during earlier deletion. Bounded helper regressions (real stdin and real timeout) pass; no success report for ManualRetry. Current peer remains offline with qemu process present; preserve guest data and diagnose before rerun. Exact owned test helpers were stopped, primary reverse restored/fixtures cleaned, proxy retained. Do not reuse older logs/report as evidence for the new scenario.
+Historical failed attempt: build51s passed, but peer ADB/control became unresponsive during earlier deletion, before manual Retry. Bounded helper regressions (real stdin and real timeout) passed; no success report existed then. This is superseded by the recovery and301-check result above; do not reuse those older logs as evidence for the corrected scenario.
 
 ## Offline queued send and recovery — 2026-10-08
 

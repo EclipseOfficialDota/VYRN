@@ -100,7 +100,11 @@ final class ChatUiIntegration {
             await(()->{try(android.database.Cursor cursor=store.getReadableDatabase().rawQuery("SELECT count(*) FROM outbox WHERE user_id=? AND conversation_id=? AND body=?",new String[]{user,group,text})){return cursor.moveToFirst()&&cursor.getInt(0)==1;}},check,"offline_pending_persisted");
             String client;try(android.database.Cursor cursor=store.getReadableDatabase().rawQuery("SELECT client_id FROM outbox WHERE user_id=? AND conversation_id=? AND body=?",new String[]{user,group,text})){check.verify(cursor.getCount()==1&&cursor.moveToFirst(),"offline_exactly_one_durable_queue_entry");client=cursor.getString(0);}
             xyz.eclipseofficial.vyrn.data.OutboxStore.Entry entry=store.get(user,client);check.verify(failed?entry.state==xyz.eclipseofficial.vyrn.data.OutboxStore.FAILED&&entry.attempts==8:entry.state==xyz.eclipseofficial.vyrn.data.OutboxStore.QUEUED||entry.state==xyz.eclipseofficial.vyrn.data.OutboxStore.SENDING,failed?"retry_queue_failed_after_eight_attempts":"offline_queue_retryable_not_sent");
-            if(reopen)check.verify(client.equals(fixture.getString("client_id")),"offline_restart_keeps_same_client_id");
+            if(reopen){
+                check.verify(client.equals(fixture.getString("client_id")),"offline_restart_keeps_same_client_id");
+                long[] random={0};instrumentation.runOnMainSync(()->random[0]=cell(activity.getWindow().getDecorView(),text).getMessageObject().messageOwner.random_id);
+                check.verify(random[0]!=0&&client.equals(java.util.UUID.nameUUIDFromBytes((user+":"+random[0]).getBytes(StandardCharsets.UTF_8)).toString()),"offline_native_retry_identity_survives_process_restart");
+            }
             write(instrumentation,new JSONObject().put("client_id",client).put("pending",true));
         }
     }
