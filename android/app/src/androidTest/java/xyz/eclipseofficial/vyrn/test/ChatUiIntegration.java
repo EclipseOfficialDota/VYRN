@@ -30,6 +30,20 @@ final class ChatUiIntegration {
         RestRepository repository=new RestRepository(new TokenVault(instrumentation.getTargetContext(),account));
         boolean offlineReopen=phase.equals("chat-offline-reopen")||phase.equals("chat-failed-reopen");
         String user=offlineReopen?repository.vault.load().getString("user_id"):repository.me().id;
+        if(phase.equals("chat-key-readiness")){
+            java.util.concurrent.CompletableFuture<org.telegram.tgnet.TLObject> dialogs=new java.util.concurrent.CompletableFuture<>();
+            org.telegram.tgnet.ConnectionsManager.getInstance(account).sendRequest(new org.telegram.tgnet.TLRPC.TL_messages_getDialogs(),(value,error)->{if(error!=null)dialogs.completeExceptionally(new AssertionError());else dialogs.complete(value);});
+            check.verify(dialogs.get(30,java.util.concurrent.TimeUnit.SECONDS) instanceof org.telegram.tgnet.TLRPC.TL_messages_dialogs,"private_keys_native_dialog_load");
+            xyz.eclipseofficial.vyrn.compat.VyrnBridge bridge=xyz.eclipseofficial.vyrn.compat.VyrnBridge.forAccount(account);
+            await(bridge::privateKeysReady,check,"private_keys_automatic_dialog_publication");
+            bridge.preparePrivateKeys().get(60,java.util.concurrent.TimeUnit.SECONDS);
+            check.verify(bridge.privateKeysReady(),"private_keys_native_session_ready");
+            try(xyz.eclipseofficial.vyrn.data.SignalDeviceKeys keys=new xyz.eclipseofficial.vyrn.data.SignalDeviceKeys(instrumentation.getTargetContext(),repository)){
+                String address=keys.ensurePublished().getName();check.verify(user.equals(keys.user)&&!keys.device.equals(address),"private_keys_authenticated_device_identity");
+                if(fixture.has("key_address"))check.verify(address.equals(fixture.getString("key_address")),"private_keys_cold_restart_same_publication");
+                write(instrumentation,new JSONObject().put("user",keys.user).put("key_device",keys.device).put("key_address",address));
+            }return;
+        }
         if(phase.equals("chat-identity")){write(instrumentation,new JSONObject().put("user",user));return;}
         if(phase.equals("chat-create")){
             String peer=fixture.getString("peer_user");check.verify(!user.equals(peer),"chat_distinct_accounts");

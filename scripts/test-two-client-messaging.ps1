@@ -1,5 +1,5 @@
 # Native foreground send/edit/delete and optional offline queue/recovery. Physical-phone acceptance remains separate.
-param([switch]$Edit,[switch]$Delete,[switch]$Offline,[switch]$ManualRetry,[switch]$LostAck,[switch]$MutationRestart)
+param([switch]$Edit,[switch]$Delete,[switch]$Offline,[switch]$ManualRetry,[switch]$LostAck,[switch]$MutationRestart,[switch]$PrivateKeys)
 if($MutationRestart){$LostAck=$true}
 if($ManualRetry -or $LostAck){$Offline=$true}
 $ErrorActionPreference='Stop'
@@ -117,6 +117,20 @@ try{
     $users=@{}
     foreach($serial in @('emulator-5560','emulator-5562')){Write-Fixture $serial @{};$rounds+=Finish-Phase (Start-Phase $serial 'chat-identity');$users[$serial]=(Read-State $serial).user}
     if(!$users['emulator-5560'] -or !$users['emulator-5562'] -or $users['emulator-5560'] -eq $users['emulator-5562']){throw 'Two distinct authenticated users required'}
+    if($PrivateKeys){
+        $publications=@{}
+        foreach($serial in @('emulator-5560','emulator-5562')){
+            Write-Fixture $serial @{};$rounds+=Finish-Phase (Start-Phase $serial 'chat-key-readiness');$publication=Read-State $serial
+            if($publication.user -ne $users[$serial] -or !$publication.key_device -or !$publication.key_address){throw 'Authenticated key publication evidence missing'}
+            $publications[$serial]=$publication
+        }
+        if($publications['emulator-5560'].key_device -eq $publications['emulator-5562'].key_device -or $publications['emulator-5560'].key_address -eq $publications['emulator-5562'].key_address){throw 'Independent device keys required'}
+        foreach($serial in @('emulator-5560','emulator-5562')){
+            Write-Fixture $serial @{key_address=$publications[$serial].key_address};$rounds+=Finish-Phase (Start-Phase $serial 'chat-key-readiness');$reopened=Read-State $serial
+            if($reopened.user -ne $users[$serial] -or $reopened.key_device -ne $publications[$serial].key_device){throw 'Key publication changed authenticated device on restart'}
+        }
+        $rounds+=@{phase='key-publication-host';result='passed';checks=@('independent_authenticated_publications','both_cold_reopens_preserve_device')}
+    }
     $title='Native two-client '+[guid]::NewGuid().ToString('N')
     Write-Fixture 'emulator-5560' @{peer_user=$users['emulator-5562'];title=$title};$rounds+=Finish-Phase (Start-Phase 'emulator-5560' 'chat-create');$group=(Read-State 'emulator-5560').group
     if(!$group){throw 'Shared group fixture missing'}
@@ -196,7 +210,7 @@ try{
         }
     }
     $registration=Get-Content (Join-Path $root 'artifacts/android-two-client-registration.json') -Raw | ConvertFrom-Json
-    $report=if($MutationRestart){'artifacts/android-two-client-mutation-restart.json'}elseif($LostAck){'artifacts/android-two-client-lost-ack.json'}elseif($ManualRetry){'artifacts/android-two-client-manual-retry.json'}elseif($Offline){'artifacts/android-two-client-offline.json'}elseif($Delete){'artifacts/android-two-client-deletion.json'}elseif($Edit){'artifacts/android-two-client-editing.json'}else{'artifacts/android-two-client-messaging.json'}
+    $report=if($PrivateKeys){'artifacts/android-two-client-private-keys.json'}elseif($MutationRestart){'artifacts/android-two-client-mutation-restart.json'}elseif($LostAck){'artifacts/android-two-client-lost-ack.json'}elseif($ManualRetry){'artifacts/android-two-client-manual-retry.json'}elseif($Offline){'artifacts/android-two-client-offline.json'}elseif($Delete){'artifacts/android-two-client-deletion.json'}elseif($Edit){'artifacts/android-two-client-editing.json'}else{'artifacts/android-two-client-messaging.json'}
     $scope='Native button-click send and visible confirmed bubbles in both directions while both clients are foreground; REST group fixture, programmatic chat entry'
     if($Edit -or $Delete -or $Offline){$scope+='; native message menu/Edit/Done, same-process receiver edit, same server identity/ordinal with newer revision and no duplicate'}
     if($Delete -or $Offline){$scope+='; native shared deletion confirmation/cancellation, receiver removal and both cold app reopens without resurrection'}
@@ -204,6 +218,7 @@ try{
     if($ManualRetry){$scope+='; real eight-attempt network failure, failed bubble after offline cold reopen, native Retry menu, original queue ID delivered once and confirmed cold reopen'}
     if($LostAck){$scope+='; successful upstream send response held, explicit app force-stop before acknowledgement, original durable client ID reconciles to the pre-restart server ID, one native/server message and confirmed cold reopen'}
     if($MutationRestart){$scope+='; native Edit/Done and shared Delete committed upstream with responses held, explicit in-flight app interruption, edited identity/revision after both app restarts and repeated deleted-history reopens without resurrection'}
+    if($PrivateKeys){$scope+='; native dialog loading prepares authenticated per-device public keys, independent device addresses and unchanged publications after both cold reopens; private messaging UI remains gated'}
     @{date=[DateTimeOffset]::UtcNow.ToString('o');result='passed';apk_sha256=$registration.devices[0].apk_sha256;devices=$registration.devices;rounds=$rounds;scope=$scope;edit_ui=[bool]($Edit -or $Delete -or $Offline);delete_ui=[bool]($Delete -or $Offline);delete_process_restart=[bool]($Delete -or $Offline);offline_automatic_retry=[bool]$Offline;manual_retry_ui=[bool]$ManualRetry;lost_ack_process_restart=[bool]$LostAck;mutation_process_restart=[bool]$MutationRestart;physical_devices='not tested'} | ConvertTo-Json -Depth 7 | Set-Content (Join-Path $root $report) -Encoding utf8
     Write-Output ('PASS: native composer send and foreground receipt on two independent clients.'+$(if($Edit -or $Delete -or $Offline){' Native edit and receiver update also passed.'})+$(if($Delete -or $Offline){' Shared deletion, cancellation and both cold reopens passed.'})+$(if($Offline){' Offline queue and automatic recovery passed.'}))
 }finally{

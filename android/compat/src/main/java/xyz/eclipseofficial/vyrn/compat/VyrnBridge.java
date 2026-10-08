@@ -34,6 +34,7 @@ import xyz.eclipseofficial.vyrn.data.TokenVault;
 import xyz.eclipseofficial.vyrn.data.OutboxSender;
 import xyz.eclipseofficial.vyrn.data.OutboxStore;
 import xyz.eclipseofficial.vyrn.data.RealtimeSync;
+import xyz.eclipseofficial.vyrn.data.SignalDeviceKeys;
 import xyz.eclipseofficial.vyrn.domain.Models;
 
 /** The only adapter allowed to depend on both Telegram wire-shaped UI models and VYRN domain models. */
@@ -156,8 +157,28 @@ public final class VyrnBridge {
     private final RealtimeSync realtime;
     private final int account;
     private final AtomicBoolean uiReconciling=new AtomicBoolean();
+    private java.util.concurrent.CompletableFuture<Void> privateKeysPreparation;
+    private volatile String privateKeysSession;
+    private volatile long privateKeysOwner;
     private final Map<Long,String> privateConversations=new HashMap<>();
     private VyrnBridge(int account){this.account=account;repository=new RestRepository(new TokenVault(ApplicationLoader.applicationContext,account));ids=new IdMap(ApplicationLoader.applicationContext,account);outbox=new OutboxSender(ApplicationLoader.applicationContext,account,repository);realtime=new RealtimeSync(ApplicationLoader.applicationContext,account,repository,this::applyEvent);outbox.setUiListener(this::resolveUi);}
+    public boolean privateKeysReady(){return privateKeysOwner!=0&&privateKeysOwner==UserConfig.getInstance(account).getClientUserId()&&privateKeysSession!=null&&privateKeysSession.equals(repository.vault.cachedSession());}
+    public synchronized java.util.concurrent.CompletableFuture<Void> preparePrivateKeys(){
+        if(privateKeysReady())return java.util.concurrent.CompletableFuture.completedFuture(null);
+        if(privateKeysPreparation!=null&&!privateKeysPreparation.isDone())return privateKeysPreparation;
+        final long owner=UserConfig.getInstance(account).getClientUserId();final String session=repository.vault.cachedSession();
+        privateKeysPreparation=java.util.concurrent.CompletableFuture.runAsync(()->{
+            try{
+                if(owner==0||session==null)throw new SecurityException("signal_native_session_missing");
+                try(SignalDeviceKeys keys=new SignalDeviceKeys(ApplicationLoader.applicationContext,repository)){
+                    if(ids.local("user",keys.user)!=owner)throw new SecurityException("signal_native_owner_changed");
+                    keys.ensurePublished();
+                    if(UserConfig.getInstance(account).getClientUserId()!=owner||!session.equals(repository.vault.cachedSession()))throw new SecurityException("signal_native_session_changed");
+                    privateKeysOwner=owner;privateKeysSession=session;
+                }
+            }catch(Exception failure){throw new java.util.concurrent.CompletionException(failure);}
+        },IO);return privateKeysPreparation;
+    }
     /** Group text cancellation owns local removal; other message kinds retain their existing flow. */
     public static boolean cancelSendingMessages(int account,ArrayList<MessageObject> objects){
         ArrayList<MessageObject> other=new ArrayList<>();boolean handled=false;
@@ -516,6 +537,8 @@ public final class VyrnBridge {
         return dialogs(null);
     }
     private TLRPC.TL_messages_dialogs dialogs(java.util.Set<Long> requested) throws Exception {
+        // Ready devices are needed before a peer can encrypt a first message; sending stays gated until UI integration.
+        preparePrivateKeys();
         TLRPC.TL_messages_dialogs result=new TLRPC.TL_messages_dialogs();
         for(Models.Conversation c:repository.conversations()){
             if(requested!=null && (!c.kind.equals("group") || !requested.contains(-(long)ids.local("conversation",c.id))))continue;

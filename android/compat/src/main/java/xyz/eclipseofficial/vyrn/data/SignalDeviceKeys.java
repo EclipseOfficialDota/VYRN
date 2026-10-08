@@ -52,6 +52,22 @@ public final class SignalDeviceKeys implements AutoCloseable {
         if(!recipient.equals(response.getString("user_id")))throw new SecurityException("signal_roster_mismatch");
         return response.getJSONArray("devices");
     }
+    /** Replay initial publication only when its durable acknowledgement is missing. Never replace an existing generation. */
+    public SignalProtocolAddress ensurePublished() throws Exception {synchronized(guard()){
+        requireSession();
+        if(store.loadValue("keys","acknowledged")==null)publishInitial();
+        JSONObject local=acknowledged();JSONArray roster=devices(user);
+        if(roster.length()<1||roster.length()>3)throw new SecurityException("invalid_signal_roster");
+        ClaimedKey own=null;
+        for(int i=0;i<roster.length();i++){
+            JSONObject item=roster.getJSONObject(i);
+            if(!device.equals(item.getString("device_id")))continue;
+            if(own!=null||item.get("ready")!=Boolean.TRUE)throw new SecurityException("signal_local_publication_changed");
+            own=parseClaim(new JSONObject(item.toString()).put("user_id",user).put("prekey",JSONObject.NULL),user,device,integer(item,"version"));
+        }
+        if(own==null||!own.address.getName().equals(local.getString("signal_address_id"))||own.version!=integer(local,"version")||!own.bundle.getIdentityKey().equals(store.getIdentityKeyPair().getPublicKey())||own.bundle.getRegistrationId()!=store.getLocalRegistrationId())throw new SecurityException("signal_local_publication_changed");
+        return own.address;
+    }}
     public ClaimedKey claim(String recipient,String recipientDevice,int version) throws Exception {
         id(recipient);id(recipientDevice);if(version<1)throw new IllegalArgumentException("invalid_signal_version");
         JSONObject response=(JSONObject)request("POST","/v1/users/"+recipient+"/device-keys/"+recipientDevice+"/claim",new JSONObject().put("expected_version",version));

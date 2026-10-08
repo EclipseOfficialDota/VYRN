@@ -26,6 +26,16 @@ $sdkProperty='sdk.dir='+$env:ANDROID_HOME.Replace('\','/')
 $task=':VyrnApp:assemble'+[char]::ToUpper($Flavor[0])+$Flavor.Substring(1)+[char]::ToUpper($BuildType[0])+$BuildType.Substring(1)
 $tasks=@($task)
 if($Instrumentation){$tasks+=':VyrnApp:assembleDevDebugAndroidTest'}
+# Recreate APK containers: incremental ZIP updates can retain hundreds of MB of deleted native-library data.
+$variant=[string]$Flavor+[char]::ToUpper($BuildType[0])+$BuildType.Substring(1)
+$buildRoot=[IO.Path]::GetFullPath((Join-Path $root 'android/app/build'))+[IO.Path]::DirectorySeparatorChar
+$packageOutputs=@("intermediates/incremental/package$([char]::ToUpper($variant[0]))$($variant.Substring(1))","outputs/apk/$Flavor/$BuildType")
+if($Instrumentation){$packageOutputs+=@('intermediates/incremental/packageDevDebugAndroidTest','outputs/apk/androidTest/dev/debug')}
+foreach($relative in $packageOutputs){
+    $target=[IO.Path]::GetFullPath((Join-Path $buildRoot $relative))
+    if(!$target.StartsWith($buildRoot,[StringComparison]::OrdinalIgnoreCase)){throw 'APK packaging cleanup escaped the build directory'}
+    if(Test-Path -LiteralPath $target){Remove-Item -LiteralPath $target -Recurse -Force}
+}
 Push-Location (Join-Path $root 'android/upstream')
 try {
     $log=Join-Path $root '.local/android-build.log'

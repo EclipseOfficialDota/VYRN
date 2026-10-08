@@ -1,5 +1,13 @@
 # Local Android integration
 
+## Compact Debug packaging and device-key readiness — 2026-10-08
+
+The app module pins the same NDK27.2.12479018 as the native library module, allowing AGP to strip debug symbols. Exclude only libsignal_jni_testing.so from JNI packaging; retain libsignal_jni.so and libtmessages.49.so. The build wrapper recreates only the selected variant's APK output and incremental packaging cache, with validated paths inside android/app/build. This prevents deleted ZIP content from leaving hundreds of MB of unused archive space. Normal APK verification rejects test-only JNI and single-architecture files above250,000,000 bytes.
+
+Run scripts/build-android.ps1 -Abis arm64-v8a,armeabi-v7a, then scripts/verify-apks.ps1. Fresh normal Debug artifacts:ARM64 122,428,217 bytes, ARMv7 108,141,523 bytes, universal 158,653,634 bytes. No local CA; no release-signing claim. After the same fresh local x86 build, scripts/test-signal.ps1 -Network passes64 checks (58 network+6 real process restart), APK SHA256d9265fc63d0ec059b43a9a1cd6abe88270496764b1ddaeef7e10bb71a01c8349. This verifies actual HTTPS/JNI encryption and decryption after stripping and removal of test JNI; physical ARM testing remains separate.
+
+scripts/test-two-client-messaging.ps1 -PrivateKeys -Offline adds automatic native-dialog key publication to existing independent registration and foreground/offline messaging. Each authenticated installation must publish its own distinct device/address, then preserve that publication on cold app entry. The phase waits for automatic preparation before calling the idempotent helper; an explicit helper call cannot conceal a missing native trigger. Private send UI remains gated. These are emulator checks, not proof of full private chat or physical-device completion.
+
 ## Native mutations interrupted before acknowledgement — 2026-10-08
 
 Run `./scripts/test-two-client-messaging.ps1 -MutationRestart` after local x86 instrumentation build. It includes -LostAck/-Offline, then sends/caches a fresh message on both native clients, captures owned/live server identity, presses native Edit/Done and shared Delete cancel/confirm, holds successful upstream acknowledgements and force-stops the actor before10s. Both cold histories verify edited identity/revision/uniqueness and repeatedly verify deletion without resurrection. Existing fault helper accepts -operation send/edit/delete and selected -message UUID for mutations; existing local CA checks remain active. No new dependency or production policy change.

@@ -1,5 +1,11 @@
 # Verification report
 
+## Compact Debug APK and automatic device publication — 2026-10-08
+
+Fresh normal Debug builds pass signature/package/API/ABI/native Signal/TLS-policy verification: ARM64 122,428,217 bytes, ARMv7 108,141,523 bytes, universal158,653,634 bytes. App NDK pin enables native-symbol stripping; testing JNI excluded. Initial incremental archives still occupied692 MB despite121 MB payload; build wrapper now recreates bounded variant packaging outputs, removing unused ZIP data. scripts/verify-apks.ps1 rejects testing JNI and per-ABI artifacts above250 MB. ARM64 reduction82.3%; APKs remain Debug and physical ARM installation is unverified.
+
+Fresh compact local x86 APK SHA256d9265fc63d0ec059b43a9a1cd6abe88270496764b1ddaeef7e10bb71a01c8349 matches both reports. Signal HTTPS/JNI network58 and actual-process-restart6 checks pass, artifacts/android-signal-network.json at22:25:21. Two-client -PrivateKeys -Offline passes261 recorded checks (30 registrations+231 rounds), artifacts/android-two-client-private-keys.json at22:28:09. Actual native dialog load prepares distinct authenticated device publications automatically; both cold reopens preserve them. Existing native send/receive/edit/delete/offline pending/recovery/uniqueness/tombstone checks pass on the stripped package. Group setup is REST and chat entry programmatic. Private chat UI, peer identity verification/rotation, background/media, physical devices and final release remain incomplete.
+
 ## Native edit/delete response-loss and cold-history acceptance — 2026-10-08
 
 `scripts/test-two-client-messaging.ps1 -MutationRestart` passes412 recorded checks after a1m1s local instrumentation build. Fresh artifacts/android-two-client-mutation-restart.json; actual saved local APK SHA256451305f23d695e7013348865ca48812f536579ab42e6574a132c6c7e0af51c8b matches report. Successful upstream responses are held while explicit app force-stop completes send693ms/edit720ms/delete245ms after request start, below10s host bound and real20s read timeout. Interrupted rounds are transparently interrupted_as_requested (send16/edit16/delete22 checks), not normal completed instrumentation.

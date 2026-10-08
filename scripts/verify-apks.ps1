@@ -9,6 +9,7 @@ $reports=@()
 foreach($abi in @('arm64-v8a','armeabi-v7a','universal')){
     $path=Join-Path $root "artifacts/VyrnApp-$Flavor-$abi-$BuildType.apk"
     if(!(Test-Path -LiteralPath $path)){throw "Missing APK: $abi"}
+    if($abi -ne 'universal' -and (Get-Item -LiteralPath $path).Length -gt 250000000){throw "Single-architecture APK exceeds the 250 MB delivery limit: $abi"}
     & (Join-Path $buildTools 'apksigner.bat') verify $path
     if($LASTEXITCODE -ne 0){throw "APK signature failed: $abi"}
     $badging=& (Join-Path $buildTools 'aapt2.exe') dump badging $path
@@ -21,6 +22,7 @@ foreach($abi in @('arm64-v8a','armeabi-v7a','universal')){
         $entries=@($archive.Entries.FullName)
         if(@($entries | Where-Object {$_ -match 'vyrn_dev_ca'}).Count){throw 'Local test CA leaked into a normal APK'}
         if(@($entries | Where-Object {$_ -match '(libsignal_jni.*\.dylib|signal_jni.*\.dll)$' -or $_ -match '^libsignal_jni.*\.so$'}).Count){throw 'Desktop Signal native library leaked into an Android APK'}
+        if(@($entries | Where-Object {$_ -match '/libsignal_jni_testing\.so$'}).Count){throw 'Signal test-only native library leaked into an Android APK'}
         $signalAbis=if($abi -eq 'universal'){@('arm64-v8a','armeabi-v7a')}else{@($abi)}
         foreach($signalAbi in $signalAbis){if($entries -notcontains "lib/$signalAbi/libsignal_jni.so"){throw "Signal native library missing: $signalAbi"}}
     }finally{$archive.Dispose()}
