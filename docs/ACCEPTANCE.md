@@ -1,6 +1,8 @@
 # Acceptance matrix
 
-Updated 2026-10-08. A route existing or a build compiling does **not** establish end-to-end completion.
+Updated 2026-10-09. A route existing or a build compiling does **not** establish end-to-end completion.
+
+Latest native private receive checkpoint:150 recorded checks pass on two independently registered emulators. Signal-domain encrypted fixtures sent in both directions are visible in actual private ChatActivity cells, with one matching ordinal and placeholder native messageOwner. Each current native row's data/custom_params/replydata lacks fixture plaintext. Both apps cold-reopen offline with real authenticated HTTPS failure, persisted native peers and visible decrypted cached bubbles. Persian screenshots inspected after UTF-8 fixture correction. This supersedes older native-private-rendering-pending statements only for this receiving/cache scenario. Native composer Send stays gated; identity/device/outbox lifecycle, private mutation/race/background/media and physical/release/backup acceptance remain open. Product phone APKs remain verified122/108/159 MB.
 
 Latest offline-cache checkpoint:76 Signal checks now include real cold offline cache opening using encrypted authenticated server-device/original-session proof. No missing-store identity regeneration; wrong account/session/device binding rejected; exact pending ciphertext and ratchets preserved. Same fresh local APK passes261 independent native registration/publication/group foreground/offline checks. Normal ARM64/ARMv7/universal remain122.4/108.1/158.7 MB and verify successfully. These establish the offline cache service primitive, not native private rendering/sending, peer verification or complete key lifecycle. Physical/release and remaining full-goal requirements are still open.
 

@@ -1,5 +1,11 @@
 # Local Android integration
 
+## Two native private chats — 2026-10-09
+
+Run scripts/test-two-client-messaging.ps1 -PrivateChat after a local x86 instrumentation build. Reuses native registration/key-publication setup, then sends encrypted text through SignalMessages as a fixture in both directions. Actual private ChatActivity cells and native database rows are checked on both clients, including force-stop and offline reopen with each18443 reverse removed. Restore mappings and remove private fixtures in finally. Screenshots remain ignored in .local for visual verification. Native composer sending is not exercised or enabled by this test.
+
+Shared bounded SDK helper explicitly uses UTF-8 input/output; scripts/test-android-test-tools.ps1 verifies Persian/emoji round-trip, preserved exit code and timeout termination of only the owned helper. Offline activity readiness handles existing test permission prompts before requiring real app window focus. For an exhausted local invite, scripts/renew-local-test-invite.py uses ignored dev.env bootstrap admin credentials, localhost TLS/private CA and MFA to create a fresh normal invite and logs out. No credentials/code are printed, no redirect/proxy inheritance, no production endpoint or database quota reset. Keep .local and environment files out of Git.
+
 ## Context-bound private display component — 2026-10-08
 
 scripts/test-signal.ps1 -Network additionally validates automatic signed sender directory resolution without one-time prekey consumption, address/version rejection, and offline cached duplicate receive. The display reader requires authenticated peer/conversation/sender/revision/ordinal and respects deletion/expiry fences. A UI-thread synthetic MessageObject check uses applyNewText and serializes the underlying TL message to prove the placeholder is retained. This does not enter a real private ChatActivity, inspect MessagesStorage blobs or prove physical-device delivery; those remain required when wiring the renderer.

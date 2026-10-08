@@ -28,7 +28,7 @@ final class ChatUiIntegration {
         int account=UserConfig.selectedAccount;
         check.verify(account==0&&UserConfig.getInstance(account).isClientActivated(),"chat_native_account0_active");
         RestRepository repository=new RestRepository(new TokenVault(instrumentation.getTargetContext(),account));
-        boolean offlineReopen=phase.equals("chat-offline-reopen")||phase.equals("chat-failed-reopen");
+        boolean offlineReopen=phase.equals("chat-offline-reopen")||phase.equals("chat-failed-reopen")||phase.equals("chat-private-offline-view");
         String user=offlineReopen?repository.vault.load().getString("user_id"):repository.me().id;
         if(phase.equals("chat-key-readiness")){
             java.util.concurrent.CompletableFuture<org.telegram.tgnet.TLObject> dialogs=new java.util.concurrent.CompletableFuture<>();
@@ -45,6 +45,7 @@ final class ChatUiIntegration {
             }return;
         }
         if(phase.equals("chat-identity")){write(instrumentation,new JSONObject().put("user",user));return;}
+        if(phase.startsWith("chat-private-")){privateChat(instrumentation,activity,fixture,repository,user,phase,check);return;}
         if(phase.equals("chat-create")){
             String peer=fixture.getString("peer_user");check.verify(!user.equals(peer),"chat_distinct_accounts");
             String group=repository.createGroup(fixture.getString("title"),java.util.Collections.singletonList(peer),0).id;
@@ -145,6 +146,38 @@ final class ChatUiIntegration {
         if(view instanceof ChatMessageCell){org.telegram.messenger.MessageObject message=((ChatMessageCell)view).getMessageObject();Rect visible=new Rect();if(message!=null&&text.equals(message.messageOwner.message)&&message.isOutOwner()==outgoing&&message.messageOwner.send_state==0&&message.getId()>0&&view.getGlobalVisibleRect(visible))return true;}
         if(view instanceof ViewGroup)for(int i=0;i<((ViewGroup)view).getChildCount();i++)if(bubble(((ViewGroup)view).getChildAt(i),text,outgoing))return true;
         return false;
+    }
+    private static void privateChat(Instrumentation instrumentation,Activity activity,JSONObject fixture,RestRepository repository,String user,String phase,AuthUiIntegration.Check check) throws Exception {
+        final int account=UserConfig.selectedAccount;String peer=fixture.getString("peer_user"),text=fixture.getString("text");check.verify(!peer.equals(user),"private_native_distinct_peer");
+        check.verify(text.startsWith("چت خصوصی بومی "),"private_native_utf8_fixture_preserved");
+        if(phase.equals("chat-private-fixture-send")){
+            String conversation=fixture.optString("conversation");if(conversation.isEmpty())conversation=((JSONObject)repository.request("POST","/v1/conversations",new JSONObject().put("kind","private").put("members",new org.json.JSONArray().put(peer)),true)).getString("id");
+            try(xyz.eclipseofficial.vyrn.data.SignalDeviceKeys keys=xyz.eclipseofficial.vyrn.data.SignalDeviceKeys.openLocal(instrumentation.getTargetContext(),repository)){
+                xyz.eclipseofficial.vyrn.data.SignalMessages messages=new xyz.eclipseofficial.vyrn.data.SignalMessages(keys);String client=java.util.UUID.randomUUID().toString();messages.prepare(peer,conversation,client,text);String message=messages.send(client);
+                xyz.eclipseofficial.vyrn.domain.Models.Message value=repository.message(message);check.verify(value.encrypted&&!value.deleted&&value.conversation.equals(conversation)&&value.sender.equals(user),"private_encrypted_fixture_committed");
+                write(instrumentation,new JSONObject().put("conversation",conversation).put("message_id",message).put("ordinal",value.ordinal));
+            }return;
+        }
+        boolean offline=phase.equals("chat-private-offline-view");long local;try(IdMap ids=new IdMap(instrumentation.getTargetContext(),account)){local=ids.local("user",peer);}
+        if(offline){boolean disconnected=false;try{repository.me();}catch(java.io.IOException expected){disconnected=true;}check.verify(disconnected,"private_cold_reopen_transport_actually_disconnected");
+            org.telegram.tgnet.TLRPC.User cached=org.telegram.messenger.MessagesStorage.getInstance(account).getUserSync(local);check.verify(cached!=null,"private_cold_reopen_native_peer_persisted");instrumentation.runOnMainSync(()->MessagesController.getInstance(account).putUser(cached,true));
+        }else{
+            java.util.concurrent.CompletableFuture<org.telegram.tgnet.TLObject> loaded=new java.util.concurrent.CompletableFuture<>();org.telegram.tgnet.ConnectionsManager.getInstance(account).sendRequest(new org.telegram.tgnet.TLRPC.TL_messages_getDialogs(),(value,error)->{if(error!=null)loaded.completeExceptionally(new AssertionError());else loaded.complete(value);});
+            org.telegram.tgnet.TLRPC.TL_messages_dialogs dialogs=(org.telegram.tgnet.TLRPC.TL_messages_dialogs)loaded.get(30,java.util.concurrent.TimeUnit.SECONDS);instrumentation.runOnMainSync(()->MessagesController.getInstance(account).putUsers(dialogs.users,false));org.telegram.messenger.MessagesStorage.getInstance(account).putUsersAndChats(dialogs.users,dialogs.chats,true,true);
+        }
+        await(()->!AuthUiIntegration.handlePrompts(instrumentation,activity,check),check,"private_native_startup_prompts_handled");
+        instrumentation.runOnMainSync(()->{Bundle args=new Bundle();args.putLong("user_id",local);LaunchActivity.getLastFragment().presentFragment(new ChatActivity(args));});
+        await(()->{boolean[] ready={false};instrumentation.runOnMainSync(()->ready[0]=LaunchActivity.getLastFragment() instanceof ChatActivity&&!LaunchActivity.getLastFragment().getParentLayout().isTransitionAnimationInProgress());return ready[0];},check,"private_native_chat_screen_ready");
+        final int ordinal=fixture.getInt("ordinal");View root=activity.getWindow().getDecorView();
+        await(()->{boolean[] visible={false};instrumentation.runOnMainSync(()->visible[0]=privateCell(root,ordinal,text)!=null);return visible[0];},check,offline?"private_cold_offline_native_plaintext_bubble":"private_native_plaintext_bubble");
+        instrumentation.runOnMainSync(()->{ChatActivity chat=(ChatActivity)LaunchActivity.getLastFragment();check.verify(chat.messages.stream().filter(message->message.getId()==ordinal).count()==1,"private_native_single_message_identity");org.telegram.messenger.MessageObject object=privateCell(root,ordinal,text).getMessageObject();check.verify(!text.equals(object.messageOwner.message),"private_native_visible_bubble_keeps_owner_placeholder");});
+        org.telegram.messenger.MessagesStorage storage=org.telegram.messenger.MessagesStorage.getInstance(account);java.util.concurrent.CompletableFuture<Boolean> stored=new java.util.concurrent.CompletableFuture<>();
+        storage.getStorageQueue().postRunnable(()->{try{org.telegram.SQLite.SQLiteCursor cursor=storage.getDatabase().queryFinalized("SELECT data,custom_params,replydata FROM messages_v2 WHERE uid="+local+" AND mid="+ordinal);try{boolean safe=cursor.next();if(safe)for(int column=0;column<3;column++){byte[] bytes=cursor.byteArrayValue(column);if(bytes!=null&&new String(bytes,StandardCharsets.UTF_8).contains(text))safe=false;}stored.complete(safe);}finally{cursor.dispose();}}catch(Throwable failure){stored.completeExceptionally(failure);}});
+        check.verify(stored.get(20,java.util.concurrent.TimeUnit.SECONDS),"private_native_chat_database_contains_no_plaintext_body");write(instrumentation,new JSONObject().put("message_id",fixture.getString("message_id")).put("ordinal",ordinal).put("offline",offline));
+    }
+    private static ChatMessageCell privateCell(View view,int id,String text){
+        if(!view.isShown())return null;if(view instanceof ChatMessageCell){org.telegram.messenger.MessageObject object=((ChatMessageCell)view).getMessageObject();if(object!=null&&object.getId()==id&&text.contentEquals(object.messageText))return (ChatMessageCell)view;}
+        if(view instanceof ViewGroup)for(int i=0;i<((ViewGroup)view).getChildCount();i++){ChatMessageCell found=privateCell(((ViewGroup)view).getChildAt(i),id,text);if(found!=null)return found;}return null;
     }
     private static ChatMessageCell cell(View view,String text){
         if(!view.isShown())return null;

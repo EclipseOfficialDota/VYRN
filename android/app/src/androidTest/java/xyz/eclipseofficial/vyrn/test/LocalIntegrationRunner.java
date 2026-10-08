@@ -59,7 +59,7 @@ public final class LocalIntegrationRunner extends Instrumentation {
         context=getTargetContext();
         Bundle result=new Bundle();
         Thread diagnostic=null;
-        boolean offlineChatReopen=phase.equals("chat-offline-reopen")||phase.equals("chat-failed-reopen");
+        boolean offlineChatReopen=phase.equals("chat-offline-reopen")||phase.equals("chat-failed-reopen")||phase.equals("chat-private-offline-view");
         if(offlineChatReopen){
             diagnostic=new Thread(()->{try{Thread.sleep(50000);StringBuilder trace=new StringBuilder("stage=").append(stage).append('\n');for(java.util.Map.Entry<Thread,StackTraceElement[]> entry:Thread.getAllStackTraces().entrySet()){trace.append(entry.getKey().getName().equals("main")?"main":"worker").append(' ').append(entry.getKey().getState()).append('\n');for(StackTraceElement frame:entry.getValue())trace.append(frame).append('\n');}java.nio.file.Files.write(file("vyrn-test-thread-state.txt").toPath(),trace.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8));}catch(Exception ignored){}},"vyrn-test-diagnostic");diagnostic.setDaemon(true);diagnostic.start();
         }
@@ -76,7 +76,11 @@ public final class LocalIntegrationRunner extends Instrumentation {
             if(offlineChatReopen){
                 context.startActivity(launch);
                 long deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(30);boolean[] visible={false};
-                while(!visible[0]&&System.nanoTime()<deadline){runOnMainSync(()->{org.telegram.ui.LaunchActivity current=org.telegram.ui.LaunchActivity.instance;visible[0]=current!=null&&!current.isFinishing()&&!current.isDestroyed()&&current.hasWindowFocus()&&org.telegram.ui.LaunchActivity.getLastFragment()!=null;});if(!visible[0])Thread.sleep(100);}
+                while(!visible[0]&&System.nanoTime()<deadline){
+                    org.telegram.ui.LaunchActivity current=org.telegram.ui.LaunchActivity.instance;
+                    if(current!=null)AuthUiIntegration.handlePrompts(this,current,(condition,name)->{check(condition,name);passed.put(name);});
+                    runOnMainSync(()->{org.telegram.ui.LaunchActivity active=org.telegram.ui.LaunchActivity.instance;visible[0]=active!=null&&!active.isFinishing()&&!active.isDestroyed()&&active.hasWindowFocus()&&org.telegram.ui.LaunchActivity.getLastFragment()!=null;});if(!visible[0])Thread.sleep(100);
+                }
                 check(visible[0],"offline_foreground_activity_visible");foreground=org.telegram.ui.LaunchActivity.instance;
             }else{foreground=startActivitySync(launch);}
             check(foreground!=null,"foreground_activity");

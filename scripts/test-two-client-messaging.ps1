@@ -1,5 +1,6 @@
 # Native foreground send/edit/delete and optional offline queue/recovery. Physical-phone acceptance remains separate.
-param([switch]$Edit,[switch]$Delete,[switch]$Offline,[switch]$ManualRetry,[switch]$LostAck,[switch]$MutationRestart,[switch]$PrivateKeys)
+param([switch]$Edit,[switch]$Delete,[switch]$Offline,[switch]$ManualRetry,[switch]$LostAck,[switch]$MutationRestart,[switch]$PrivateKeys,[switch]$PrivateChat)
+if($PrivateChat){$PrivateKeys=$true}
 if($MutationRestart){$LostAck=$true}
 if($ManualRetry -or $LostAck){$Offline=$true}
 $ErrorActionPreference='Stop'
@@ -47,11 +48,19 @@ function Read-State([string]$Serial){
     if($state.code -ne 0){return $null}
     return ($state.output | ConvertFrom-Json)
 }
+function Capture-PrivateChat([string]$Serial,[string]$Phase){
+    $remote='/data/local/tmp/vyrn-private-chat.png'
+    $captured=Invoke-TestAdb -Arguments @('-s',$Serial,'shell','screencap','-p',$remote)
+    if($captured.code -ne 0){throw 'Private chat screenshot failed'}
+    try{$pulled=Invoke-TestAdb -Arguments @('-s',$Serial,'pull',$remote,(Join-Path $root ".local/$Phase-$Serial.png"));if($pulled.code -ne 0){throw 'Private chat screenshot transfer failed'}}
+    finally{$null=Invoke-TestAdb -Arguments @('-s',$Serial,'shell','rm','-f',$remote)}
+}
 $receiver=$null
 $networkRun=$null
 $testProxy=$null
 $faultProxy=$null
 $faultReverse=$false
+$privateReverseRemoved=$false
 function Restore-TestProxy {
     if(!$script:testProxy){return}
     $live=Get-Process -Id $script:testProxy.pid -ErrorAction SilentlyContinue
@@ -130,6 +139,33 @@ try{
             if($reopened.user -ne $users[$serial] -or $reopened.key_device -ne $publications[$serial].key_device){throw 'Key publication changed authenticated device on restart'}
         }
         $rounds+=@{phase='key-publication-host';result='passed';checks=@('independent_authenticated_publications','both_cold_reopens_preserve_device')}
+    }
+    if($PrivateChat){
+        $conversation=''
+        foreach($direction in @(@{sender='emulator-5560';recipient='emulator-5562'},@{sender='emulator-5562';recipient='emulator-5560'})){
+            $text='چت خصوصی بومی '+[guid]::NewGuid().ToString('N')
+            Write-Fixture $direction.sender @{peer_user=$users[$direction.recipient];text=$text;conversation=$conversation}
+            $rounds+=Finish-Phase (Start-Phase $direction.sender 'chat-private-fixture-send');$sent=Read-State $direction.sender;$conversation=$sent.conversation
+            if(!$conversation -or !$sent.message_id -or !$sent.ordinal){throw 'Private encrypted fixture evidence missing'}
+            foreach($serial in @('emulator-5560','emulator-5562')){
+                $peer=if($serial -eq 'emulator-5560'){$users['emulator-5562']}else{$users['emulator-5560']}
+                Write-Fixture $serial @{peer_user=$peer;text=$text;conversation=$conversation;message_id=$sent.message_id;ordinal=$sent.ordinal}
+                $rounds+=Finish-Phase (Start-Phase $serial 'chat-private-view')
+                Capture-PrivateChat $serial 'chat-private-view'
+            }
+            $privateReverseRemoved=$true
+            foreach($serial in @('emulator-5560','emulator-5562')){
+                $removed=Invoke-TestAdb -Arguments @('-s',$serial,'reverse','--remove','tcp:18443');if($removed.code -ne 0){throw 'Private offline mapping removal failed'}
+                $rounds+=Finish-Phase (Start-Phase $serial 'chat-private-offline-view')
+                Capture-PrivateChat $serial 'chat-private-offline-view'
+            }
+            foreach($serial in @('emulator-5560','emulator-5562')){$restored=Invoke-TestAdb -Arguments @('-s',$serial,'reverse','tcp:18443','tcp:18443');if($restored.code -ne 0){throw 'Private offline mapping restore failed'}}
+            $privateReverseRemoved=$false
+        }
+        $registration=Get-Content (Join-Path $root 'artifacts/android-two-client-registration.json') -Raw | ConvertFrom-Json
+        @{date=[DateTimeOffset]::Now.ToString('o');result='passed';apk_sha256=(Get-FileHash (Join-Path $root 'artifacts/VyrnApp-dev-x86_64-debug-local-tls.apk') -Algorithm SHA256).Hash.ToLowerInvariant();devices=$registration.devices;rounds=$rounds;physical_devices='not tested';scope='Two independent native registrations and key publication; Signal-domain encrypted fixture send in both directions, actual foreground private ChatActivity cells and native row persistence on both clients; disconnected cold native reopen. Private native composer sending remains gated.'} | ConvertTo-Json -Depth 9 | Set-Content (Join-Path $root 'artifacts/android-two-client-private-chat.json') -Encoding utf8
+        Write-Output 'PASS: encrypted native private bubbles and disconnected cold reopen on both clients; domain fixture sends, native composer still gated.'
+        return
     }
     $title='Native two-client '+[guid]::NewGuid().ToString('N')
     Write-Fixture 'emulator-5560' @{peer_user=$users['emulator-5562'];title=$title};$rounds+=Finish-Phase (Start-Phase 'emulator-5560' 'chat-create');$group=(Read-State 'emulator-5560').group
@@ -231,6 +267,7 @@ try{
         $null=Invoke-TestAdb -Arguments @('-s',$serial,'shell','run-as',$package,'rm','-f','files/vyrn-test-fixture.json','files/vyrn-test-chat-state.json','files/vyrn-test-network-request.txt','files/vyrn-test-network-ack.txt')
     }
     }finally{
+        if($privateReverseRemoved){foreach($serial in @('emulator-5560','emulator-5562')){$restored=Invoke-TestAdb -Arguments @('-s',$serial,'reverse','tcp:18443','tcp:18443');if($restored.code -ne 0){throw 'Private test mapping cleanup failed'}}}
         try{if($faultReverse){$restore=Invoke-TestAdb -Arguments @('-s','emulator-5562','reverse','tcp:18443','tcp:18443');if($restore.code -ne 0){throw 'Lost-ack mapping cleanup failed'}}}
         finally{try{if($faultProxy -and !$faultProxy.HasExited){Stop-Process -Id $faultProxy.Id;$null=$faultProxy.WaitForExit(10000)}}finally{Restore-TestProxy}}
     }

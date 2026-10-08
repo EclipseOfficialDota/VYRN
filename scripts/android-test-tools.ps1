@@ -2,6 +2,8 @@
 function Invoke-TestAdb([string[]]$Arguments,[int]$TimeoutMs=10000,[string]$InputText){
     $start=[Diagnostics.ProcessStartInfo]::new($adb);$start.UseShellExecute=$false;$start.RedirectStandardOutput=$true;$start.RedirectStandardError=$true;$start.CreateNoWindow=$true
     $start.RedirectStandardInput=$PSBoundParameters.ContainsKey('InputText')
+    $start.StandardOutputEncoding=[Text.UTF8Encoding]::new($false);$start.StandardErrorEncoding=[Text.UTF8Encoding]::new($false)
+    if($start.RedirectStandardInput){$start.StandardInputEncoding=[Text.UTF8Encoding]::new($false)}
     foreach($argument in $Arguments){$start.ArgumentList.Add($argument)}
     $process=[Diagnostics.Process]::Start($start);$output=$process.StandardOutput.ReadToEndAsync();$errors=$process.StandardError.ReadToEndAsync()
     if($start.RedirectStandardInput){$process.StandardInput.Write($InputText);$process.StandardInput.Close()}
