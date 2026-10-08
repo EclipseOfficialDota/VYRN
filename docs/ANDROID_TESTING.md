@@ -1,5 +1,11 @@
 # Local Android integration
 
+## Native mutations interrupted before acknowledgement — 2026-10-08
+
+Run `./scripts/test-two-client-messaging.ps1 -MutationRestart` after local x86 instrumentation build. It includes -LostAck/-Offline, then sends/caches a fresh message on both native clients, captures owned/live server identity, presses native Edit/Done and shared Delete cancel/confirm, holds successful upstream acknowledgements and force-stops the actor before10s. Both cold histories verify edited identity/revision/uniqueness and repeatedly verify deletion without resurrection. Existing fault helper accepts -operation send/edit/delete and selected -message UUID for mutations; existing local CA checks remain active. No new dependency or production policy change.
+
+Final report artifacts/android-two-client-mutation-restart.json passes412 recorded checks, APK SHA256451305f23d695e7013348865ca48812f536579ab42e6574a132c6c7e0af51c8b, build1m1s. Stop durations:send693ms/edit720ms/delete245ms, before real20s read timeout. Intentional interruption has its own status and captured native check snapshot; successful restart phases still require normal passed instrumentation. Native chat entry is programmatic and group setup is REST fixture. Physical devices and arbitrary pre-commit/storage/account-switch/offline mutation acceptance remain separate; do not claim complete messaging or whole-goal readiness from this scenario.
+
 ## Verified interruption before read timeout — 2026-10-08
 
 The refined `./scripts/test-two-client-messaging.ps1 -LostAck` now passes285 checks after a59s local instrumentation build. Fresh report artifacts/android-two-client-lost-ack.json; local APK SHA256376c1654a8a9fc809ba8f66cd050181d05e128fccceeedd305e9b89c7158bde7. Interrupted phase records original queue SENDING and interruption_ms=462, below its10s limit and the app's20s read timeout. After a real successful response is held and the app is force-stopped, original queue/client/server identities reconcile once; recipient bubble and confirmed cold reopen pass. This supersedes the earlier pending/refinement paragraphs below. Interruption has explicit interrupted_as_requested status, never an ordinary successful instrumentation completion. Physical devices and broader mutation/account/background/private/media acceptance remain separate.

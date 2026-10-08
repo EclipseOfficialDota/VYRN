@@ -27,12 +27,19 @@ type heldSend struct {
 }
 type requestStart struct{}
 
-func faultProxy(target *url.URL, transport http.RoundTripper, group, state string) http.Handler {
+func faultProxy(target *url.URL, transport http.RoundTripper, group, operation, messageID, state string) http.Handler {
 	proxy := httputil.NewSingleHostReverseProxy(target)
 	proxy.Transport = transport
 	var held atomic.Bool
+	method, path := http.MethodPost, "/v1/conversations/"+group+"/messages"
+	if operation == "edit" {
+		method, path = http.MethodPatch, "/v1/messages/"+messageID
+	}
+	if operation == "delete" {
+		method = http.MethodDelete
+	}
 	proxy.ModifyResponse = func(response *http.Response) error {
-		if response.Request.Method != http.MethodPost || response.Request.URL.Path != "/v1/conversations/"+group+"/messages" || response.StatusCode < 200 || response.StatusCode >= 300 || !held.CompareAndSwap(false, true) {
+		if response.Request.Method != method || response.Request.URL.Path != path || response.StatusCode < 200 || response.StatusCode >= 300 || !held.CompareAndSwap(false, true) {
 			return nil
 		}
 		body, err := io.ReadAll(io.LimitReader(response.Body, 1<<20))
@@ -44,7 +51,8 @@ func faultProxy(target *url.URL, transport http.RoundTripper, group, state strin
 		var message struct {
 			ID string `json:"id"`
 		}
-		if json.Unmarshal(body, &message) != nil || message.ID == "" {
+		message.ID = messageID
+		if operation == "send" && (json.Unmarshal(body, &message) != nil || message.ID == "") {
 			return errors.New("successful send has no server identity")
 		}
 		proof, _ := json.Marshal(heldSend{Server: message.ID, Status: response.StatusCode, Started: response.Request.Context().Value(requestStart{}).(int64)})
@@ -65,10 +73,18 @@ func faultProxy(target *url.URL, transport http.RoundTripper, group, state strin
 
 func main() {
 	group := flag.String("group", "", "disposable local group UUID")
+	operation := flag.String("operation", "send", "send, edit or delete")
+	message := flag.String("message", "", "existing mutation message UUID")
 	state := flag.String("state", "", "private local evidence file")
 	flag.Parse()
 	if !regexp.MustCompile(`^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$`).MatchString(*group) || *state == "" {
 		log.Fatal("local group and evidence path required")
+	}
+	if *operation != "send" && *operation != "edit" && *operation != "delete" {
+		log.Fatal("invalid local operation")
+	}
+	if *operation != "send" && !regexp.MustCompile(`^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$`).MatchString(*message) {
+		log.Fatal("mutation message UUID required")
 	}
 	ca, err := os.ReadFile(".local/dev-ca.crt")
 	if err != nil {
@@ -81,6 +97,6 @@ func main() {
 	transport := http.DefaultTransport.(*http.Transport).Clone()
 	transport.TLSClientConfig = &tls.Config{RootCAs: roots, MinVersion: tls.VersionTLS12}
 	target, _ := url.Parse("https://localhost:18443")
-	server := &http.Server{Addr: "127.0.0.1:18444", Handler: faultProxy(target, transport, *group, *state), ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 90 * time.Second}
+	server := &http.Server{Addr: "127.0.0.1:18444", Handler: faultProxy(target, transport, *group, *operation, *message, *state), ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 90 * time.Second}
 	log.Fatal(server.ListenAndServeTLS(".local/devtls-server.crt", ".local/devtls-server.key"))
 }

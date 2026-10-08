@@ -37,6 +37,13 @@ final class ChatUiIntegration {
             check.verify(repository.members(group).size()==2,"chat_fixture_two_members");write(instrumentation,new JSONObject().put("group",group));return;
         }
         String group=fixture.getString("group"),text=fixture.getString("text");
+        if(phase.equals("chat-message-identity")){
+            java.util.List<xyz.eclipseofficial.vyrn.domain.Models.Message> live=repository.liveMessages(group,null,100);
+            check.verify(live.stream().filter(message->text.equals(message.text)).count()==1,"mutation_original_unique_server_message");
+            xyz.eclipseofficial.vyrn.domain.Models.Message original=live.stream().filter(message->text.equals(message.text)).findFirst().orElseThrow(AssertionError::new);
+            check.verify(user.equals(original.sender)&&!original.deleted,"mutation_original_owned_and_live");
+            write(instrumentation,new JSONObject().put("message_id",original.id).put("original_ordinal",original.ordinal).put("original_revision",original.revision));return;
+        }
         long local;try(IdMap map=new IdMap(instrumentation.getTargetContext(),account)){local=map.local("conversation",group);}
         await(()->!AuthUiIntegration.handlePrompts(instrumentation,activity,check),check,"chat_startup_permissions_handled");
         if(!offlineReopen){
@@ -51,8 +58,9 @@ final class ChatUiIntegration {
         instrumentation.runOnMainSync(()->check.verify(org.telegram.messenger.ChatObject.canSendPlain(MessagesController.getInstance(account).getChat(local)),"chat_member_can_send_plain"));
         if(!offlineReopen)await(()->{boolean[] ready={false};instrumentation.runOnMainSync(()->{try{java.lang.reflect.Field field=ChatActivity.class.getDeclaredField("firstLoading");field.setAccessible(true);ready[0]=!field.getBoolean(LaunchActivity.getLastFragment());}catch(Exception failure){throw new AssertionError("chat_loading_state_unavailable");}});return ready[0];},check,"chat_initial_history_complete");
         if(offlineReopen){pending(instrumentation,activity,fixture,repository,user,check,true);return;}
-        if(phase.equals("chat-delete")||phase.equals("chat-watch-delete")||phase.equals("chat-deleted-reopen")){delete(instrumentation,activity,fixture,repository,phase,check);return;}
-        if(phase.equals("chat-edit")||phase.equals("chat-watch-edit")){edit(instrumentation,activity,fixture,repository,phase.equals("chat-edit"),check);return;}
+        if(phase.equals("chat-delete")||phase.equals("chat-watch-delete")||phase.equals("chat-deleted-reopen")){delete(instrumentation,activity,fixture,repository,phase,check,checkpoints);return;}
+        if(phase.equals("chat-edit")||phase.equals("chat-watch-edit")){edit(instrumentation,activity,fixture,repository,phase.equals("chat-edit"),check,checkpoints);return;}
+        if(phase.equals("chat-edited-reopen")){editedReopen(instrumentation,activity,fixture,repository,user,check);return;}
         if(phase.equals("chat-receive"))write(instrumentation,new JSONObject().put("ready",true));
         boolean sending=phase.equals("chat-send")||phase.equals("chat-offline-send")||phase.equals("chat-failed-send")||phase.equals("chat-unknown-send");
         if(phase.equals("chat-offline-send")||phase.equals("chat-failed-send"))AuthUiIntegration.networkStep(instrumentation,activity,"offline-send",check);
@@ -131,7 +139,7 @@ final class ChatUiIntegration {
         return null;
     }
     private static ChatActivityEnterView composer(){try{java.lang.reflect.Field field=ChatActivity.class.getDeclaredField("chatActivityEnterView");field.setAccessible(true);return (ChatActivityEnterView)field.get(LaunchActivity.getLastFragment());}catch(Exception failure){throw new AssertionError("composer_unavailable");}}
-    private static void edit(Instrumentation instrumentation,Activity activity,JSONObject fixture,RestRepository repository,boolean sender,AuthUiIntegration.Check check) throws Exception {
+    private static void edit(Instrumentation instrumentation,Activity activity,JSONObject fixture,RestRepository repository,boolean sender,AuthUiIntegration.Check check,java.util.List<String> checkpoints) throws Exception {
         String group=fixture.getString("group"),old=fixture.getString("text"),edited=fixture.getString("edited_text");View root=activity.getWindow().getDecorView();
         await(()->{boolean[] shown={false};instrumentation.runOnMainSync(()->shown[0]=bubble(root,old,sender));return shown[0];},check,"edit_original_visible");
         java.util.List<xyz.eclipseofficial.vyrn.domain.Models.Message> before=repository.liveMessages(group,null,100);xyz.eclipseofficial.vyrn.domain.Models.Message original=before.stream().filter(message->old.equals(message.text)).findFirst().orElseThrow(AssertionError::new);
@@ -145,6 +153,7 @@ final class ChatUiIntegration {
             View[] done={null};instrumentation.runOnMainSync(()->{try{java.lang.reflect.Field field=ChatActivityEnterView.class.getDeclaredField("doneButton");field.setAccessible(true);done[0]=(View)field.get(composer());}catch(Exception failure){throw new AssertionError("edit_done_unavailable");}});
             await(()->{boolean[] ready={false};instrumentation.runOnMainSync(()->ready[0]=done[0].isShown()&&done[0].isEnabled());return ready[0];},check,"edit_native_done_visible");
             instrumentation.runOnMainSync(()->check.verify(done[0].performClick(),"edit_native_done_clicked"));
+            if(fixture.optBoolean("interrupt_mutation")){interruptedMutation(instrumentation,original,checkpoints);return;}
             await(()->{boolean[] finished={false};instrumentation.runOnMainSync(()->finished[0]=composer().getEditingMessageObject()==null);return finished[0];},check,"edit_native_editor_closed");
         }else{write(instrumentation,new JSONObject().put("ready",true));}
         try{await(()->{boolean[] changed={false};instrumentation.runOnMainSync(()->changed[0]=bubble(root,edited,sender)&&!bubble(root,old,sender));return changed[0];},check,sender?"edit_sender_new_bubble":"edit_receiver_new_bubble_same_process");}
@@ -166,7 +175,7 @@ final class ChatUiIntegration {
         await(()->{boolean[] showing={false};instrumentation.runOnMainSync(()->showing[0]=dialog()!=null);return showing[0];},check,"delete_native_confirmation_visible");
         instrumentation.runOnMainSync(()->{org.telegram.ui.ActionBar.AlertDialog alert=dialog();String expected=org.telegram.messenger.LocaleController.isRTL?"این پیام‌ها برای همهٔ اعضای گروه حذف می‌شوند. ادامه می‌دهید؟":"These messages will be deleted for everyone in the group. Continue?";check.verify(expected.contentEquals(alert.getMessageTextView().getText())&&!hasCheckbox(alert.getWindow().getDecorView()),"delete_shared_semantics_no_local_only_option");});
     }
-    private static void delete(Instrumentation instrumentation,Activity activity,JSONObject fixture,RestRepository repository,String phase,AuthUiIntegration.Check check) throws Exception {
+    private static void delete(Instrumentation instrumentation,Activity activity,JSONObject fixture,RestRepository repository,String phase,AuthUiIntegration.Check check,java.util.List<String> checkpoints) throws Exception {
         String group=fixture.getString("group"),text=fixture.getString("text");boolean actor=phase.equals("chat-delete"),reopen=phase.equals("chat-deleted-reopen");View root=activity.getWindow().getDecorView();
         xyz.eclipseofficial.vyrn.domain.Models.Message original;
         if(reopen){original=repository.messageForUser(repository.me().id,fixture.getString("message_id"));check.verify(original.deleted,"delete_reopen_server_tombstone");}
@@ -180,13 +189,28 @@ final class ChatUiIntegration {
                 xyz.eclipseofficial.vyrn.domain.Models.Message preserved=repository.messageForUser(repository.me().id,original.id);check.verify(!preserved.deleted&&preserved.revision==original.revision&&text.equals(preserved.text),"delete_cancel_preserves_server_revision");
                 deleteMenu(instrumentation,activity,text,check);
                 instrumentation.runOnMainSync(()->check.verify(dialog().getButton(android.content.DialogInterface.BUTTON_POSITIVE).performClick(),"delete_native_confirm_clicked"));
+                if(fixture.optBoolean("interrupt_mutation")){interruptedMutation(instrumentation,original,checkpoints);return;}
             }else{write(instrumentation,new JSONObject().put("ready",true).put("message_id",original.id));}
         }
         int id=original.ordinal;
         await(()->{boolean[] absent={false};instrumentation.runOnMainSync(()->{ChatActivity chat=(ChatActivity)LaunchActivity.getLastFragment();absent[0]=cell(root,text)==null&&chat.messages.stream().noneMatch(message->message.getId()==id);});return absent[0];},check,reopen?"delete_no_resurrection_after_process_restart":actor?"delete_sender_native_removed":"delete_receiver_removed_same_process");
         xyz.eclipseofficial.vyrn.domain.Models.Message tombstone=repository.messageForUser(repository.me().id,original.id);
         check.verify(tombstone.deleted&&tombstone.id.equals(original.id)&&tombstone.ordinal==id&&(reopen||tombstone.revision>original.revision),"delete_confirmed_same_identity_tombstone");
+        if(fixture.has("original_revision"))check.verify(tombstone.ordinal==fixture.getInt("original_ordinal")&&tombstone.revision>fixture.getInt("original_revision"),"delete_restart_preserves_original_identity_and_new_revision");
         check.verify(repository.liveMessages(group,null,100).stream().noneMatch(message->message.id.equals(original.id)||text.equals(message.text)),"delete_absent_from_live_history");
+    }
+    private static void interruptedMutation(Instrumentation instrumentation,xyz.eclipseofficial.vyrn.domain.Models.Message original,java.util.List<String> checkpoints) throws Exception {
+        write(instrumentation,new JSONObject().put("pending",true).put("message_id",original.id).put("original_ordinal",original.ordinal).put("original_revision",original.revision).put("interrupted_checks",new org.json.JSONArray(checkpoints)));
+        Thread.sleep(200000);throw new AssertionError("Host did not interrupt the mutation");
+    }
+    private static void editedReopen(Instrumentation instrumentation,Activity activity,JSONObject fixture,RestRepository repository,String user,AuthUiIntegration.Check check) throws Exception {
+        String old=fixture.getString("text"),edited=fixture.getString("edited_text"),id=fixture.getString("message_id");boolean outgoing=fixture.getBoolean("outgoing");
+        await(()->{boolean[] shown={false};instrumentation.runOnMainSync(()->shown[0]=bubble(activity.getWindow().getDecorView(),edited,outgoing)&&!bubble(activity.getWindow().getDecorView(),old,outgoing));return shown[0];},check,"edit_committed_text_visible_after_process_restart");
+        instrumentation.runOnMainSync(()->{ChatActivity chat=(ChatActivity)LaunchActivity.getLastFragment();check.verify(chat.messages.stream().filter(message->message.getId()==fixture.optInt("original_ordinal")).count()==1&&chat.messages.stream().filter(message->edited.equals(message.messageOwner.message)).count()==1&&chat.messages.stream().noneMatch(message->old.equals(message.messageOwner.message)),"edit_restart_no_native_duplicate_or_old_text");});
+        xyz.eclipseofficial.vyrn.domain.Models.Message changed=repository.messageForUser(user,id);
+        check.verify(!changed.deleted&&edited.equals(changed.text)&&changed.ordinal==fixture.getInt("original_ordinal")&&changed.revision>fixture.getInt("original_revision")&&changed.editedDate>0,"edit_restart_original_server_identity_new_revision");
+        java.util.List<xyz.eclipseofficial.vyrn.domain.Models.Message> live=repository.liveMessages(fixture.getString("group"),null,100);
+        check.verify(live.stream().filter(message->edited.equals(message.text)&&id.equals(message.id)).count()==1&&live.stream().noneMatch(message->old.equals(message.text)),"edit_restart_one_server_message_no_old_text");
     }
     private static void await(BooleanSupplier condition,AuthUiIntegration.Check check,String name) throws Exception {await(condition,check,name,40);}
     private static void await(BooleanSupplier condition,AuthUiIntegration.Check check,String name,int seconds) throws Exception {long deadline=System.nanoTime()+java.util.concurrent.TimeUnit.SECONDS.toNanos(seconds);while(!condition.getAsBoolean()&&System.nanoTime()<deadline)Thread.sleep(100);check.verify(condition.getAsBoolean(),name);}

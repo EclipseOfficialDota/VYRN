@@ -1,5 +1,6 @@
 # Native foreground send/edit/delete and optional offline queue/recovery. Physical-phone acceptance remains separate.
-param([switch]$Edit,[switch]$Delete,[switch]$Offline,[switch]$ManualRetry,[switch]$LostAck)
+param([switch]$Edit,[switch]$Delete,[switch]$Offline,[switch]$ManualRetry,[switch]$LostAck,[switch]$MutationRestart)
+if($MutationRestart){$LostAck=$true}
 if($ManualRetry -or $LostAck){$Offline=$true}
 $ErrorActionPreference='Stop'
 $root=Split-Path $PSScriptRoot -Parent
@@ -74,6 +75,38 @@ function Begin-OfflineSend([string]$Phase){
     if($ack.code -ne 0){throw 'Offline acknowledgement transfer failed'}
     return $run
 }
+function Interrupt-HeldRequest([string]$Phase,[string]$Group,[string]$Operation='send',[string]$Message=''){
+    $faultState=Join-Path $root ('.local/lost-ack-'+[guid]::NewGuid().ToString('N')+'.json')
+    $arguments=@('-group',$Group,'-operation',$Operation,'-state',('"'+$faultState+'"'));if($Message){$arguments+=@('-message',$Message)}
+    $script:faultProxy=Start-Process -FilePath (Join-Path $root '.local/lost-ack-proxy.exe') -ArgumentList $arguments -WorkingDirectory $root -WindowStyle Hidden -RedirectStandardInput (Join-Path $root '.local/devtls-native-input.txt') -RedirectStandardOutput (Join-Path $root '.local/lost-ack-proxy.log') -RedirectStandardError (Join-Path $root '.local/lost-ack-proxy-error.log') -PassThru
+    $deadline=[DateTimeOffset]::UtcNow.AddSeconds(15);$ready=$false
+    while(!$faultProxy.HasExited -and [DateTimeOffset]::UtcNow -lt $deadline){$socket=[Net.Sockets.TcpClient]::new();try{$connect=$socket.ConnectAsync('127.0.0.1',18444);if($connect.Wait(200) -and $socket.Connected){$ready=$true;break}}catch{}finally{$socket.Dispose()};Start-Sleep -Milliseconds 100}
+    if(!$ready){throw 'Lost-ack proxy not ready'}
+    if(!(Get-NetTCPConnection -State Listen -LocalPort 18444 | Where-Object {$_.OwningProcess -eq $faultProxy.Id -and $_.LocalAddress -eq '127.0.0.1'})){throw 'Lost-ack listener ownership mismatch'}
+    $mapped=Invoke-TestAdb -Arguments @('-s','emulator-5562','reverse','tcp:18443','tcp:18444');if($mapped.code -ne 0){throw 'Lost-ack device mapping failed'};$script:faultReverse=$true
+    $script:networkRun=Start-Phase 'emulator-5562' $Phase
+    $deadline=[DateTimeOffset]::UtcNow.AddSeconds(60);$held=$null;$pending=$null
+    while(!$networkRun.process.HasExited -and [DateTimeOffset]::UtcNow -lt $deadline){
+        $pending=Read-State 'emulator-5562'
+        if(Test-Path -LiteralPath $faultState){try{$held=[IO.File]::ReadAllText($faultState) | ConvertFrom-Json}catch{}}
+        if($held.server_id -and $pending.pending -and $pending.interrupted_checks){break}
+        Start-Sleep -Milliseconds 100
+    }
+    if(!$held.server_id -or !$pending.pending -or !$pending.interrupted_checks){if($networkRun.process.HasExited){$null=Finish-Phase $networkRun};throw 'Committed held response and native pending evidence missing'}
+    if($Operation -eq 'send' -and !$pending.client_id){throw 'Original pending queue identity missing'}
+    if($Operation -ne 'send' -and ($held.server_id -ne $Message -or $pending.message_id -ne $Message)){throw 'Mutation response identity mismatch'}
+    $interruptMs=[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()-$held.request_started_ms
+    if($held.request_started_ms -le 0 -or $interruptMs -lt 0 -or $interruptMs -gt 10000){throw 'Interruption missed the in-flight deadline before the 20s read timeout'}
+    $stopped=Invoke-TestAdb -Arguments @('-s','emulator-5562','shell','am','force-stop',$package);if($stopped.code -ne 0){throw 'In-flight app interruption failed'}
+    $interruptMs=[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()-$held.request_started_ms;if($interruptMs -gt 10000){throw 'Force-stop completed after the in-flight deadline'}
+    if(!$networkRun.process.WaitForExit(10000)){$networkRun.process.Kill();throw 'Interrupted instrumentation did not terminate'}
+    $recordPhase=if($Operation -eq 'send'){$Phase}else{$Phase+'-interrupted'}
+    [IO.File]::WriteAllText((Join-Path $root ".local/$recordPhase-emulator-5562.log"),$networkRun.stdout.GetAwaiter().GetResult()+$networkRun.stderr.GetAwaiter().GetResult())
+    $round=@{serial='emulator-5562';phase=$recordPhase;operation=$Operation;checks=@($pending.interrupted_checks)+@('server_success_response_held_before_ack','app_force_stopped_before_response');interruption_ms=$interruptMs;result='interrupted_as_requested'}
+    $mapped=Invoke-TestAdb -Arguments @('-s','emulator-5562','reverse','tcp:18443','tcp:18443');if($mapped.code -ne 0){throw 'Normal test mapping restore failed'};$script:faultReverse=$false
+    Stop-Process -Id $faultProxy.Id;if(!$faultProxy.WaitForExit(10000)){throw 'Owned fault proxy did not stop'}
+    return @{round=$round;pending=$pending;held=$held}
+}
 try{
     if($Offline){
         $exe=Join-Path $root '.local/devtls-native.exe';$proxyId=[int][IO.File]::ReadAllText((Join-Path $root '.local/devtls-native.pid'));$proxy=Get-Process -Id $proxyId
@@ -141,46 +174,37 @@ try{
         }
         if($LostAck){
             $uncertain='پیام با تأیید ازدست‌رفته '+[guid]::NewGuid().ToString('N')
-            $faultState=Join-Path $root ('.local/lost-ack-'+[guid]::NewGuid().ToString('N')+'.json')
-            $faultProxy=Start-Process -FilePath (Join-Path $root '.local/lost-ack-proxy.exe') -ArgumentList @('-group',$group,'-state',('"'+$faultState+'"')) -WorkingDirectory $root -WindowStyle Hidden -RedirectStandardInput (Join-Path $root '.local/devtls-native-input.txt') -RedirectStandardOutput (Join-Path $root '.local/lost-ack-proxy.log') -RedirectStandardError (Join-Path $root '.local/lost-ack-proxy-error.log') -PassThru
-            $deadline=[DateTimeOffset]::UtcNow.AddSeconds(15);$ready=$false
-            while(!$faultProxy.HasExited -and [DateTimeOffset]::UtcNow -lt $deadline){$socket=[Net.Sockets.TcpClient]::new();try{$connect=$socket.ConnectAsync('127.0.0.1',18444);if($connect.Wait(200) -and $socket.Connected){$ready=$true;break}}catch{}finally{$socket.Dispose()};Start-Sleep -Milliseconds 100}
-            if(!$ready){throw 'Lost-ack proxy not ready'}
-            if(!(Get-NetTCPConnection -State Listen -LocalPort 18444 | Where-Object {$_.OwningProcess -eq $faultProxy.Id -and $_.LocalAddress -eq '127.0.0.1'})){throw 'Lost-ack listener ownership mismatch'}
-            $mapped=Invoke-TestAdb -Arguments @('-s','emulator-5562','reverse','tcp:18443','tcp:18444');if($mapped.code -ne 0){throw 'Lost-ack device mapping failed'};$faultReverse=$true
-            Write-Fixture 'emulator-5562' @{group=$group;text=$uncertain};$networkRun=Start-Phase 'emulator-5562' 'chat-unknown-send'
-            $deadline=[DateTimeOffset]::UtcNow.AddSeconds(60);$held=$null;$pending=$null
-            while(!$networkRun.process.HasExited -and [DateTimeOffset]::UtcNow -lt $deadline){
-                $pending=Read-State 'emulator-5562'
-                if(Test-Path -LiteralPath $faultState){try{$held=[IO.File]::ReadAllText($faultState) | ConvertFrom-Json}catch{}}
-                if($held.server_id -and $pending.pending -and $pending.client_id -and $pending.interrupted_checks){break}
-                Start-Sleep -Milliseconds 100
-            }
-            if(!$held.server_id -or !$pending.pending -or !$pending.client_id -or !$pending.interrupted_checks){if($networkRun.process.HasExited){$null=Finish-Phase $networkRun};throw 'Committed held response and native pending evidence missing'}
-            $interruptMs=[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()-$held.request_started_ms
-            if($held.request_started_ms -le 0 -or $interruptMs -lt 0 -or $interruptMs -gt 10000){throw 'Interruption missed the in-flight deadline before the 20s read timeout'}
-            $stopped=Invoke-TestAdb -Arguments @('-s','emulator-5562','shell','am','force-stop',$package);if($stopped.code -ne 0){throw 'Unknown sender interruption failed'}
-            $interruptMs=[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()-$held.request_started_ms;if($interruptMs -gt 10000){throw 'Force-stop completed after the in-flight deadline'}
-            if(!$networkRun.process.WaitForExit(10000)){$networkRun.process.Kill();throw 'Interrupted instrumentation did not terminate'}
-            [IO.File]::WriteAllText((Join-Path $root '.local/chat-unknown-send-emulator-5562.log'),$networkRun.stdout.GetAwaiter().GetResult()+$networkRun.stderr.GetAwaiter().GetResult())
-            $rounds+=@{serial='emulator-5562';phase='chat-unknown-send';checks=@($pending.interrupted_checks)+@('server_success_response_held_before_ack','app_force_stopped_before_response');interruption_ms=$interruptMs;result='interrupted_as_requested'}
-            $mapped=Invoke-TestAdb -Arguments @('-s','emulator-5562','reverse','tcp:18443','tcp:18443');if($mapped.code -ne 0){throw 'Normal test mapping restore failed'};$faultReverse=$false
-            Stop-Process -Id $faultProxy.Id;if(!$faultProxy.WaitForExit(10000)){throw 'Owned fault proxy did not stop'}
-            foreach($serial in @('emulator-5560','emulator-5562')){Write-Fixture $serial @{group=$group;text=$uncertain;client_id=$pending.client_id;server_id=$held.server_id}}
+            Write-Fixture 'emulator-5562' @{group=$group;text=$uncertain};$interrupted=Interrupt-HeldRequest 'chat-unknown-send' $group;$rounds+=$interrupted.round
+            foreach($serial in @('emulator-5560','emulator-5562')){Write-Fixture $serial @{group=$group;text=$uncertain;client_id=$interrupted.pending.client_id;server_id=$interrupted.held.server_id}}
             $rounds+=Finish-Phase (Start-Phase 'emulator-5562' 'chat-recover')
             $rounds+=Finish-Phase (Start-Phase 'emulator-5560' 'chat-receive')
             $rounds+=Finish-Phase (Start-Phase 'emulator-5562' 'chat-recovered-reopen')
         }
+        if($MutationRestart){
+            $mutationText='پیام آزمون تغییر '+[guid]::NewGuid().ToString('N');$mutationEdited='ویرایش پیش از توقف '+[guid]::NewGuid().ToString('N')
+            foreach($serial in @('emulator-5560','emulator-5562')){Write-Fixture $serial @{group=$group;text=$mutationText}}
+            $rounds+=Finish-Phase (Start-Phase 'emulator-5562' 'chat-send');$rounds+=Finish-Phase (Start-Phase 'emulator-5560' 'chat-receive')
+            $rounds+=Finish-Phase (Start-Phase 'emulator-5562' 'chat-message-identity');$identity=Read-State 'emulator-5562'
+            $fixture=@{group=$group;text=$mutationText;edited_text=$mutationEdited;message_id=$identity.message_id;original_ordinal=$identity.original_ordinal;original_revision=$identity.original_revision;interrupt_mutation=$true}
+            Write-Fixture 'emulator-5562' $fixture;$interrupted=Interrupt-HeldRequest 'chat-edit' $group 'edit' $identity.message_id;$rounds+=$interrupted.round
+            foreach($serial in @('emulator-5560','emulator-5562')){$fixture.outgoing=$serial -eq 'emulator-5562';Write-Fixture $serial $fixture;$rounds+=Finish-Phase (Start-Phase $serial 'chat-edited-reopen')}
+            Write-Fixture 'emulator-5562' @{group=$group;text=$mutationEdited};$rounds+=Finish-Phase (Start-Phase 'emulator-5562' 'chat-message-identity');$identity=Read-State 'emulator-5562'
+            $fixture=@{group=$group;text=$mutationEdited;message_id=$identity.message_id;original_ordinal=$identity.original_ordinal;original_revision=$identity.original_revision;interrupt_mutation=$true}
+            Write-Fixture 'emulator-5562' $fixture;$interrupted=Interrupt-HeldRequest 'chat-delete' $group 'delete' $identity.message_id;$rounds+=$interrupted.round
+            foreach($serial in @('emulator-5560','emulator-5562')){Write-Fixture $serial $fixture;$rounds+=Finish-Phase (Start-Phase $serial 'chat-deleted-reopen')}
+            foreach($serial in @('emulator-5560','emulator-5562')){$rounds+=Finish-Phase (Start-Phase $serial 'chat-deleted-reopen')}
+        }
     }
     $registration=Get-Content (Join-Path $root 'artifacts/android-two-client-registration.json') -Raw | ConvertFrom-Json
-    $report=if($LostAck){'artifacts/android-two-client-lost-ack.json'}elseif($ManualRetry){'artifacts/android-two-client-manual-retry.json'}elseif($Offline){'artifacts/android-two-client-offline.json'}elseif($Delete){'artifacts/android-two-client-deletion.json'}elseif($Edit){'artifacts/android-two-client-editing.json'}else{'artifacts/android-two-client-messaging.json'}
+    $report=if($MutationRestart){'artifacts/android-two-client-mutation-restart.json'}elseif($LostAck){'artifacts/android-two-client-lost-ack.json'}elseif($ManualRetry){'artifacts/android-two-client-manual-retry.json'}elseif($Offline){'artifacts/android-two-client-offline.json'}elseif($Delete){'artifacts/android-two-client-deletion.json'}elseif($Edit){'artifacts/android-two-client-editing.json'}else{'artifacts/android-two-client-messaging.json'}
     $scope='Native button-click send and visible confirmed bubbles in both directions while both clients are foreground; REST group fixture, programmatic chat entry'
     if($Edit -or $Delete -or $Offline){$scope+='; native message menu/Edit/Done, same-process receiver edit, same server identity/ordinal with newer revision and no duplicate'}
     if($Delete -or $Offline){$scope+='; native shared deletion confirmation/cancellation, receiver removal and both cold app reopens without resurrection'}
     if($Offline){$scope+='; dedicated test proxy stopped, native queued send, offline cold pending bubble, same durable client ID, automatic delivery after reconnect, confirmed cold reopen and deleted-message absence after reconnect'}
     if($ManualRetry){$scope+='; real eight-attempt network failure, failed bubble after offline cold reopen, native Retry menu, original queue ID delivered once and confirmed cold reopen'}
     if($LostAck){$scope+='; successful upstream send response held, explicit app force-stop before acknowledgement, original durable client ID reconciles to the pre-restart server ID, one native/server message and confirmed cold reopen'}
-    @{date=[DateTimeOffset]::UtcNow.ToString('o');result='passed';apk_sha256=$registration.devices[0].apk_sha256;devices=$registration.devices;rounds=$rounds;scope=$scope;edit_ui=[bool]($Edit -or $Delete -or $Offline);delete_ui=[bool]($Delete -or $Offline);delete_process_restart=[bool]($Delete -or $Offline);offline_automatic_retry=[bool]$Offline;manual_retry_ui=[bool]$ManualRetry;lost_ack_process_restart=[bool]$LostAck;physical_devices='not tested'} | ConvertTo-Json -Depth 7 | Set-Content (Join-Path $root $report) -Encoding utf8
+    if($MutationRestart){$scope+='; native Edit/Done and shared Delete committed upstream with responses held, explicit in-flight app interruption, edited identity/revision after both app restarts and repeated deleted-history reopens without resurrection'}
+    @{date=[DateTimeOffset]::UtcNow.ToString('o');result='passed';apk_sha256=$registration.devices[0].apk_sha256;devices=$registration.devices;rounds=$rounds;scope=$scope;edit_ui=[bool]($Edit -or $Delete -or $Offline);delete_ui=[bool]($Delete -or $Offline);delete_process_restart=[bool]($Delete -or $Offline);offline_automatic_retry=[bool]$Offline;manual_retry_ui=[bool]$ManualRetry;lost_ack_process_restart=[bool]$LostAck;mutation_process_restart=[bool]$MutationRestart;physical_devices='not tested'} | ConvertTo-Json -Depth 7 | Set-Content (Join-Path $root $report) -Encoding utf8
     Write-Output ('PASS: native composer send and foreground receipt on two independent clients.'+$(if($Edit -or $Delete -or $Offline){' Native edit and receiver update also passed.'})+$(if($Delete -or $Offline){' Shared deletion, cancellation and both cold reopens passed.'})+$(if($Offline){' Offline queue and automatic recovery passed.'}))
 }finally{
     try{
