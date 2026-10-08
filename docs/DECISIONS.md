@@ -1,5 +1,9 @@
 # Decisions
 
+## Recheck mutable native row provenance — 2026-10-08
+
+Validate the exact native object/row, message ID/dialog/peer/sender/date/edit and stored placeholder before assigning private text and while retaining it. Native owner/session checks alone cannot detect a changed vault user that reuses the session string; also require the originally authenticated user. Test mutable sender/date and same-session user changes, metadata deletion, populated v3 migration, and actual native row persistence. Keep private text in volatile formatting; native messageOwner remains the placeholder. Complete ChatActivity/device/lifecycle acceptance remains required.
+
 ## Native encrypted text hydration — 2026-10-08
 
 Use the existing IO executor and immutable encrypted-cache display API from the pinned MessageObject constructor. Persist only routing/revision/date/edit/encrypted/deleted metadata in IdMap v4; old v3 rows default to nonencrypted until a fresh observation, preserving fail-closed provenance. Check the exact native object, owner/session, current metadata and native deletion snapshot before applying volatile text. Update visible cells through a scoped updateInterfaces mask rather than replacing objects by message ID; stale objects cannot replace newer edits. A weak-reference timer clears volatile text on invalidated provenance/account/session or expiry. Private sending remains gated. Constructor hydration is tested; actual ChatActivity/storage/lifecycle acceptance still required.

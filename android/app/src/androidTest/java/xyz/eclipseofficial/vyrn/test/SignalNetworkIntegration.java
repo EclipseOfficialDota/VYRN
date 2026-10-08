@@ -229,6 +229,29 @@ final class SignalNetworkIntegration {
         if(failure!=null)throw failure;
     }
 
+    private static boolean awaitNativeText(java.util.concurrent.atomic.AtomicReference<org.telegram.messenger.MessageObject> target,String expected) throws Exception {
+        java.util.concurrent.CompletableFuture<Boolean> result=new java.util.concurrent.CompletableFuture<>();long deadline=android.os.SystemClock.elapsedRealtime()+8000;
+        org.telegram.messenger.AndroidUtilities.runOnUIThread(new Runnable(){public void run(){org.telegram.messenger.MessageObject object=target.get();if(object!=null&&expected.contentEquals(object.messageText)){result.complete(true);return;}if(android.os.SystemClock.elapsedRealtime()>=deadline){result.complete(false);return;}org.telegram.messenger.AndroidUtilities.runOnUIThread(this,100);}});
+        return result.get(10,java.util.concurrent.TimeUnit.SECONDS);
+    }
+    private static void metadataMigration(Context context,BiConsumer<Boolean,String> check) throws Exception {
+        final int slot=9016;String file="vyrn_ids_"+slot+".db",message=UUID.randomUUID().toString(),sender=UUID.randomUUID().toString(),conversation=UUID.randomUUID().toString();context.deleteDatabase(file);
+        try{
+            try(SQLiteDatabase legacy=SQLiteDatabase.openOrCreateDatabase(context.getDatabasePath(file),null)){
+                legacy.execSQL("CREATE TABLE ids(id INTEGER PRIMARY KEY AUTOINCREMENT,kind TEXT NOT NULL,uuid TEXT NOT NULL,UNIQUE(kind,uuid))");legacy.execSQL("INSERT INTO ids VALUES(7,'user',?)",new Object[]{sender});
+                legacy.execSQL("CREATE TABLE message_ids(id INTEGER PRIMARY KEY CHECK(id>0),uuid TEXT NOT NULL UNIQUE)");legacy.execSQL("INSERT INTO message_ids VALUES(17,?)",new Object[]{message});
+                legacy.execSQL("CREATE TABLE observed_messages(uuid TEXT PRIMARY KEY,conversation TEXT NOT NULL,sender TEXT NOT NULL,revision INTEGER NOT NULL CHECK(revision>0),body_hash BLOB)");legacy.execSQL("INSERT INTO observed_messages VALUES(?,?,?,?,NULL)",new Object[]{message,conversation,sender,2});legacy.setVersion(3);
+            }
+            try(IdMap ids=new IdMap(context,slot)){
+                check.accept(ids.remote("user",7).equals(sender)&&ids.remote("message",17).equals(message)&&ids.privateContext(17)==null,"signal_native_populated_v3_migration_preserves_ids_and_requires_fresh_private_metadata");
+                ids.observe(new xyz.eclipseofficial.vyrn.domain.Models.Message(message,sender,"ignored ciphertext",10,17,true,false,conversation,2,11));
+                JSONObject value=ids.privateContext(17);check.accept(value!=null&&value.getInt("revision")==2&&value.getInt("date")==10&&value.getInt("edited")==11,"signal_native_migrated_private_context_binds_revision_date_edit");
+                ids.observe(new xyz.eclipseofficial.vyrn.domain.Models.Message(message,sender,"old",9,17,true,false,conversation,1,0));check.accept(ids.privateContext(17).toString().equals(value.toString()),"signal_native_private_metadata_rejects_revision_regression");
+                ids.observe(new xyz.eclipseofficial.vyrn.domain.Models.Message(message,sender,"",10,17,true,true,conversation,2,11));boolean rejected=false;try{ids.observe(new xyz.eclipseofficial.vyrn.domain.Models.Message(message,sender,"revive",10,17,true,false,conversation,3,12));}catch(IllegalStateException expected){rejected=true;}check.accept(rejected&&ids.privateContext(17)==null,"signal_native_migrated_private_tombstone_cannot_revive");
+            }
+            try(IdMap ids=new IdMap(context,slot)){check.accept(ids.privateContext(17)==null&&ids.remote("message",17).equals(message),"signal_native_migration_tombstone_survives_reopen");}
+        }finally{context.deleteDatabase(file);}
+    }
     private static void nativeHydration(Context context,RestRepository receiver,JSONObject packet,String text,BiConsumer<Boolean,String> check) throws Exception {
         final int account=3;TokenVault vault=new TokenVault(context,account);
         if(org.telegram.messenger.UserConfig.getInstance(account).getClientUserId()!=0||vault.load().has("access_token"))throw new SecurityException("native_test_slot_in_use");
@@ -251,14 +274,35 @@ final class SignalNetworkIntegration {
                 target.set(new org.telegram.messenger.MessageObject(account,row,true,false));
             }catch(Throwable error){hydrated.completeExceptionally(error);}});
             check.accept(hydrated.get(30,java.util.concurrent.TimeUnit.SECONDS),"signal_native_constructor_hydrates_encrypted_cache_without_serializing_text");
+            org.telegram.messenger.MessagesStorage storage=org.telegram.messenger.MessagesStorage.getInstance(account);
+            java.util.ArrayList<org.telegram.tgnet.TLRPC.Message> rows=new java.util.ArrayList<>();rows.add(target.get().messageOwner);storage.putMessages(rows,true,true,false,0,0,0);
+            java.util.concurrent.CompletableFuture<Boolean> persisted=new java.util.concurrent.CompletableFuture<>();
+            storage.getStorageQueue().postRunnable(()->{try{org.telegram.SQLite.SQLiteCursor cursor=storage.getDatabase().queryFinalized("SELECT data,custom_params,replydata FROM messages_v2 WHERE uid="+peer+" AND mid="+value.ordinal);try{
+                boolean safe=cursor.next();if(safe){for(int column=0;column<3;column++){byte[] bytes=cursor.byteArrayValue(column);if(bytes!=null&&new String(bytes,StandardCharsets.UTF_8).contains(text))safe=false;}org.telegram.tgnet.NativeByteBuffer data=cursor.byteBufferValue(0);try{org.telegram.tgnet.TLRPC.Message stored=org.telegram.tgnet.TLRPC.Message.TLdeserialize(data,data.readInt32(true),true);safe &= "Encrypted message".equals(stored.message);}finally{data.reuse();}}persisted.complete(safe);
+            }finally{cursor.dispose();}}catch(Throwable error){persisted.completeExceptionally(error);}});
+            check.accept(persisted.get(20,java.util.concurrent.TimeUnit.SECONDS),"signal_native_messages_storage_persists_placeholder_without_private_text");
+            org.telegram.messenger.AndroidUtilities.runOnUIThread(()->target.get().messageOwner.from_id.user_id=owner);
+            check.accept(awaitNativeText(target,"Encrypted message"),"signal_native_sender_mutation_clears_volatile_text");
+            org.telegram.messenger.AndroidUtilities.runOnUIThread(()->{target.get().messageOwner.from_id.user_id=peer;xyz.eclipseofficial.vyrn.compat.VyrnBridge.hydratePrivateText(target.get());});
+            check.accept(awaitNativeText(target,text),"signal_native_verified_sender_restores_volatile_text");
+            org.telegram.messenger.AndroidUtilities.runOnUIThread(()->target.get().messageOwner.date++);
+            check.accept(awaitNativeText(target,"Encrypted message"),"signal_native_date_mutation_clears_volatile_text");
+            org.telegram.messenger.AndroidUtilities.runOnUIThread(()->{target.get().messageOwner.date=value.date;xyz.eclipseofficial.vyrn.compat.VyrnBridge.hydratePrivateText(target.get());});
+            check.accept(awaitNativeText(target,text),"signal_native_verified_date_restores_volatile_text");
+            vault.save(new JSONObject(receiver.vault.load().toString()).put("user_id",UUID.randomUUID().toString()));
+            check.accept(awaitNativeText(target,"Encrypted message"),"signal_native_same_session_changed_user_clears_volatile_text");
+            vault.save(receiver.vault.load());org.telegram.messenger.AndroidUtilities.runOnUIThread(()->xyz.eclipseofficial.vyrn.compat.VyrnBridge.hydratePrivateText(target.get()));
+            check.accept(awaitNativeText(target,text),"signal_native_restored_authenticated_user_restores_volatile_text");
             ids.observe(new xyz.eclipseofficial.vyrn.domain.Models.Message(value.id,value.sender,"",value.date,value.ordinal,true,true,value.conversation,value.revision,value.editedDate));
             check.accept(ids.privateContext(value.ordinal)==null,"signal_native_private_context_tombstone_fence");
+            check.accept(awaitNativeText(target,"Encrypted message"),"signal_native_metadata_deletion_clears_displayed_private_text");
         }finally{
             vault.clear();java.util.concurrent.CountDownLatch cleared=new java.util.concurrent.CountDownLatch(1);
             org.telegram.messenger.AndroidUtilities.runOnUIThread(()->{org.telegram.messenger.NotificationCenter.getInstance(account).removeObserver(observer,org.telegram.messenger.NotificationCenter.updateInterfaces);org.telegram.messenger.UserConfig.getInstance(account).setCurrentUser(new org.telegram.tgnet.TLRPC.TL_user());cleared.countDown();});cleared.await(10,java.util.concurrent.TimeUnit.SECONDS);
         }
     }
     private static void codec(Context context,RestRepository a,RestRepository b,RestRepository second,SignalDeviceKeys alice,SignalDeviceKeys bob,SignalDeviceKeys bob2,String conversation,java.util.List<SignalDeviceKeys.ClaimedKey> targets,BiConsumer<Boolean,String> check) throws Exception {
+        metadataMigration(context,check);
         SignalMessages sending=new SignalMessages(alice),receiving=new SignalMessages(bob),receiving2=new SignalMessages(bob2);
         SignalDeviceKeys.ClaimedKey senderKey=bob.claim(alice.user,alice.device,1);
         String client=UUID.randomUUID().toString(),text="پیام خصوصی پایدار 🔐";
