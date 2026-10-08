@@ -15,7 +15,7 @@ $phases=@('signal','signal-restart')
 $report='android-signal.json'
 try {
 if($Network){
-    $phases=@('signal-network','signal-network-restart');$report='android-signal-network.json'
+    $phases=@('signal-network','signal-network-offline-restart','signal-network-restart');$report='android-signal-network.json'
     & $adb -s $Serial reverse tcp:18443 tcp:18443
     if($LASTEXITCODE -ne 0){throw 'Local TLS forwarding failed'}
     & $adb -s $Serial shell run-as $package mkdir -p files
@@ -33,6 +33,7 @@ if($Network){
 }
 $rounds=@()
 foreach($phase in $phases){
+    if($Network){if($phase -eq 'signal-network-offline-restart'){& $adb -s $Serial reverse --remove tcp:18443}else{& $adb -s $Serial reverse tcp:18443 tcp:18443};if($LASTEXITCODE -ne 0){throw 'Signal test network mapping failed'}}
     & $adb -s $Serial shell am force-stop $package
     if($LASTEXITCODE -ne 0){throw 'Test process stop failed'}
     $result=(& $adb -s $Serial shell am instrument -w -e phase $phase "$package.test/xyz.eclipseofficial.vyrn.test.LocalIntegrationRunner") -join "`n"
@@ -53,6 +54,8 @@ foreach($phase in $phases){
     Write-Output "PASS: Signal integration phase $phase"
 } } finally {
     if($Network){
+        & $adb -s $Serial reverse tcp:18443 tcp:18443
+        if($LASTEXITCODE -ne 0){throw 'Signal test network mapping restore failed'}
         $cleanup=(& $adb -s $Serial shell am instrument -w -e phase signal-network-cleanup "$package.test/xyz.eclipseofficial.vyrn.test.LocalIntegrationRunner") -join "`n"
         [IO.File]::WriteAllText((Join-Path $root '.local/android-signal-network-cleanup.log'),$cleanup)
         $cleanupFailed=($LASTEXITCODE -ne 0 -or $cleanup -notmatch 'vyrn_result=passed')

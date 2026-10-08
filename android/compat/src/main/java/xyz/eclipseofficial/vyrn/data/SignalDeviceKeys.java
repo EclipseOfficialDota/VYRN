@@ -24,12 +24,24 @@ public final class SignalDeviceKeys implements AutoCloseable {
     private final String session;
     private final RestRepository repository;
     public SignalDeviceKeys(Context context,RestRepository repository) throws Exception {
+        this(context,repository,false);
+    }
+    /** Offline cache access requires an existing encrypted store and previously authenticated device binding. */
+    public static SignalDeviceKeys openLocal(Context context,RestRepository repository) throws Exception {return new SignalDeviceKeys(context,repository,true);}
+    private SignalDeviceKeys(Context context,RestRepository repository,boolean local) throws Exception {
         this.repository=repository;
         synchronized(repository.vault.guard()){
             JSONObject tokens=repository.vault.load();user=id(tokens.getString("user_id"));session=id(tokens.getString("session_id"));
-            JSONObject me=(JSONObject)request("GET","/v1/me",null);
-            if(!user.equals(me.getString("id")))throw new SecurityException("signal_owner_changed");
-            device=id(me.getString("device_id"));store=new SignalStore(context,user,device);
+            if(local){if(!tokens.has("signal_device_id")||!session.equals(tokens.optString("signal_device_session")))throw new SecurityException("signal_local_device_missing");device=id(tokens.getString("signal_device_id"));store=SignalStore.openExisting(context,user,device);}
+            else{JSONObject me=(JSONObject)request("GET","/v1/me",null);if(!user.equals(me.getString("id")))throw new SecurityException("signal_owner_changed");device=id(me.getString("device_id"));requireSession();JSONObject current=repository.vault.load();if(current.has("signal_device_id")&&!device.equals(current.getString("signal_device_id")))throw new SecurityException("signal_device_changed");repository.vault.save(current.put("signal_device_id",device).put("signal_device_session",session));store=new SignalStore(context,user,device);}
+            try{
+                store.transaction(()->{
+                    byte[] prior=store.loadValue("keys","authenticated-device");
+                    if(prior==null){if(local)throw new SecurityException("signal_local_device_unverified");store.saveValue("keys","authenticated-device",new JSONObject().put("user",user).put("device",device).toString().getBytes(StandardCharsets.UTF_8));}
+                    else{JSONObject binding=new JSONObject(new String(prior,StandardCharsets.UTF_8));if(!user.equals(binding.getString("user"))||!device.equals(binding.getString("device")))throw new SecurityException("signal_device_changed");}
+                    if(local)acknowledged();return null;
+                });
+            }catch(Exception failure){store.close();throw failure;}
         }
     }
     Object guard(){return repository.vault.guard();}

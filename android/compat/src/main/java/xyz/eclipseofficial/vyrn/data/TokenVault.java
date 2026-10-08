@@ -38,6 +38,10 @@ public final class TokenVault {
     }
     public void save(JSONObject tokens) throws Exception { synchronized(guard()) {
         JSONObject stored=new JSONObject(tokens.toString());
+        if(!stored.has("signal_device_id")&&isUser(stored.optString("user_id"))&&stored.optString("session_id").equals(cachedSession())){
+            JSONObject previous=load();
+            if(!stored.optString("user_id").isEmpty()&&!stored.optString("session_id").isEmpty()&&stored.optString("user_id").equals(previous.optString("user_id"))&&stored.optString("session_id").equals(previous.optString("session_id"))&&previous.has("signal_device_id")&&stored.optString("session_id").equals(previous.optString("signal_device_session")))stored.put("signal_device_id",previous.getString("signal_device_id")).put("signal_device_session",previous.getString("signal_device_session"));
+        }
         if(!stored.has("recovery_pending")&&hasPendingRecovery()){
             JSONObject previous=load();
             if(!stored.optString("user_id").isEmpty()&&!stored.optString("session_id").isEmpty()&&stored.optString("user_id").equals(previous.optString("user_id"))&&stored.optString("session_id").equals(previous.optString("session_id"))&&previous.optBoolean("recovery_pending")){

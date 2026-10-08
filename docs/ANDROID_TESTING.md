@@ -1,5 +1,11 @@
 # Local Android integration
 
+## Authenticated encrypted history after offline process restart — 2026-10-08
+
+scripts/test-signal.ps1 -Network now runs signal-network, signal-network-offline-restart, then signal-network-restart. The host removes the scoped emulator18443 reverse before force-stopping/relaunching the app; the offline phase requires an actual IOException from authenticated HTTPS before testing cache access. Restore the same reverse before online retry and cleanup, including on failure. Three distinct actual app process IDs are recorded.
+
+Latest run passes76 checks (59 network+11 offline+6 online restart), artifacts/android-signal-network.json at22:50:26; local APK SHA256c52cd64f115a6c1883bf3cf2c9c07777c9932eed44737eb60654dc8d60afaaa6. Both encrypted history caches open offline, pending ciphertext/ratchets stay unchanged, duplicate receive requires no directory, changed account/session and reused old-session device proof are rejected, mismatched encrypted device binding is not replaced, missing store creates no identity, and a valid other-account login can replace corrupt unrelated token ciphertext. Includes a real server-device UUID differing from the requested local UUID. These are service/cache tests; native private rendering/sending remains gated.
+
 ## Compact Debug packaging and device-key readiness — 2026-10-08
 
 The app module pins the same NDK27.2.12479018 as the native library module, allowing AGP to strip debug symbols. Exclude only libsignal_jni_testing.so from JNI packaging; retain libsignal_jni.so and libtmessages.49.so. The build wrapper recreates only the selected variant's APK output and incremental packaging cache, with validated paths inside android/app/build. This prevents deleted ZIP content from leaving hundreds of MB of unused archive space. Normal APK verification rejects test-only JNI and single-architecture files above250,000,000 bytes.

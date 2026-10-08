@@ -47,18 +47,23 @@ public final class SignalStore implements SignalProtocolStore, AutoCloseable {
     private final SQLiteOpenHelper helper;
 
     public SignalStore(Context context,String user,String device) throws Exception {
+        this(context,user,device,true);
+    }
+    public static SignalStore openExisting(Context context,String user,String device) throws Exception {return new SignalStore(context,user,device,false);}
+    private SignalStore(Context context,String user,String device,boolean create) throws Exception {
         if(!UUID.fromString(user).toString().equals(user) || !UUID.fromString(device).toString().equals(device))throw new IllegalArgumentException("invalid_signal_owner");
         namespace=user+"_"+device; alias="vyrn.signal."+namespace; guard=LOCKS.computeIfAbsent(namespace,ignored->new Object());
         String path=new File(context.getNoBackupFilesDir(),"vyrn_signal_"+namespace+".db").getAbsolutePath();
+        if(!create && !new File(path).isFile())throw new SecurityException("signal_local_store_missing");
         helper=new SQLiteOpenHelper(context.getApplicationContext(),path,null,1){
             @Override public void onConfigure(SQLiteDatabase db){db.execSQL("PRAGMA synchronous=FULL");}
-            @Override public void onCreate(SQLiteDatabase db){db.execSQL("CREATE TABLE records(kind TEXT NOT NULL,name TEXT NOT NULL,device INTEGER NOT NULL,key_id INTEGER NOT NULL,value BLOB NOT NULL,PRIMARY KEY(kind,name,device,key_id)) WITHOUT ROWID");}
+            @Override public void onCreate(SQLiteDatabase db){if(!create)throw new SecurityException("signal_local_store_missing");db.execSQL("CREATE TABLE records(kind TEXT NOT NULL,name TEXT NOT NULL,device INTEGER NOT NULL,key_id INTEGER NOT NULL,value BLOB NOT NULL,PRIMARY KEY(kind,name,device,key_id)) WITHOUT ROWID");}
             @Override public void onUpgrade(SQLiteDatabase db,int oldVersion,int newVersion){throw new IllegalStateException("unsupported_signal_schema");}
         };
         try { transaction(()->{
             byte[] identity=read("local","",0,0), registration=read("local","",0,1);
             if(identity==null && registration==null){
-                if(count()!=0)throw new SecurityException("missing_signal_identity");
+                if(!create || count()!=0)throw new SecurityException("missing_signal_identity");
                 write("local","",0,0,IdentityKeyPair.generate().serialize());
                 write("local","",0,1,ByteBuffer.allocate(4).putInt(KeyHelper.generateRegistrationId(false)).array());
             }else if(identity==null || registration==null || registration.length!=4){throw new SecurityException("incomplete_signal_identity");}

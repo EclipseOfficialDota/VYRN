@@ -1,5 +1,11 @@
 # Verification report
 
+## Offline encrypted cache and authenticated device proof — 2026-10-08
+
+Fresh Signal run passes76 checks:59 actual network/JNI,11 after real app process restart with18443 forwarding removed,6 after transport restoration and another restart. Offline phase requires authenticated HTTPS IOException; both encrypted caches remain readable without directory access, pending ciphertext/ratchets unchanged. Changed account/session, reused old-session device proof, mismatched device binding and missing-store regeneration are rejected. A valid new login can replace corrupt unrelated token ciphertext. Actual server-device UUID differing from requested local UUID is preserved. PIDs6335/6472/6574, report22:50:26, APK SHA256c52cd64f115a6c1883bf3cf2c9c07777c9932eed44737eb60654dc8d60afaaa6.
+
+Same APK's independent native registration/publication/group messaging/offline scenario passes261 recorded checks at22:56:49. Native automatic device keys, cold stable publication, bidirectional send/edit/delete, original-row offline recovery, uniqueness and deletion fences remain valid. REST group setup/programmatic chat entry; no physical-device claim. Normal ARM build2m12s; all three signature/package/API/ABI/TLS/size checks pass:122428249/108141555/158653666 bytes. Native private rendering/sending remains disabled and incomplete.
+
 ## Compact Debug APK and automatic device publication — 2026-10-08
 
 Fresh normal Debug builds pass signature/package/API/ABI/native Signal/TLS-policy verification: ARM64 122,428,217 bytes, ARMv7 108,141,523 bytes, universal158,653,634 bytes. App NDK pin enables native-symbol stripping; testing JNI excluded. Initial incremental archives still occupied692 MB despite121 MB payload; build wrapper now recreates bounded variant packaging outputs, removing unused ZIP data. scripts/verify-apks.ps1 rejects testing JNI and per-ABI artifacts above250 MB. ARM64 reduction82.3%; APKs remain Debug and physical ARM installation is unverified.

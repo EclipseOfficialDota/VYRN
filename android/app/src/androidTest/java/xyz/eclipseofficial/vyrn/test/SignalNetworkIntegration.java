@@ -112,6 +112,7 @@ final class SignalNetworkIntegration {
                 check.accept(denied && alice.store.loadValue("private-outgoing",unpreparedClient)==null && Arrays.equals(beforeRoster,alice.store.loadSession(ba).serialize()),"signal_auto_roster_unprepared_device_stops_before_encryption");
                 SignalProtocolAddress b2a=bob2.publishInitial();
                 check.accept(bob2.device.equals(alice.device) && !b2a.equals(aa) && !bob2.device.equals(second.vault.device()),"signal_network_cross_account_device_UUID_addresses");
+                try(SignalDeviceKeys localSecond=SignalDeviceKeys.openLocal(context,second)){check.accept(localSecond.device.equals(bob2.device)&&localSecond.store.getIdentityKeyPair().getPublicKey().equals(bob2.store.getIdentityKeyPair().getPublicKey()),"signal_local_authenticated_device_independent_of_requested_UUID");}
                 automatic(context,fixture,a,b,second,alice,bob,bob2,conversation,check);
                 SignalDeviceKeys.ClaimedKey b2key=alice.claim(bob2.user,bob2.device,1);
                 alice.store.transaction(()->{new SessionBuilder(alice.store,b2a,aa).process(b2key.bundle);return null;});
@@ -176,6 +177,35 @@ final class SignalNetworkIntegration {
         // Test-only app-private state: no credentials or decrypted message text.
         Files.write(new File(context.getFilesDir(),"vyrn-signal-network-state.json").toPath(),state.toString().getBytes(StandardCharsets.UTF_8));
         check.accept(alice.store.loadValue("private-outgoing",pending)!=null && bob.store.loadValue("private-cache",message+"_1")!=null,"signal_codec_restart_fixture_pending_ciphertext");
+    }
+    static void offlineRestart(Context context,BiConsumer<Boolean,String> check) throws Exception {
+        JSONObject state=new JSONObject(new String(Files.readAllBytes(new File(context.getFilesDir(),"vyrn-signal-network-state.json").toPath()),StandardCharsets.UTF_8));
+        RestRepository a=new RestRepository(new TokenVault(context,9101)),b=new RestRepository(new TokenVault(context,9102));
+        boolean unavailable=false;try{a.me();}catch(java.io.IOException expected){unavailable=true;}check.accept(unavailable,"signal_offline_actual_authenticated_request_unavailable");
+        try(SignalDeviceKeys alice=SignalDeviceKeys.openLocal(context,a);SignalDeviceKeys bob=SignalDeviceKeys.openLocal(context,b)){
+            check.accept(alice.user.equals(state.getString("alice"))&&bob.user.equals(state.getString("bob")),"signal_offline_existing_authenticated_devices");
+            SignalMessages outgoing=new SignalMessages(alice),incoming=new SignalMessages(bob);String message=state.getString("message");
+            check.accept(RESTART_TEXT.equals(outgoing.cachedText(message))&&RESTART_TEXT.equals(incoming.cachedText(message)),"signal_offline_cold_encrypted_history_both_devices");
+            check.accept(state.getString("body").equals(outgoing.prepare(bob.user,state.getString("conversation"),state.getString("pending"),RESTART_TEXT,null))&&state.getString("sender_ratchet").equals(fingerprint(alice.store.loadSession(new SignalProtocolAddress(state.getString("recipient_address"),1)).serialize())),"signal_offline_pending_exact_ciphertext_without_ratchet_advance");
+            check.accept(RESTART_TEXT.equals(incoming.receive(alice.user,state.getString("conversation"),state.getJSONObject("delivered"),null))&&state.getString("receiver_ratchet").equals(fingerprint(bob.store.loadSession(new SignalProtocolAddress(state.getString("sender_address"),1)).serialize())),"signal_offline_cached_duplicate_without_directory");
+            JSONObject original=a.vault.load();try{a.vault.save(new JSONObject(original.toString()).put("session_id",UUID.randomUUID().toString()));boolean denied=false;try{outgoing.cachedText(message);}catch(SecurityException expected){denied=true;}check.accept(denied,"signal_offline_changed_session_cannot_read_history");denied=false;try(SignalDeviceKeys ignored=SignalDeviceKeys.openLocal(context,a)){}catch(SecurityException expected){denied=true;}check.accept(denied,"signal_offline_new_session_cannot_reuse_old_device_proof");}finally{a.vault.save(original);}
+            try{a.vault.save(b.vault.load());boolean denied=false;try{outgoing.cachedText(message);}catch(SecurityException expected){denied=true;}check.accept(denied,"signal_offline_changed_account_cannot_read_history");}finally{a.vault.save(original);}
+            byte[] binding=alice.store.loadValue("keys","authenticated-device");
+            try{
+                alice.store.transaction(()->{alice.store.saveValue("keys","authenticated-device",new JSONObject().put("user",UUID.randomUUID().toString()).put("device",alice.device).toString().getBytes(StandardCharsets.UTF_8));return null;});
+                boolean denied=false;try(SignalDeviceKeys ignored=SignalDeviceKeys.openLocal(context,a)){}catch(SecurityException expected){denied=true;}
+                check.accept(denied&&!Arrays.equals(binding,alice.store.loadValue("keys","authenticated-device")),"signal_offline_mismatched_device_binding_not_replaced");
+            }finally{alice.store.transaction(()->{alice.store.saveValue("keys","authenticated-device",binding);return null;});}
+        }
+        String missingUser=UUID.randomUUID().toString(),missingDevice=UUID.randomUUID().toString();File missing=new File(context.getNoBackupFilesDir(),"vyrn_signal_"+missingUser+"_"+missingDevice+".db");
+        boolean denied=false;try(SignalStore ignored=SignalStore.openExisting(context,missingUser,missingDevice)){}catch(SecurityException expected){denied=true;}
+        check.accept(denied&&!missing.exists(),"signal_offline_missing_store_does_not_create_identity");
+        TokenVault replacement=new TokenVault(context,9198);replacement.clear();
+        try{
+            JSONObject before=b.vault.load(),next=a.vault.load();for(JSONObject value:new JSONObject[]{before,next}){value.remove("signal_device_id");value.remove("signal_device_session");}
+            replacement.save(before);context.getSharedPreferences("vyrn_session_9198",Context.MODE_PRIVATE).edit().putString("tokens","corrupt").commit();
+            replacement.save(next);check.accept(next.getString("user_id").equals(replacement.load().getString("user_id"))&&!replacement.load().has("signal_device_id"),"signal_new_login_can_replace_corrupt_unrelated_tokens");
+        }finally{replacement.clear();}
     }
     static void restart(Context context,BiConsumer<Boolean,String> check) throws Exception {
         JSONObject state=new JSONObject(new String(Files.readAllBytes(new File(context.getFilesDir(),"vyrn-signal-network-state.json").toPath()),StandardCharsets.UTF_8));
