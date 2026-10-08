@@ -1,5 +1,9 @@
 # Decisions
 
+## Native encrypted text hydration — 2026-10-08
+
+Use the existing IO executor and immutable encrypted-cache display API from the pinned MessageObject constructor. Persist only routing/revision/date/edit/encrypted/deleted metadata in IdMap v4; old v3 rows default to nonencrypted until a fresh observation, preserving fail-closed provenance. Check the exact native object, owner/session, current metadata and native deletion snapshot before applying volatile text. Update visible cells through a scoped updateInterfaces mask rather than replacing objects by message ID; stale objects cannot replace newer edits. A weak-reference timer clears volatile text on invalidated provenance/account/session or expiry. Private sending remains gated. Constructor hydration is tested; actual ChatActivity/storage/lifecycle acceptance still required.
+
 ## Private receive metadata and volatile text — 2026-10-08
 
 Use authorized signed sender directory metadata for incoming decryption; reading a message must not consume sender one-time prekeys. Reuse immutable cached bindings offline and reject changed identity/address. Before handing encrypted-cache text to native formatting, require matching peer/conversation/sender/revision/ordinal and enforce deletion/expiry. Keep TL messageOwner as the placeholder; MessageObject.applyNewText can hold volatile layout text without changing serialized message bytes. The component check does not replace actual ChatActivity/native-storage lifecycle verification. Native private sending remains gated until the remaining identity/device/outbox workflow is connected and verified.

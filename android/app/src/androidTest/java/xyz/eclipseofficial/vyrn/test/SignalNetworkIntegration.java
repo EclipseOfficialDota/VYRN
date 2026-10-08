@@ -229,6 +229,35 @@ final class SignalNetworkIntegration {
         if(failure!=null)throw failure;
     }
 
+    private static void nativeHydration(Context context,RestRepository receiver,JSONObject packet,String text,BiConsumer<Boolean,String> check) throws Exception {
+        final int account=3;TokenVault vault=new TokenVault(context,account);
+        if(org.telegram.messenger.UserConfig.getInstance(account).getClientUserId()!=0||vault.load().has("access_token"))throw new SecurityException("native_test_slot_in_use");
+        xyz.eclipseofficial.vyrn.domain.Models.Message value=receiver.message(packet.getString("id"));
+        java.util.concurrent.CountDownLatch ready=new java.util.concurrent.CountDownLatch(1);
+        org.telegram.messenger.MessagesStorage.getInstance(account).getStorageQueue().postRunnable(ready::countDown);
+        if(!ready.await(20,java.util.concurrent.TimeUnit.SECONDS))throw new IllegalStateException("native_storage_not_ready");
+        java.util.concurrent.CompletableFuture<Boolean> hydrated=new java.util.concurrent.CompletableFuture<>();
+        java.util.concurrent.atomic.AtomicReference<org.telegram.messenger.MessageObject> target=new java.util.concurrent.atomic.AtomicReference<>();
+        org.telegram.messenger.NotificationCenter.NotificationCenterDelegate observer=(event,slot,args)->{try{
+            org.telegram.messenger.MessageObject object=target.get();if(object==null||!text.contentEquals(object.messageText))return;
+            org.telegram.tgnet.SerializedData serialized=new org.telegram.tgnet.SerializedData();try{object.messageOwner.serializeToStream(serialized);hydrated.complete("Encrypted message".equals(object.messageOwner.message)&&!new String(serialized.toByteArray(),StandardCharsets.UTF_8).contains(text));}finally{serialized.cleanup();}
+        }catch(Throwable error){hydrated.completeExceptionally(error);}};
+        try(IdMap ids=new IdMap(context,account)){
+            vault.save(receiver.vault.load());long owner=ids.local("user",receiver.vault.load().getString("user_id")),peer=ids.local("user",value.sender);ids.observe(value);
+            org.telegram.messenger.AndroidUtilities.runOnUIThread(()->{try{
+                org.telegram.tgnet.TLRPC.TL_user user=new org.telegram.tgnet.TLRPC.TL_user();user.id=owner;user.first_name="Signal fixture";org.telegram.messenger.UserConfig.getInstance(account).setCurrentUser(user);
+                org.telegram.messenger.NotificationCenter.getInstance(account).addObserver(observer,org.telegram.messenger.NotificationCenter.updateInterfaces);
+                org.telegram.tgnet.TLRPC.TL_message row=new org.telegram.tgnet.TLRPC.TL_message();row.id=value.ordinal;row.date=value.date;row.edit_date=value.editedDate;row.message="Encrypted message";row.flags=256;row.from_id=new org.telegram.tgnet.TLRPC.TL_peerUser();row.from_id.user_id=peer;row.peer_id=new org.telegram.tgnet.TLRPC.TL_peerUser();row.peer_id.user_id=peer;row.media=new org.telegram.tgnet.TLRPC.TL_messageMediaEmpty();
+                target.set(new org.telegram.messenger.MessageObject(account,row,true,false));
+            }catch(Throwable error){hydrated.completeExceptionally(error);}});
+            check.accept(hydrated.get(30,java.util.concurrent.TimeUnit.SECONDS),"signal_native_constructor_hydrates_encrypted_cache_without_serializing_text");
+            ids.observe(new xyz.eclipseofficial.vyrn.domain.Models.Message(value.id,value.sender,"",value.date,value.ordinal,true,true,value.conversation,value.revision,value.editedDate));
+            check.accept(ids.privateContext(value.ordinal)==null,"signal_native_private_context_tombstone_fence");
+        }finally{
+            vault.clear();java.util.concurrent.CountDownLatch cleared=new java.util.concurrent.CountDownLatch(1);
+            org.telegram.messenger.AndroidUtilities.runOnUIThread(()->{org.telegram.messenger.NotificationCenter.getInstance(account).removeObserver(observer,org.telegram.messenger.NotificationCenter.updateInterfaces);org.telegram.messenger.UserConfig.getInstance(account).setCurrentUser(new org.telegram.tgnet.TLRPC.TL_user());cleared.countDown();});cleared.await(10,java.util.concurrent.TimeUnit.SECONDS);
+        }
+    }
     private static void codec(Context context,RestRepository a,RestRepository b,RestRepository second,SignalDeviceKeys alice,SignalDeviceKeys bob,SignalDeviceKeys bob2,String conversation,java.util.List<SignalDeviceKeys.ClaimedKey> targets,BiConsumer<Boolean,String> check) throws Exception {
         SignalMessages sending=new SignalMessages(alice),receiving=new SignalMessages(bob),receiving2=new SignalMessages(bob2);
         SignalDeviceKeys.ClaimedKey senderKey=bob.claim(alice.user,alice.device,1);
@@ -265,6 +294,7 @@ final class SignalNetworkIntegration {
             org.telegram.tgnet.SerializedData serialized=new org.telegram.tgnet.SerializedData();try{row.serializeToStream(serialized);nativePrivacy.complete("Encrypted message".equals(row.message)&&text.contentEquals(object.messageText)&&!new String(serialized.toByteArray(),StandardCharsets.UTF_8).contains(text));}finally{serialized.cleanup();}
         }catch(Throwable failure){nativePrivacy.completeExceptionally(failure);}});
         check.accept(nativePrivacy.get(20,java.util.concurrent.TimeUnit.SECONDS),"signal_native_volatile_layout_does_not_serialize_private_text");
+        nativeHydration(context,b,delivered,text,check);
         byte[] after=bob.store.loadSession(senderKey.address).serialize();
         check.accept(text.equals(receiving.receive(alice.user,conversation,delivered,null)) && Arrays.equals(after,bob.store.loadSession(senderKey.address).serialize()) && text.equals(sending.receive(bob.user,conversation,(JSONObject)a.request("GET","/v1/messages/"+message,null,true),null)),"signal_codec_duplicate_and_producing_device_history_cache");
         changed=new JSONObject(delivered.toString()).put("id",UUID.randomUUID().toString());denied=false;try{receiving.receive(alice.user,conversation,changed,null);}catch(SecurityException expected){denied=true;}

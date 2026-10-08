@@ -1,5 +1,9 @@
 # Verification report
 
+## Native encrypted-cache constructor hydration — 2026-10-08
+
+Fresh local build2m52s and Signal suite86 checks pass at23:37:16. APK SHA256581d659f568e1521cefaa03e71c4b8ebe23860a5d683e231b17122377ed3d16b;69 network/11 disconnected cold restart/6 online restart, PIDs8893/9003/9102. A reserved inactive native account3 receives authenticated fixture proof and metadata, constructs MessageObject and waits for the constructor's actual async cache hydration. Displayed text matches decrypted cache and serialized TL message keeps the placeholder; metadata tombstone removes private context. Borrowed vault/native owner are cleared. This is an automatic native-object test, not actual visible ChatActivity, native SQLite blob audit, physical-phone or notification acceptance. Same APK's two-client native -PrivateKeys -Offline regression passes261 recorded checks (registration30 + rounds231) at23:40:27. Native automatic publication and group send/edit/delete/offline recovery/nonduplication/tombstones remain verified in emulators, with REST group setup/programmatic chat entry. Normal phone build2m14s and all three APK signature/package/API/ABI/TLS/size checks pass:122428213/108141519/158653630 bytes. ARM64 SHA256405bb4016a8fe4cdec78b6274b2e45550a9539bea7887e126ef9988f2b13bc0e; ARMv7 16d87d8c70344d770c31e1c62ba8726df40785df44b2101fc13df2769c9b153a; universal9f335bc447dbe94d2613e92e26075bc09561d2326dbbec0f90115cb85cefe4e0. Debug/no local CA; physical installation untested.
+
 ## Sender authentication and native formatting boundary — 2026-10-08
 
 Normal phone build3m and all three APK verification checks pass. ARM64 122428245 bytes/SHA2561b2e5f9d9455aadea7fcd4121811876b699c8732d59006d97d8f3d324a6d607c; ARMv7 108141551/598f8e4ff0fa9ad4c1e472c64a081fe4f5aef8c5c708ad43fce78f988cd2b688; universal158653662/aeb239669529570b16f7a0b2a6860bf1a011da25b496a1b23f31706421a86ede. Debug artifacts, no local test CA; physical installation remains untested.

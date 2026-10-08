@@ -35,6 +35,7 @@ import xyz.eclipseofficial.vyrn.data.OutboxSender;
 import xyz.eclipseofficial.vyrn.data.OutboxStore;
 import xyz.eclipseofficial.vyrn.data.RealtimeSync;
 import xyz.eclipseofficial.vyrn.data.SignalDeviceKeys;
+import xyz.eclipseofficial.vyrn.data.SignalMessages;
 import xyz.eclipseofficial.vyrn.domain.Models;
 
 /** The only adapter allowed to depend on both Telegram wire-shaped UI models and VYRN domain models. */
@@ -238,6 +239,39 @@ public final class VyrnBridge {
     }
     public static synchronized VyrnBridge forAccount(int account){VyrnBridge bridge=INSTANCES.get(account);if(bridge==null){bridge=new VyrnBridge(account);INSTANCES.put(account,bridge);}return bridge;}
     public static void execute(Runnable task){IO.execute(task);}
+    public static final int PRIVATE_TEXT_UPDATE=1<<29;
+    /** Native messageOwner remains a placeholder. Only the exact object receives volatile layout text. */
+    public static void hydratePrivateText(MessageObject object){
+        if(object==null||object.messageOwner==null||object.getId()<=0||object.getDialogId()<=0||object.messageOwner.peer_id==null||object.messageOwner.peer_id.user_id==0)return;
+        final int account=object.currentAccount,id=object.getId();final long dialog=object.getDialogId(),owner=UserConfig.getInstance(account).getClientUserId();
+        if(owner==0||dialog==owner)return;VyrnBridge bridge=forAccount(account);final String session=bridge.repository.vault.cachedSession();if(session==null)return;
+        final TLRPC.Message row=object.messageOwner;final String placeholder=row.message;final int edited=row.edit_date;
+        final java.lang.ref.WeakReference<MessageObject> reference=new java.lang.ref.WeakReference<>(object);
+        execute(()->{try{
+            JSONObject context=bridge.ids.privateContext(id);if(context==null||context.getInt("date")!=row.date||context.getInt("edited")!=edited)return;
+            String peer=bridge.ids.remote("user",dialog),sender=context.getString("sender");
+            if(row.from_id==null||row.from_id.user_id!=bridge.ids.local("user",sender))return;
+            JSONObject display;
+            try(SignalDeviceKeys keys=SignalDeviceKeys.openLocal(ApplicationLoader.applicationContext,bridge.repository)){
+                if(bridge.ids.local("user",keys.user)!=owner||!session.equals(bridge.repository.vault.cachedSession()))return;
+                SignalMessages messages=new SignalMessages(keys);
+                display=messages.display(peer,context.getString("conversation"),context.getString("message"),sender,context.getInt("revision"),id);
+                if(display==null){JSONObject packet=(JSONObject)bridge.repository.requestForSession(keys.user,session,"GET","/v1/messages/"+context.getString("message"),null);messages.receive(peer,context.getString("conversation"),packet);display=messages.display(peer,context.getString("conversation"),context.getString("message"),sender,context.getInt("revision"),id);}
+            }
+            if(display==null)return;final String text=display.getString("text");final long expiry=display.isNull("expires_at")?Long.MAX_VALUE:java.time.Instant.parse(display.getString("expires_at")).toEpochMilli();
+            AndroidUtilities.runOnUIThread(()->{try{
+                MessageObject target=reference.get();if(target==null||target.deleted||target.messageOwner!=row||target.getId()!=id||target.getDialogId()!=dialog||row.edit_date!=edited||!java.util.Objects.equals(row.message,placeholder)||UserConfig.getInstance(account).getClientUserId()!=owner||!session.equals(bridge.repository.vault.cachedSession())||expiry<=System.currentTimeMillis()||!context.toString().equals(String.valueOf(bridge.ids.privateContext(id))))return;
+                Map<Long,java.util.Set<Integer>> deleted=MessagesStorage.getInstance(account).getVyrnDeletedMessages();if(deleted==null||deleted.containsKey(dialog)&&deleted.get(dialog).contains(id))return;
+                target.applyNewText(text);NotificationCenter.getInstance(account).postNotificationName(NotificationCenter.updateInterfaces,PRIVATE_TEXT_UPDATE);
+                AndroidUtilities.runOnUIThread(new Runnable(){public void run(){MessageObject current=reference.get();if(current==null||current.messageOwner!=row)return;
+                    boolean live=false;try{Map<Long,java.util.Set<Integer>> fences=MessagesStorage.getInstance(account).getVyrnDeletedMessages();live=fences!=null&&(!fences.containsKey(dialog)||!fences.get(dialog).contains(id))&&context.toString().equals(String.valueOf(bridge.ids.privateContext(id)));}catch(Exception unavailable){/* Clear volatile text if provenance cannot be checked. */}
+                    if(!live||current.deleted||UserConfig.getInstance(account).getClientUserId()!=owner||!session.equals(bridge.repository.vault.cachedSession())||expiry<=System.currentTimeMillis()){
+                        current.applyNewText(placeholder);NotificationCenter.getInstance(account).postNotificationName(NotificationCenter.updateInterfaces,PRIVATE_TEXT_UPDATE);return;
+                    }AndroidUtilities.runOnUIThread(this,1000);
+                }},1000);
+            }catch(Exception unavailable){/* Preserve the placeholder on changed or unavailable provenance. */}});
+        }catch(Exception unavailable){/* No plaintext fallback or identity regeneration. */}});
+    }
     boolean isLocalUser(String user,long expected){return expected!=0&&user!=null&&!user.isEmpty()&&ids.local("user",user)==expected;}
     /** Replayed live updates must follow a confirmed deletion through the native delete path. */
     public static boolean filterDeletedUpdates(int account,ArrayList<TLRPC.Update> updates){

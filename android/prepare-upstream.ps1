@@ -501,6 +501,20 @@ if (dialog_id < 0 && !DialogObject.isEncryptedDialog(dialog_id) && !editingMessa
                 }
 '@)
 }
+Edit 'TMessagesProj/src/main/java/org/telegram/messenger/MessageObject.java' {
+ param($t)
+ $t=(& git -c "safe.directory=$($upstream.Replace('\','/'))" -C $upstream show "${pin}:TMessagesProj/src/main/java/org/telegram/messenger/MessageObject.java") -join "`n"
+ $marker="        if (checkMediaExists) {`n            checkMediaExistance();`n        }"
+ if(!$t.Contains($marker)){throw 'Pinned private text constructor marker missing'}
+ $t.Replace($marker,$marker+"`n        xyz.eclipseofficial.vyrn.compat.VyrnBridge.hydratePrivateText(this);")
+}
+Edit 'TMessagesProj/src/main/java/org/telegram/ui/ChatActivity.java' {
+ param($t)
+ $t=(& git -c "safe.directory=$($upstream.Replace('\','/'))" -C $upstream show "${pin}:TMessagesProj/src/main/java/org/telegram/ui/ChatActivity.java") -join "`n"
+ $marker='            int updateMask = (Integer) args[0];'
+ if(!$t.Contains($marker)){throw 'Pinned private text UI refresh marker missing'}
+ $t.Replace($marker,$marker+"`n            if ((updateMask & xyz.eclipseofficial.vyrn.compat.VyrnBridge.PRIVATE_TEXT_UPDATE) != 0) updateVisibleRows();")
+}
 Edit 'TMessagesProj/src/main/java/org/telegram/messenger/NotificationCenter.java' {
  param($t)
  $t=(& git -c "safe.directory=$($upstream.Replace('\','/'))" -C $upstream show "${pin}:TMessagesProj/src/main/java/org/telegram/messenger/NotificationCenter.java") -join "`n"

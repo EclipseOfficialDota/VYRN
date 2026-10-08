@@ -12,25 +12,31 @@ import xyz.eclipseofficial.vyrn.domain.Models;
 
 /** Local stable IDs isolate the Telegram UI's integer identifiers from VYRN UUIDs. */
 public final class IdMap extends SQLiteOpenHelper {
-    public IdMap(Context context,int account){super(context,"vyrn_ids_"+account+".db",null,3);}
+    public IdMap(Context context,int account){super(context,"vyrn_ids_"+account+".db",null,4);}
     public void onCreate(SQLiteDatabase db){db.execSQL("CREATE TABLE ids(id INTEGER PRIMARY KEY AUTOINCREMENT,kind TEXT NOT NULL,uuid TEXT NOT NULL,UNIQUE(kind,uuid))");createMessageMap(db);createObservedMessages(db);}
     private void createMessageMap(SQLiteDatabase db){db.execSQL("CREATE TABLE message_ids(id INTEGER PRIMARY KEY CHECK(id>0),uuid TEXT NOT NULL UNIQUE)");}
-    private void createObservedMessages(SQLiteDatabase db){db.execSQL("CREATE TABLE observed_messages(uuid TEXT PRIMARY KEY,conversation TEXT NOT NULL,sender TEXT NOT NULL,revision INTEGER NOT NULL CHECK(revision>0),body_hash BLOB)");}
-    public void onUpgrade(SQLiteDatabase db,int oldVersion,int newVersion){if(oldVersion<1||oldVersion>2||newVersion!=3)throw new IllegalStateException("id_map_migration_required");if(oldVersion==1)createMessageMap(db);createObservedMessages(db);}
+    private void createObservedMessages(SQLiteDatabase db){db.execSQL("CREATE TABLE observed_messages(uuid TEXT PRIMARY KEY,conversation TEXT NOT NULL,sender TEXT NOT NULL,revision INTEGER NOT NULL CHECK(revision>0),body_hash BLOB,encrypted INTEGER NOT NULL DEFAULT 0,deleted INTEGER NOT NULL DEFAULT 0,date INTEGER NOT NULL DEFAULT 0,edited INTEGER NOT NULL DEFAULT 0)");}
+    public void onUpgrade(SQLiteDatabase db,int oldVersion,int newVersion){if(oldVersion<1||oldVersion>3||newVersion!=4)throw new IllegalStateException("id_map_migration_required");if(oldVersion==1)createMessageMap(db);if(oldVersion<3)createObservedMessages(db);else{db.execSQL("ALTER TABLE observed_messages ADD COLUMN encrypted INTEGER NOT NULL DEFAULT 0");db.execSQL("ALTER TABLE observed_messages ADD COLUMN deleted INTEGER NOT NULL DEFAULT 0");db.execSQL("ALTER TABLE observed_messages ADD COLUMN date INTEGER NOT NULL DEFAULT 0");db.execSQL("ALTER TABLE observed_messages ADD COLUMN edited INTEGER NOT NULL DEFAULT 0");}}
     private static byte[] bodyHash(String text){try{return MessageDigest.getInstance("SHA-256").digest(text.getBytes(StandardCharsets.UTF_8));}catch(java.security.NoSuchAlgorithmException impossible){throw new AssertionError(impossible);}}
     public synchronized void observe(Models.Message message){
         if(message.revision<1||message.conversation==null)return;
         message(message.id,message.ordinal);SQLiteDatabase db=getWritableDatabase();byte[] hash=message.encrypted||message.deleted?null:bodyHash(message.text);
         db.beginTransaction();try {
-        try(Cursor c=db.rawQuery("SELECT conversation,sender,revision,body_hash FROM observed_messages WHERE uuid=?",new String[]{message.id})){
+        try(Cursor c=db.rawQuery("SELECT conversation,sender,revision,body_hash,encrypted,deleted FROM observed_messages WHERE uuid=?",new String[]{message.id})){
             if(c.moveToFirst()){
                 if(!message.conversation.equals(c.getString(0))||!message.sender.equals(c.getString(1)))throw new IllegalStateException("message_identity_changed");
-                int previous=c.getInt(2);if(message.revision<previous)return;
-                if(message.revision==previous){if(Arrays.equals(hash,c.getBlob(3)))return;if(!message.deleted)throw new IllegalStateException("message_revision_changed");}
+                int previous=c.getInt(2);if(message.revision<previous)return;if(c.getInt(5)!=0){if(!message.deleted)throw new IllegalStateException("message_deleted");return;}
+                if(message.revision==previous){if(Arrays.equals(hash,c.getBlob(3))&&c.getInt(4)==(message.encrypted?1:0)&&!message.deleted)return;if(!message.deleted&&!Arrays.equals(hash,c.getBlob(3)))throw new IllegalStateException("message_revision_changed");}
             }
         }
-        ContentValues value=new ContentValues();value.put("uuid",message.id);value.put("conversation",message.conversation);value.put("sender",message.sender);value.put("revision",message.revision);value.put("body_hash",hash);db.insertWithOnConflict("observed_messages",null,value,SQLiteDatabase.CONFLICT_REPLACE);
+        ContentValues value=new ContentValues();value.put("uuid",message.id);value.put("conversation",message.conversation);value.put("sender",message.sender);value.put("revision",message.revision);value.put("body_hash",hash);value.put("date",message.date);value.put("edited",message.editedDate);value.put("encrypted",message.encrypted?1:0);value.put("deleted",message.deleted?1:0);db.insertWithOnConflict("observed_messages",null,value,SQLiteDatabase.CONFLICT_REPLACE);
         db.setTransactionSuccessful();}finally{db.endTransaction();}
+    }
+    /** Metadata only: private plaintext never belongs in this ordinary database. */
+    public synchronized org.json.JSONObject privateContext(long ordinal) throws org.json.JSONException {
+        try(Cursor c=getReadableDatabase().rawQuery("SELECT m.uuid,o.conversation,o.sender,o.revision,o.date,o.edited FROM message_ids m JOIN observed_messages o ON o.uuid=m.uuid WHERE m.id=? AND o.encrypted=1 AND o.deleted=0",new String[]{Long.toString(ordinal)})){
+            return c.moveToFirst()?new org.json.JSONObject().put("message",c.getString(0)).put("conversation",c.getString(1)).put("sender",c.getString(2)).put("revision",c.getInt(3)).put("ordinal",ordinal).put("date",c.getInt(4)).put("edited",c.getInt(5)):null;
+        }
     }
     public synchronized int editRevision(String sender,String conversation,long localId,String originalText){
         String uuid=remote("message",localId);
