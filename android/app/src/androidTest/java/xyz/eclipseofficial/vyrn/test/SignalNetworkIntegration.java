@@ -148,11 +148,13 @@ final class SignalNetworkIntegration {
         JSONObject copies=new JSONObject(body).getJSONObject("payload").getJSONObject("devices");
         check.accept(copies.length()==3 && alice.store.containsSession(new SignalProtocolAddress(bob2.publishInitial().getName(),1)),"signal_auto_roster_claims_new_device_and_complete_fanout");
         String message=sending.send(client);
-        JSONArray senders=bob.devices(alice.user);JSONObject senderMetadata=null;
-        for(int i=0;i<senders.length();i++)if(alice.device.equals(senders.getJSONObject(i).getString("device_id")))senderMetadata=new JSONObject(senders.getJSONObject(i).toString()).put("user_id",alice.user).put("prekey",JSONObject.NULL);
-        SignalDeviceKeys.ClaimedKey sender=SignalDeviceKeys.parseClaim(senderMetadata,alice.user,alice.device,1);
-        check.accept(text.equals(new SignalMessages(bob).receive(alice.user,conversation,(JSONObject)b.request("GET","/v1/messages/"+message,null,true),sender)) && text.equals(new SignalMessages(bob2).receive(alice.user,conversation,(JSONObject)second.request("GET","/v1/messages/"+message,null,true),sender)),"signal_auto_roster_new_session_ciphertext_two_device_delivery");
-        check.accept(text.equals(new SignalMessages(alice2).receive(bob.user,conversation,(JSONObject)other.request("GET","/v1/messages/"+message,null,true),sender)),"signal_auto_roster_sender_other_device_decrypts_own_history");
+        SignalDeviceKeys.ClaimedKey sender=bob.senderKey(alice.user,alice.device,new JSONObject(body).getJSONObject("payload").getJSONObject("sender").getString("signal_address_id"),1);
+        check.accept(sender.bundle.getPreKeyId()==org.signal.libsignal.protocol.state.PreKeyBundle.NULL_PRE_KEY_ID,"signal_reader_signed_metadata_without_prekey_claim");
+        boolean readerDenied=false;try{bob.senderKey(alice.user,alice.device,UUID.randomUUID().toString(),1);}catch(SecurityException expected){readerDenied=true;}check.accept(readerDenied,"signal_reader_wrong_address_rejected");
+        readerDenied=false;try{bob.senderKey(alice.user,alice.device,sender.address.getName(),2);}catch(SecurityException expected){readerDenied=true;}check.accept(readerDenied,"signal_reader_future_sender_version_rejected");
+        check.accept(text.equals(new SignalMessages(bob).receive(alice.user,conversation,(JSONObject)b.request("GET","/v1/messages/"+message,null,true))) && text.equals(new SignalMessages(bob2).receive(alice.user,conversation,(JSONObject)second.request("GET","/v1/messages/"+message,null,true))),"signal_auto_roster_new_session_ciphertext_two_device_delivery");
+        check.accept(text.equals(new SignalMessages(alice2).receive(bob.user,conversation,(JSONObject)other.request("GET","/v1/messages/"+message,null,true))),"signal_auto_roster_sender_other_device_decrypts_own_history");
+        check.accept(bob.claim(alice.user,alice.device,1).bundle.getPreKeyId()==1,"signal_reader_automatic_receive_does_not_consume_sender_prekey");
         other.request("POST","/v1/auth/logout",new JSONObject(),true);other.vault.clear();
         check.accept(body.equals(sending.prepare(bob.user,conversation,client,text)) && message.equals(sending.send(client)),"signal_auto_roster_committed_retry_after_sender_device_logout");
         java.util.List<SignalDeviceKeys.ClaimedKey> metadata=alice.targets(bob.user);
@@ -187,7 +189,7 @@ final class SignalNetworkIntegration {
             SignalMessages outgoing=new SignalMessages(alice),incoming=new SignalMessages(bob);String message=state.getString("message");
             check.accept(RESTART_TEXT.equals(outgoing.cachedText(message))&&RESTART_TEXT.equals(incoming.cachedText(message)),"signal_offline_cold_encrypted_history_both_devices");
             check.accept(state.getString("body").equals(outgoing.prepare(bob.user,state.getString("conversation"),state.getString("pending"),RESTART_TEXT,null))&&state.getString("sender_ratchet").equals(fingerprint(alice.store.loadSession(new SignalProtocolAddress(state.getString("recipient_address"),1)).serialize())),"signal_offline_pending_exact_ciphertext_without_ratchet_advance");
-            check.accept(RESTART_TEXT.equals(incoming.receive(alice.user,state.getString("conversation"),state.getJSONObject("delivered"),null))&&state.getString("receiver_ratchet").equals(fingerprint(bob.store.loadSession(new SignalProtocolAddress(state.getString("sender_address"),1)).serialize())),"signal_offline_cached_duplicate_without_directory");
+            check.accept(RESTART_TEXT.equals(incoming.receive(alice.user,state.getString("conversation"),state.getJSONObject("delivered")))&&state.getString("receiver_ratchet").equals(fingerprint(bob.store.loadSession(new SignalProtocolAddress(state.getString("sender_address"),1)).serialize())),"signal_offline_cached_duplicate_without_directory");
             JSONObject original=a.vault.load();try{a.vault.save(new JSONObject(original.toString()).put("session_id",UUID.randomUUID().toString()));boolean denied=false;try{outgoing.cachedText(message);}catch(SecurityException expected){denied=true;}check.accept(denied,"signal_offline_changed_session_cannot_read_history");denied=false;try(SignalDeviceKeys ignored=SignalDeviceKeys.openLocal(context,a)){}catch(SecurityException expected){denied=true;}check.accept(denied,"signal_offline_new_session_cannot_reuse_old_device_proof");}finally{a.vault.save(original);}
             try{a.vault.save(b.vault.load());boolean denied=false;try{outgoing.cachedText(message);}catch(SecurityException expected){denied=true;}check.accept(denied,"signal_offline_changed_account_cannot_read_history");}finally{a.vault.save(original);}
             byte[] binding=alice.store.loadValue("keys","authenticated-device");
@@ -249,6 +251,20 @@ final class SignalNetworkIntegration {
         denied=false;try{receiving.receive(alice.user,conversation,changed,senderKey);}catch(SecurityException expected){denied=true;}
         check.accept(denied && Arrays.equals(receiveBefore,bob.store.loadSession(senderKey.address).serialize()) && Arrays.equals(bindingBefore,bob.store.loadValue("private-peer",alice.user+"_"+alice.device)),"signal_codec_authenticated_inner_rejection_rolls_back_receive");
         check.accept(text.equals(receiving.receive(alice.user,conversation,delivered,senderKey)) && text.equals(receiving2.receive(alice.user,conversation,(JSONObject)second.request("GET","/v1/messages/"+message,null,true),senderKey)),"signal_codec_two_device_authenticated_plaintext_delivery");
+        JSONObject display=receiving.display(alice.user,conversation,message,alice.user,delivered.getInt("revision"),delivered.getInt("ordinal"));
+        check.accept(text.equals(display.getString("text"))&&display.isNull("expires_at"),"signal_display_matches_authenticated_row_context");
+        boolean displayDenied=true;
+        for(int variant=0;variant<5;variant++){
+            boolean rejected=false;try{receiving.display(variant==0?UUID.randomUUID().toString():alice.user,variant==1?UUID.randomUUID().toString():conversation,message,variant==2?bob.user:alice.user,delivered.getInt("revision")+(variant==3?1:0),delivered.getInt("ordinal")+(variant==4?1:0));}catch(SecurityException expected){rejected=true;}displayDenied &= rejected;
+        }
+        check.accept(displayDenied&&text.equals(receiving.cachedText(message)),"signal_display_rejects_wrong_peer_conversation_sender_revision_ordinal");
+        java.util.concurrent.CompletableFuture<Boolean> nativePrivacy=new java.util.concurrent.CompletableFuture<>();
+        org.telegram.messenger.AndroidUtilities.runOnUIThread(()->{try{
+            org.telegram.tgnet.TLRPC.TL_message row=new org.telegram.tgnet.TLRPC.TL_message();row.id=delivered.getInt("ordinal");row.date=(int)(System.currentTimeMillis()/1000);row.message="Encrypted message";row.flags=256;row.from_id=new org.telegram.tgnet.TLRPC.TL_peerUser();row.from_id.user_id=1;row.peer_id=new org.telegram.tgnet.TLRPC.TL_peerUser();row.peer_id.user_id=2;row.media=new org.telegram.tgnet.TLRPC.TL_messageMediaEmpty();
+            org.telegram.messenger.MessageObject object=new org.telegram.messenger.MessageObject(0,row,true,false);object.applyNewText(display.getString("text"));
+            org.telegram.tgnet.SerializedData serialized=new org.telegram.tgnet.SerializedData();try{row.serializeToStream(serialized);nativePrivacy.complete("Encrypted message".equals(row.message)&&text.contentEquals(object.messageText)&&!new String(serialized.toByteArray(),StandardCharsets.UTF_8).contains(text));}finally{serialized.cleanup();}
+        }catch(Throwable failure){nativePrivacy.completeExceptionally(failure);}});
+        check.accept(nativePrivacy.get(20,java.util.concurrent.TimeUnit.SECONDS),"signal_native_volatile_layout_does_not_serialize_private_text");
         byte[] after=bob.store.loadSession(senderKey.address).serialize();
         check.accept(text.equals(receiving.receive(alice.user,conversation,delivered,null)) && Arrays.equals(after,bob.store.loadSession(senderKey.address).serialize()) && text.equals(sending.receive(bob.user,conversation,(JSONObject)a.request("GET","/v1/messages/"+message,null,true),null)),"signal_codec_duplicate_and_producing_device_history_cache");
         changed=new JSONObject(delivered.toString()).put("id",UUID.randomUUID().toString());denied=false;try{receiving.receive(alice.user,conversation,changed,null);}catch(SecurityException expected){denied=true;}
@@ -258,6 +274,7 @@ final class SignalNetworkIntegration {
         JSONObject tombstone=(JSONObject)b.request("GET","/v1/messages/"+message,null,true);
         check.accept(!tombstone.isNull("deleted_at") && tombstone.getInt("revision")>delivered.getInt("revision") && tombstone.getJSONObject("payload").length()==0,"signal_codec_server_deletion_tombstone_delivery");
         check.accept(receiving.receive(alice.user,conversation,tombstone,null)==null && receiving.cachedText(message)==null,"signal_codec_deletion_purges_decrypted_cache");
+        check.accept(receiving.display(alice.user,conversation,message,alice.user,delivered.getInt("revision"),delivered.getInt("ordinal"))==null,"signal_display_deleted_message_returns_no_plaintext");
         denied=false;try{receiving.receive(alice.user,conversation,delivered,null);}catch(SecurityException expected){denied=true;}
         check.accept(denied,"signal_codec_deleted_history_cannot_resurrect");
         sending.receive(bob.user,conversation,tombstone,null);denied=false;try{sending.send(client);}catch(SecurityException expected){denied=true;}

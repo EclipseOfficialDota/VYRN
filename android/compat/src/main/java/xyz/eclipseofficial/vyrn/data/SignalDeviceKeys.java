@@ -85,6 +85,18 @@ public final class SignalDeviceKeys implements AutoCloseable {
         JSONObject response=(JSONObject)request("POST","/v1/users/"+recipient+"/device-keys/"+recipientDevice+"/claim",new JSONObject().put("expected_version",version));
         return parseClaim(response,recipient,recipientDevice,version);
     }
+    /** Authenticate a received sender using signed directory metadata without consuming its one-time prekeys. */
+    public ClaimedKey senderKey(String owner,String senderDevice,String address,int version) throws Exception {synchronized(guard()){
+        requireSession();id(owner);id(senderDevice);id(address);if(version<1)throw new SecurityException("invalid_signal_version");
+        JSONArray roster=devices(owner);if(roster.length()<1||roster.length()>3)throw new SecurityException("invalid_signal_roster");
+        Set<String> seen=new HashSet<>();ClaimedKey found=null;
+        for(int i=0;i<roster.length();i++){
+            JSONObject item=roster.getJSONObject(i);String device=id(item.getString("device_id"));if(!seen.add(device))throw new SecurityException("invalid_signal_roster");
+            if(!senderDevice.equals(device))continue;if(item.get("ready")!=Boolean.TRUE)throw new SecurityException("signal_sender_key_required");
+            found=parseClaim(new JSONObject(item.toString()).put("user_id",owner).put("prekey",JSONObject.NULL),owner,device,integer(item,"version"));
+        }
+        if(found==null||found.version<version||!address.equals(found.address.getName()))throw new SecurityException("signal_sender_changed");return found;
+    }}
     /** Validate both complete rosters before consuming any one-time keys. */
     public List<ClaimedKey> targets(String peer) throws Exception {synchronized(guard()){
         requireSession();id(peer);if(peer.equals(user))throw new IllegalArgumentException("signal_private_peer_required");

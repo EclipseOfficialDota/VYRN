@@ -1,5 +1,9 @@
 # Local Android integration
 
+## Context-bound private display component — 2026-10-08
+
+scripts/test-signal.ps1 -Network additionally validates automatic signed sender directory resolution without one-time prekey consumption, address/version rejection, and offline cached duplicate receive. The display reader requires authenticated peer/conversation/sender/revision/ordinal and respects deletion/expiry fences. A UI-thread synthetic MessageObject check uses applyNewText and serializes the underlying TL message to prove the placeholder is retained. This does not enter a real private ChatActivity, inspect MessagesStorage blobs or prove physical-device delivery; those remain required when wiring the renderer.
+
 ## Authenticated encrypted history after offline process restart — 2026-10-08
 
 scripts/test-signal.ps1 -Network now runs signal-network, signal-network-offline-restart, then signal-network-restart. The host removes the scoped emulator18443 reverse before force-stopping/relaunching the app; the offline phase requires an actual IOException from authenticated HTTPS before testing cache access. Restore the same reverse before online retry and cleanup, including on failure. Three distinct actual app process IDs are recorded.

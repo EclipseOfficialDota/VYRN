@@ -1,5 +1,11 @@
 # Verification report
 
+## Sender authentication and native formatting boundary — 2026-10-08
+
+Normal phone build3m and all three APK verification checks pass. ARM64 122428245 bytes/SHA2561b2e5f9d9455aadea7fcd4121811876b699c8732d59006d97d8f3d324a6d607c; ARMv7 108141551/598f8e4ff0fa9ad4c1e472c64a081fe4f5aef8c5c708ad43fce78f988cd2b688; universal158653662/aeb239669529570b16f7a0b2a6860bf1a011da25b496a1b23f31706421a86ede. Debug artifacts, no local test CA; physical installation remains untested.
+
+Fresh Signal network suite passes84 checks:67 network,11 disconnected cold-process reads,6 online restart. PIDs8460/8568/8669; local APK SHA25665262bd28ed772a58e2818202bc595773cd4e0c01babafd99fd2e63482986150. Signed sender metadata lookup rejects wrong address/future version without consuming sender prekeys. Automatic receive and offline cached duplicate succeed. Display rejects altered peer/conversation/sender/revision/ordinal and returns no deleted plaintext. Synthetic native MessageObject.applyNewText displays plaintext while its TL message and serialization retain the encrypted placeholder. Actual private ChatActivity rendering and native database confidentiality are not established by this component test. Previous two-client261 checks belong to the preceding source.
+
 ## Offline encrypted cache and authenticated device proof — 2026-10-08
 
 Fresh Signal run passes76 checks:59 actual network/JNI,11 after real app process restart with18443 forwarding removed,6 after transport restoration and another restart. Offline phase requires authenticated HTTPS IOException; both encrypted caches remain readable without directory access, pending ciphertext/ratchets unchanged. Changed account/session, reused old-session device proof, mismatched device binding and missing-store regeneration are rejected. A valid new login can replace corrupt unrelated token ciphertext. Actual server-device UUID differing from requested local UUID is preserved. PIDs6335/6472/6574, report22:50:26, APK SHA256c52cd64f115a6c1883bf3cf2c9c07777c9932eed44737eb60654dc8d60afaaa6.

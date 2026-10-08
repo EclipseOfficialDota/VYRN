@@ -1,5 +1,9 @@
 # Decisions
 
+## Private receive metadata and volatile text — 2026-10-08
+
+Use authorized signed sender directory metadata for incoming decryption; reading a message must not consume sender one-time prekeys. Reuse immutable cached bindings offline and reject changed identity/address. Before handing encrypted-cache text to native formatting, require matching peer/conversation/sender/revision/ordinal and enforce deletion/expiry. Keep TL messageOwner as the placeholder; MessageObject.applyNewText can hold volatile layout text without changing serialized message bytes. The component check does not replace actual ChatActivity/native-storage lifecycle verification. Native private sending remains gated until the remaining identity/device/outbox workflow is connected and verified.
+
 ## 2026-10-04 — Signal foundation
 - Replace the unused initial signal-v1 transport with signal-v2 before any private UI release. Bind the producer and each destination to user/device/immutable Signal address/current key version. Encrypt separately for every active recipient device and the producer's other devices; exclude the producing device and retain its own plaintext only in encrypted local storage. Never silently omit unprepared devices or collapse devices from different accounts that share a physical UUID.
 - Lock participant users before sessions, then key records, through private message/event commit. Recheck lifecycle changes after lock acquisition. Preserve exact committed idempotent retries after roster/key changes; apply current-roster checks only to new ciphertext sends/edits. Private edits record their actual producing device. The complete production client still must authenticate inner conversation/client/revision metadata and persist ratchets/ciphertext/cache atomically before network access.

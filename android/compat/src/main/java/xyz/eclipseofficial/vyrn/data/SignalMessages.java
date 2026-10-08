@@ -66,6 +66,21 @@ public final class SignalMessages {
         receive(queued.getString("peer"),conversation,(JSONObject)keys.request("GET","/v1/messages/"+message,null),null);return message;
     }}
 
+    /** Acquire signed sender metadata only for an unknown or newer immutable binding. Cached reads remain offline. */
+    public String receive(String peer,String conversation,JSONObject message) throws Exception {synchronized(keys.guard()){
+        keys.requireSession();id(peer);id(conversation);String owner=id(string(message,"sender_id")),device=id(string(message,"sender_device"));
+        if(peer.equals(keys.user)||!conversation.equals(string(message,"conversation_id"))||!owner.equals(peer)&&!owner.equals(keys.user)||message.get("encrypted")!=Boolean.TRUE)throw new SecurityException("signal_message_context_changed");
+        if(!message.isNull("deleted_at")||!message.isNull("expires_at")&&!Instant.parse(string(message,"expires_at")).isAfter(Instant.now()))return receive(peer,conversation,message,null);
+        JSONObject sender=message.getJSONObject("payload").getJSONObject("sender");senderTuple(sender);
+        if(!owner.equals(string(sender,"user_id"))||!device.equals(string(sender,"device_id")))throw new SecurityException("signal_sender_changed");
+        SignalDeviceKeys.ClaimedKey snapshot=null;
+        if(!owner.equals(keys.user)||!device.equals(keys.device)){
+            JSONObject prior=load("private-peer",owner+"_"+device);
+            if(prior!=null&&!string(sender,"signal_address_id").equals(prior.getString("address")))throw new SecurityException("signal_identity_changed");
+            if(prior==null||number(sender,"version")>prior.getInt("version"))snapshot=keys.senderKey(owner,device,string(sender,"signal_address_id"),number(sender,"version"));
+        }
+        return receive(peer,conversation,message,snapshot);
+    }}
     /** Sender snapshot may be null only when its immutable binding is already stored locally. */
     public String receive(String peer,String conversation,JSONObject message,SignalDeviceKeys.ClaimedKey senderKey) throws Exception {synchronized(keys.guard()){
         keys.requireSession();id(peer);id(conversation);String messageId=id(string(message,"id")),client=id(string(message,"client_id")),owner=id(string(message,"sender_id")),device=id(string(message,"sender_device"));int revision=number(message,"revision"),ordinal=number(message,"ordinal");
@@ -108,6 +123,19 @@ public final class SignalMessages {
         });
     }}
     public String cachedText(String message) throws Exception {synchronized(keys.guard()){keys.requireSession();id(message);return store.transaction(()->{JSONObject head=load("private-head",message);if(head==null || head.optBoolean("deleted"))return null;if(expired(head)){retire(head);return null;}JSONObject cached=load("private-cache",message+"_"+head.getInt("revision"));return cached==null?null:cached.getJSONObject("inner").getString("text");});}}
+    /** Validate the native row's complete context before returning volatile text; never write this into native messageOwner. */
+    public JSONObject display(String peer,String conversation,String message,String sender,int revision,int ordinal) throws Exception {synchronized(keys.guard()){
+        keys.requireSession();id(peer);id(conversation);id(message);id(sender);
+        if(peer.equals(keys.user)||!sender.equals(peer)&&!sender.equals(keys.user)||revision<1||ordinal<1)throw new SecurityException("signal_display_context_changed");
+        return store.transaction(()->{
+            JSONObject head=load("private-head",message);if(head==null||head.optBoolean("deleted"))return null;
+            if(expired(head)){retire(head);return null;}
+            if(!conversation.equals(head.getString("conversation"))||!sender.equals(head.getString("owner"))||revision!=head.getInt("revision")||ordinal!=head.getInt("ordinal"))throw new SecurityException("signal_display_context_changed");
+            JSONObject cached=load("private-cache",message+"_"+revision);if(cached==null)return null;JSONObject inner=cached.getJSONObject("inner");
+            if(!conversation.equals(string(inner,"conversation_id"))||!head.getString("client").equals(string(inner,"client_id"))||revision!=number(inner,"revision")||!participants(peer).toString().equals(inner.getJSONArray("participants").toString())||!sender.equals(inner.getJSONObject("sender").getString("user_id")))throw new SecurityException("signal_display_context_changed");
+            return new JSONObject().put("text",string(inner,"text")).put("expires_at",head.get("expires_at"));
+        });
+    }}
     /** Call on startup and from the lifecycle worker; cache reads also enforce learned deadlines. */
     // ponytail: decrypt all retained heads; add a deadline index if large-history measurements require it.
     public int pruneExpired() throws Exception {synchronized(keys.guard()){keys.requireSession();return store.transaction(()->{int removed=0;for(String message:store.valueNames("private-head")){JSONObject head=load("private-head",message);if(!head.optBoolean("deleted") && expired(head)){retire(head);removed++;}}return removed;});}}
