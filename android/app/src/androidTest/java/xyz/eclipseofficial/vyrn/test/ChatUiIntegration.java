@@ -22,7 +22,9 @@ import xyz.eclipseofficial.vyrn.data.TokenVault;
 
 /** Real composer/bubble checks on two separate native account0 clients. Group setup is a REST fixture. */
 final class ChatUiIntegration {
-    static void run(Instrumentation instrumentation,Activity activity,JSONObject fixture,String phase,AuthUiIntegration.Check check) throws Exception {
+    static void run(Instrumentation instrumentation,Activity activity,JSONObject fixture,String phase,AuthUiIntegration.Check verification) throws Exception {
+        java.util.ArrayList<String> checkpoints=new java.util.ArrayList<>();
+        AuthUiIntegration.Check check=(condition,name)->{verification.verify(condition,name);checkpoints.add(name);};
         int account=UserConfig.selectedAccount;
         check.verify(account==0&&UserConfig.getInstance(account).isClientActivated(),"chat_native_account0_active");
         RestRepository repository=new RestRepository(new TokenVault(instrumentation.getTargetContext(),account));
@@ -48,11 +50,11 @@ final class ChatUiIntegration {
         await(()->{if(AuthUiIntegration.handlePrompts(instrumentation,activity,check))return false;boolean[] ready={false};instrumentation.runOnMainSync(()->ready[0]=LaunchActivity.getLastFragment() instanceof ChatActivity&&!LaunchActivity.getLastFragment().getParentLayout().isTransitionAnimationInProgress());return ready[0];},check,"chat_native_screen_ready");
         instrumentation.runOnMainSync(()->check.verify(org.telegram.messenger.ChatObject.canSendPlain(MessagesController.getInstance(account).getChat(local)),"chat_member_can_send_plain"));
         if(!offlineReopen)await(()->{boolean[] ready={false};instrumentation.runOnMainSync(()->{try{java.lang.reflect.Field field=ChatActivity.class.getDeclaredField("firstLoading");field.setAccessible(true);ready[0]=!field.getBoolean(LaunchActivity.getLastFragment());}catch(Exception failure){throw new AssertionError("chat_loading_state_unavailable");}});return ready[0];},check,"chat_initial_history_complete");
-        if(offlineReopen){pending(instrumentation,activity,fixture,repository,check,true);return;}
+        if(offlineReopen){pending(instrumentation,activity,fixture,repository,user,check,true);return;}
         if(phase.equals("chat-delete")||phase.equals("chat-watch-delete")||phase.equals("chat-deleted-reopen")){delete(instrumentation,activity,fixture,repository,phase,check);return;}
         if(phase.equals("chat-edit")||phase.equals("chat-watch-edit")){edit(instrumentation,activity,fixture,repository,phase.equals("chat-edit"),check);return;}
         if(phase.equals("chat-receive"))write(instrumentation,new JSONObject().put("ready",true));
-        boolean sending=phase.equals("chat-send")||phase.equals("chat-offline-send")||phase.equals("chat-failed-send");
+        boolean sending=phase.equals("chat-send")||phase.equals("chat-offline-send")||phase.equals("chat-failed-send")||phase.equals("chat-unknown-send");
         if(phase.equals("chat-offline-send")||phase.equals("chat-failed-send"))AuthUiIntegration.networkStep(instrumentation,activity,"offline-send",check);
         if(sending){
             ChatActivityEnterView[] composer={null};
@@ -63,11 +65,19 @@ final class ChatUiIntegration {
             instrumentation.runOnMainSync(()->check.verify(composer[0].getSendButtonInternal().performClick(),"chat_native_send_button_clicked"));
             await(()->{boolean[] empty={false};instrumentation.runOnMainSync(()->empty[0]=composer[0].getEditField().length()==0);return empty[0];},check,"chat_composer_cleared");
         }else if(!phase.equals("chat-receive")&&!phase.equals("chat-recover")&&!phase.equals("chat-recovered-reopen")&&!phase.equals("chat-manual-retry")){throw new IllegalArgumentException();}
-        if(phase.equals("chat-offline-send")){pending(instrumentation,activity,fixture,repository,check,false);return;}
+        if(phase.equals("chat-offline-send")){pending(instrumentation,activity,fixture,repository,user,check,false);return;}
+        if(phase.equals("chat-unknown-send")){
+            pending(instrumentation,activity,fixture,repository,user,check,false);
+            java.nio.file.Path statePath=instrumentation.getTargetContext().getFilesDir().toPath().resolve("vyrn-test-chat-state.json");
+            JSONObject state=new JSONObject(new String(Files.readAllBytes(statePath),StandardCharsets.UTF_8));
+            try(xyz.eclipseofficial.vyrn.data.OutboxStore store=new xyz.eclipseofficial.vyrn.data.OutboxStore(instrumentation.getTargetContext(),account)){check.verify(store.get(user,state.getString("client_id")).state==xyz.eclipseofficial.vyrn.data.OutboxStore.SENDING,"interrupted_send_original_queue_in_flight");}
+            state.put("interrupted_checks",new org.json.JSONArray(checkpoints));write(instrumentation,state);
+            Thread.sleep(200000);throw new AssertionError("Host did not interrupt the held send");
+        }
         if(phase.equals("chat-failed-send")){
-            pending(instrumentation,activity,fixture,repository,check,false);
+            pending(instrumentation,activity,fixture,repository,user,check,false);
             await(()->{boolean[] failed={false};instrumentation.runOnMainSync(()->{ChatMessageCell value=cell(activity.getWindow().getDecorView(),text);failed[0]=value!=null&&value.getMessageObject().getId()<0&&value.getMessageObject().isSendError();});return failed[0];},check,"retry_real_network_attempts_exhausted_native_error",200);
-            pending(instrumentation,activity,new JSONObject(fixture.toString()).put("expect_failed",true),repository,check,false);return;
+            pending(instrumentation,activity,new JSONObject(fixture.toString()).put("expect_failed",true),repository,user,check,false);return;
         }
         if(phase.equals("chat-manual-retry")){
             await(()->{boolean[] failed={false};instrumentation.runOnMainSync(()->{ChatMessageCell value=cell(activity.getWindow().getDecorView(),text);failed[0]=value!=null&&value.getMessageObject().getId()<0&&value.getMessageObject().isSendError();});return failed[0];},check,"retry_original_failed_bubble_visible");
@@ -89,11 +99,11 @@ final class ChatUiIntegration {
         check.verify(count==1,"chat_server_exactly_one_message");
         if(phase.equals("chat-recover")||phase.equals("chat-recovered-reopen")||phase.equals("chat-manual-retry")){
             instrumentation.runOnMainSync(()->check.verify(((ChatActivity)LaunchActivity.getLastFragment()).messages.stream().filter(message->text.equals(message.messageOwner.message)).count()==1,"offline_recovery_exactly_one_native_message"));
-            String client=fixture.getString("client_id");try(xyz.eclipseofficial.vyrn.data.OutboxStore store=new xyz.eclipseofficial.vyrn.data.OutboxStore(instrumentation.getTargetContext(),account)){xyz.eclipseofficial.vyrn.data.OutboxStore.Entry entry=store.get(user,client);check.verify(entry!=null&&entry.state==xyz.eclipseofficial.vyrn.data.OutboxStore.SENT,"offline_recovery_original_queue_entry_sent");check.verify(repository.liveMessages(group,null,100).stream().anyMatch(message->text.equals(message.text)&&message.id.equals(entry.server)),"offline_recovery_server_identity_matches_queue");}
+            String client=fixture.getString("client_id");try(xyz.eclipseofficial.vyrn.data.OutboxStore store=new xyz.eclipseofficial.vyrn.data.OutboxStore(instrumentation.getTargetContext(),account)){xyz.eclipseofficial.vyrn.data.OutboxStore.Entry entry=store.get(user,client);check.verify(entry!=null&&entry.state==xyz.eclipseofficial.vyrn.data.OutboxStore.SENT,"offline_recovery_original_queue_entry_sent");check.verify(repository.liveMessages(group,null,100).stream().anyMatch(message->text.equals(message.text)&&message.id.equals(entry.server)),"offline_recovery_server_identity_matches_queue");if(fixture.has("server_id"))check.verify(entry.server.equals(fixture.getString("server_id")),"interrupted_send_reuses_pre_restart_server_commit");}
         }
     }
-    private static void pending(Instrumentation instrumentation,Activity activity,JSONObject fixture,RestRepository repository,AuthUiIntegration.Check check,boolean reopen) throws Exception {
-        String text=fixture.getString("text"),group=fixture.getString("group"),user=repository.vault.load().getString("user_id");
+    private static void pending(Instrumentation instrumentation,Activity activity,JSONObject fixture,RestRepository repository,String user,AuthUiIntegration.Check check,boolean reopen) throws Exception {
+        String text=fixture.getString("text"),group=fixture.getString("group");
         boolean failed=fixture.optBoolean("expect_failed");
         await(()->{boolean[] shown={false};instrumentation.runOnMainSync(()->{ChatMessageCell value=cell(activity.getWindow().getDecorView(),text);shown[0]=value!=null&&value.getMessageObject().getId()<0&&(failed?value.getMessageObject().isSendError():value.getMessageObject().messageOwner.send_state!=0);});return shown[0];},check,reopen?(failed?"retry_failed_bubble_survives_process_restart":"offline_pending_bubble_survives_process_restart"):(failed?"retry_failed_bubble_visible":"offline_native_pending_bubble_visible"));
         try(xyz.eclipseofficial.vyrn.data.OutboxStore store=new xyz.eclipseofficial.vyrn.data.OutboxStore(instrumentation.getTargetContext(),UserConfig.selectedAccount)){
