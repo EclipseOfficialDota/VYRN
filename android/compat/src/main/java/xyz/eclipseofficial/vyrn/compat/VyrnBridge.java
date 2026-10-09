@@ -239,6 +239,13 @@ public final class VyrnBridge {
     }
     public static synchronized VyrnBridge forAccount(int account){VyrnBridge bridge=INSTANCES.get(account);if(bridge==null){bridge=new VyrnBridge(account);INSTANCES.put(account,bridge);}return bridge;}
     public static void execute(Runnable task){IO.execute(task);}
+    /** The encrypted native outbox is not connected yet; reject before native plaintext persistence. */
+    public static boolean privateSendUnavailable(long dialog){return org.telegram.messenger.DialogObject.isUserDialog(dialog)||org.telegram.messenger.DialogObject.isEncryptedDialog(dialog);}
+    public static String privateSendUnavailableLabel(){return org.telegram.messenger.LocaleController.isRTL?"ارسال خصوصی هنوز آماده نیست؛ پیش‌نویس حفظ می‌شود.":"Private sending is not ready; your draft is kept.";}
+    public static boolean blockPrivateSend(long dialog){
+        if(!privateSendUnavailable(dialog))return false;
+        AndroidUtilities.runOnUIThread(()->android.widget.Toast.makeText(ApplicationLoader.applicationContext,privateSendUnavailableLabel(),android.widget.Toast.LENGTH_LONG).show());return true;
+    }
     public static final int PRIVATE_TEXT_UPDATE=1<<29;
     private static boolean samePrivateRow(MessageObject object,TLRPC.Message row,int id,long dialog,long sender,int date,int edited,String placeholder){
         return object!=null&&!object.deleted&&object.messageOwner==row&&object.getId()==id&&object.getDialogId()==dialog&&row.peer_id!=null&&row.peer_id.user_id==dialog&&row.from_id!=null&&row.from_id.user_id==sender&&row.date==date&&row.edit_date==edited&&java.util.Objects.equals(row.message,placeholder);

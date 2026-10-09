@@ -440,6 +440,14 @@ Edit 'TMessagesProj/src/main/java/org/telegram/messenger/SendMessagesHelper.java
  $marker='public void cancelSendingMessage(ArrayList<MessageObject> objects) {'
  if(!$t.Contains($marker)){throw 'Pinned message cancellation marker missing'}
  $t=$t.Replace($marker,$marker+"`n        if (xyz.eclipseofficial.vyrn.compat.VyrnBridge.cancelSendingMessages(currentAccount, objects)) return;")
+ $send='public void sendMessage(SendMessageParams sendMessageParams) {'
+ if(!$t.Contains($send)){throw 'Pinned native send entry marker missing'}
+ $t=$t.Replace($send,$send+"`n        if (xyz.eclipseofficial.vyrn.compat.VyrnBridge.blockPrivateSend(sendMessageParams.peer)) return;")
+ $forward="        MessageSuggestionParams suggestionParams`n    ) {"
+ $screenshot='public void sendScreenshotMessage(TLRPC.User user, int messageId, TLRPC.Message resendMessage) {'
+ foreach($marker in @($forward,$screenshot)){if(!$t.Contains($marker)){throw 'Pinned alternative private send entry marker missing'}}
+ $t=$t.Replace($forward,$forward+"`n        if (xyz.eclipseofficial.vyrn.compat.VyrnBridge.blockPrivateSend(peer)) return 0;")
+ $t=$t.Replace($screenshot,$screenshot+"`n        if (user != null && xyz.eclipseofficial.vyrn.compat.VyrnBridge.blockPrivateSend(user.id)) return;")
  $start=$t.IndexOf('    public int editMessage(MessageObject messageObject, String message,')
  $end=$t.IndexOf('    public int editRichMessage(', $start)
  if($start -lt 0 -or $end -lt 0){throw 'Pinned text edit markers missing'}
@@ -488,6 +496,19 @@ Edit 'TMessagesProj/src/main/java/org/telegram/ui/Components/AlertsCreator.java'
 Edit 'TMessagesProj/src/main/java/org/telegram/ui/Components/ChatActivityEnterView.java' {
  param($t)
  $t=(& git -c "safe.directory=$($upstream.Replace('\','/'))" -C $upstream show "${pin}:TMessagesProj/src/main/java/org/telegram/ui/Components/ChatActivityEnterView.java") -join "`n"
+ $send='protected boolean sendMessageInternal(boolean notify, int scheduleDate, int scheduleRepeatPeriod, long payStars, boolean allowConfirm) {'
+ $button='public void checkSendButton(boolean animated) {'
+ $hint='public void updateFieldHint(boolean animated) {'
+ foreach($marker in @($send,$button,$hint)){if(!$t.Contains($marker)){throw 'Pinned private composer gate marker missing'}}
+ $t=$t.Replace($send,$send+"`n        if (xyz.eclipseofficial.vyrn.compat.VyrnBridge.blockPrivateSend(dialog_id)) return false;")
+ $t=$t.Replace($button,$button+"`n        if (sendButton != null) { boolean unavailable = xyz.eclipseofficial.vyrn.compat.VyrnBridge.privateSendUnavailable(dialog_id); sendButton.setEnabled(!unavailable); sendButton.setContentDescription(unavailable ? xyz.eclipseofficial.vyrn.compat.VyrnBridge.privateSendUnavailableLabel() : getString(R.string.Send)); }")
+ $t=$t.Replace($hint,$hint+"`n        if (messageEditText != null && xyz.eclipseofficial.vyrn.compat.VyrnBridge.privateSendUnavailable(dialog_id)) { messageEditText.setHintText(xyz.eclipseofficial.vyrn.compat.VyrnBridge.privateSendUnavailableLabel(), animated); return; }")
+ $begin=$t.IndexOf('        sendButton = new SendButton(');$end=$t.IndexOf('        sendButton.setVisibility(INVISIBLE);',$begin)
+ if($begin -lt 0 -or $end -lt 0){throw 'Pinned native send button marker missing'}
+ $section=$t.Substring($begin,$end-$begin)
+ if(!$section.Contains('super.setAlpha(alpha);')){throw 'Pinned send button alpha marker missing'}
+ $section=$section.Replace('super.setAlpha(alpha);','super.setAlpha(xyz.eclipseofficial.vyrn.compat.VyrnBridge.privateSendUnavailable(dialog_id) ? alpha * 0.4f : alpha);')
+ $t=$t.Substring(0,$begin)+$section+$t.Substring($end)
  $marker='        editingMessageObject = messageObject;'
  if(!$t.Contains($marker)){throw 'Pinned composer edit marker missing'}
  $t=$t.Replace($marker,$marker+"`n        xyz.eclipseofficial.vyrn.compat.VyrnBridge.captureEdit(currentAccount, messageObject);")

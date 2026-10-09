@@ -1,5 +1,9 @@
 # Local Android integration
 
+## Private send safety gate — 2026-10-09
+
+Latest -PrivateChat passes226 recorded checks at17:31:20 on local APKfd3046e6098665f97eddc606ef4afd105acfa501a09b8d17d8f3ec7b97945bd8. Check actual disabled/dimmed Send, force composer submission, invoke shared native send/forward/screenshot entries and query native messages_v2: no negative private row or plaintext pending bubble; composer draft stays intact and cold-restores offline. This gate prevents the earlier bridge-only rejection from clearing/persisting private text. It does not enable encrypted private delivery; remaining media preparation/UI and legacy storage require separate acceptance.
+
 ## Private draft checkpoint — 2026-10-09
 
 Run scripts/test-two-client-messaging.ps1 -PrivateChat against the existing local HTTPS/DB and two dedicated emulator fixtures. Latest run passes202 recorded checks at17:13:17, APK416d289422d42f49cac5889ef9db59070720e1e53a10c49e3b956a3ee40784e5. Besides actual receiving bubbles/native SQL privacy, it enters a private draft into the actual composer, calls native saveDraft, checks encrypted preferences and restores the same draft after force-stop with transport disconnected. Reject corrupted/swapped/legacy records and peer UUID reuse; preserve group serialization. This is programmatic input, not physical UI acceptance or actual reply-save coverage. Unknown legacy drafts are retained but unavailable; migration/recovery feedback remains required. Phone compatibility report remains unresolved pending model/OS/file; universal includes ARM64/ARMv7, Android8+.

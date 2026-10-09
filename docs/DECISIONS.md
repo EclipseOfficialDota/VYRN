@@ -1,5 +1,9 @@
 # Decisions
 
+## Gate private sends before ordinary native row construction — 2026-10-09
+
+Reject unsupported private send at both composer submission and shared native send/forward/screenshot entry points. A bridge network rejection is too late: native code has already cleared input and persisted the ordinary outgoing row. Keep private drafts editable, disable/dim Send and explain why through localized hint/accessibility text. Preserve supported group sending. Replace this temporary gate only after encrypted native row/outbox, reconciliation/cancellation and peer/device trust flows have actual acceptance; do not route private text through the group outbox.
+
 ## Bind native private drafts to their authenticated owner and peer — 2026-10-09
 
 Reuse native draft preferences and Android Keystore AES-GCM instead of adding a second draft database. Encrypt the original native serialization at all private draft/reply writes; bind account, authenticated UUID/native owner, actual peer UUID and complete record key as AAD. Require current owner/peer mapping before and after cryptography. Keep group serialization unchanged. Reject legacy private hex because its owner cannot be authenticated; retain it pending explicit migration/recovery UX rather than assigning it to a later login. Actual reply paths, account-switch UI and legacy handling still require acceptance.

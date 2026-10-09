@@ -1,5 +1,11 @@
 # Verification report
 
+## Private send rejection before persistence — 2026-10-09
+
+Same APK native group -PrivateKeys -Offline regression passes261 recorded checks at17:34:47. Actual group composer/send/edit/delete/cold/offline automatic recovery remains valid. Worker exited and verified childless owned RTK output wrapper was closed; resulting outer exit1 does not invalidate passing instrumentation/report/cleanup. Normal ARM build2m21s passes; all three APK signature/package/API/ABI/TLS/size checks pass. ARM64/ARMv7/universal122444605/108157911/158670022 bytes, Debug/no local CA. Universal SHA25684fcc9be1eda6d59a43d4e30e0f0db28b4ab5cef1a9a4b0ff83c9b1fbe7c1a16. Physical installation and full original goal remain incomplete.
+
+Fresh -PrivateChat passes226 recorded checks at17:31:20 (registration30 + rounds196), APKfd3046e6098665f97eddc606ef4afd105acfa501a09b8d17d8f3ec7b97945bd8, final local build2m45s. Actual private Send is disabled/dimmed. Forced composer submission returns false without clearing text; shared native text, forwarding and screenshot entries create no private negative messages_v2 row or pending plaintext bubble. Existing native draft encryption/restoration and receiving/cold offline checks pass. Final primary screenshot inspected. These are emulator/programmatic rejection tests, not native encrypted send delivery, physical phones, all media controls or historical plaintext cleanup. Original goal remains active.
+
 ## Private native draft persistence — 2026-10-09
 
 Normal ARM rebuild2m32s passes; all three fresh APK signature/package/API/ABI/TLS/size checks pass. ARM64/ARMv7/universal122428253/108141559/158653670 bytes, Debug/no local CA. Universal SHA2563c7dd785b12deebcbb6dd28034dd5b9213051ea6e9389c177150670d54d37f63. Phone installation remains unresolved; package checks do not establish it.
