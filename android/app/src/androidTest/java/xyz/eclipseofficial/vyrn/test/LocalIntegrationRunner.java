@@ -59,7 +59,7 @@ public final class LocalIntegrationRunner extends Instrumentation {
         context=getTargetContext();
         Bundle result=new Bundle();
         Thread diagnostic=null;
-        boolean offlineChatReopen=phase.equals("chat-offline-reopen")||phase.equals("chat-failed-reopen")||phase.equals("chat-private-offline-view");
+        boolean offlineChatReopen=phase.equals("chat-offline-reopen")||phase.equals("chat-failed-reopen")||phase.equals("chat-private-offline-view")||phase.equals("chat-private-deleted-offline-view");
         if(offlineChatReopen){
             diagnostic=new Thread(()->{try{Thread.sleep(50000);StringBuilder trace=new StringBuilder("stage=").append(stage).append('\n');for(java.util.Map.Entry<Thread,StackTraceElement[]> entry:Thread.getAllStackTraces().entrySet()){trace.append(entry.getKey().getName().equals("main")?"main":"worker").append(' ').append(entry.getKey().getState()).append('\n');for(StackTraceElement frame:entry.getValue())trace.append(frame).append('\n');}java.nio.file.Files.write(file("vyrn-test-thread-state.txt").toPath(),trace.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8));}catch(Exception ignored){}},"vyrn-test-diagnostic");diagnostic.setDaemon(true);diagnostic.start();
         }

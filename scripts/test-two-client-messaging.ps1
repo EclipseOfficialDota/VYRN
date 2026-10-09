@@ -1,5 +1,6 @@
 # Native foreground send/edit/delete and optional offline queue/recovery. Physical-phone acceptance remains separate.
-param([switch]$Edit,[switch]$Delete,[switch]$Offline,[switch]$ManualRetry,[switch]$LostAck,[switch]$MutationRestart,[switch]$PrivateKeys,[switch]$PrivateChat)
+param([switch]$Edit,[switch]$Delete,[switch]$Offline,[switch]$ManualRetry,[switch]$LostAck,[switch]$MutationRestart,[switch]$PrivateKeys,[switch]$PrivateChat,[switch]$PrivateDelete)
+if($PrivateDelete){$PrivateChat=$true}
 if($PrivateChat){$PrivateKeys=$true}
 if($MutationRestart){$LostAck=$true}
 if($ManualRetry -or $LostAck){$Offline=$true}
@@ -141,12 +142,13 @@ try{
         $rounds+=@{phase='key-publication-host';result='passed';checks=@('independent_authenticated_publications','both_cold_reopens_preserve_device')}
     }
     if($PrivateChat){
-        $conversation=''
+        $conversation='';$liveMessage=$null
         foreach($direction in @(@{sender='emulator-5560';recipient='emulator-5562'},@{sender='emulator-5562';recipient='emulator-5560'})){
             $text='چت خصوصی بومی '+[guid]::NewGuid().ToString('N')
             Write-Fixture $direction.sender @{peer_user=$users[$direction.recipient];text=$text;conversation=$conversation}
             $rounds+=Finish-Phase (Start-Phase $direction.sender 'chat-private-fixture-send');$sent=Read-State $direction.sender;$conversation=$sent.conversation
             if(!$conversation -or !$sent.message_id -or !$sent.ordinal){throw 'Private encrypted fixture evidence missing'}
+            if(!$liveMessage){$liveMessage=@{ordinal=$sent.ordinal;text=$text}}
             foreach($serial in @('emulator-5560','emulator-5562')){
                 $peer=if($serial -eq 'emulator-5560'){$users['emulator-5562']}else{$users['emulator-5560']}
                 Write-Fixture $serial @{peer_user=$peer;text=$text;conversation=$conversation;message_id=$sent.message_id;ordinal=$sent.ordinal}
@@ -162,8 +164,20 @@ try{
             foreach($serial in @('emulator-5560','emulator-5562')){$restored=Invoke-TestAdb -Arguments @('-s',$serial,'reverse','tcp:18443','tcp:18443');if($restored.code -ne 0){throw 'Private offline mapping restore failed'}}
             $privateReverseRemoved=$false
         }
+        if($PrivateDelete){
+            $deletedFixture=@{conversation=$conversation;message_id=$sent.message_id;ordinal=$sent.ordinal;text=$text;sender_user=$users['emulator-5562'];live_ordinal=$liveMessage.ordinal;live_text=$liveMessage.text;peer_user=$users['emulator-5560']}
+            Write-Fixture 'emulator-5562' $deletedFixture;$rounds+=Finish-Phase (Start-Phase 'emulator-5562' 'chat-private-delete-fixture')
+            foreach($serial in @('emulator-5560','emulator-5562')){
+                $fixture=$deletedFixture.Clone();$fixture.peer_user=if($serial -eq 'emulator-5560'){$users['emulator-5562']}else{$users['emulator-5560']};Write-Fixture $serial $fixture
+                $rounds+=Finish-Phase (Start-Phase $serial 'chat-private-deleted-view');Capture-PrivateChat $serial 'chat-private-deleted-view'
+            }
+            $privateReverseRemoved=$true
+            foreach($serial in @('emulator-5560','emulator-5562')){$removed=Invoke-TestAdb -Arguments @('-s',$serial,'reverse','--remove','tcp:18443');if($removed.code -ne 0){throw 'Private deleted offline mapping removal failed'};$rounds+=Finish-Phase (Start-Phase $serial 'chat-private-deleted-offline-view');Capture-PrivateChat $serial 'chat-private-deleted-offline-view'}
+            foreach($serial in @('emulator-5560','emulator-5562')){$restored=Invoke-TestAdb -Arguments @('-s',$serial,'reverse','tcp:18443','tcp:18443');if($restored.code -ne 0){throw 'Private deleted offline mapping restore failed'}};$privateReverseRemoved=$false
+        }
         $registration=Get-Content (Join-Path $root 'artifacts/android-two-client-registration.json') -Raw | ConvertFrom-Json
-        @{date=[DateTimeOffset]::Now.ToString('o');result='passed';apk_sha256=(Get-FileHash (Join-Path $root 'artifacts/VyrnApp-dev-x86_64-debug-local-tls.apk') -Algorithm SHA256).Hash.ToLowerInvariant();devices=$registration.devices;rounds=$rounds;physical_devices='not tested';scope='Two independent native registrations and key publication; Signal-domain encrypted fixture send in both directions, actual foreground private ChatActivity cells and native row persistence on both clients; disconnected cold native reopen. Private native composer sending remains gated.'} | ConvertTo-Json -Depth 9 | Set-Content (Join-Path $root 'artifacts/android-two-client-private-chat.json') -Encoding utf8
+        $report=if($PrivateDelete){'artifacts/android-two-client-private-deletion.json'}else{'artifacts/android-two-client-private-chat.json'}
+        @{date=[DateTimeOffset]::Now.ToString('o');result='passed';apk_sha256=(Get-FileHash (Join-Path $root 'artifacts/VyrnApp-dev-x86_64-debug-local-tls.apk') -Algorithm SHA256).Hash.ToLowerInvariant();devices=$registration.devices;rounds=$rounds;physical_devices='not tested';private_deletion_replay=[bool]$PrivateDelete;scope='Two independent native registrations and key publication; Signal-domain encrypted fixture send in both directions, actual foreground private ChatActivity cells and native row persistence on both clients; disconnected cold native reopen. Optional REST fixture deletion, real stream-learned tombstones, stale array/new/edit/notification/SQL/dialog-top replay and cold offline absence. Native private composer sending and deletion controls remain untested/gated.'} | ConvertTo-Json -Depth 9 | Set-Content (Join-Path $root $report) -Encoding utf8
         Write-Output 'PASS: encrypted native private bubbles and disconnected cold reopen on both clients; domain fixture sends, native composer still gated.'
         return
     }

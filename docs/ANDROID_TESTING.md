@@ -1,5 +1,9 @@
 # Local Android integration
 
+## Private deletion replay — 2026-10-09
+
+Run scripts/test-two-client-messaging.ps1 -PrivateDelete after a local x86 instrumentation build. Includes the full -PrivateChat receiving/cache scenario, deletes the second fixture message through authenticated REST, and cold-opens both actual private chats online and offline. Require stream-learned persistent native tombstones and a visible known-live first bubble before asserting the deleted message is absent. Controlled stale plaintext objects, new/edit updates, real notification dispatch, dialog previews and MessagesStorage.putMessages must not restore it. A newer object from another dialog must never replace this dialog's preview; absent same-dialog fallback clears the preview. Query actual messages_v2 and the existing dialogs row after replay. No fixture directly seeds the tombstone. Native private composer Send/Delete controls remain gated and untested; physical phones and deletion not yet learned before disconnect remain separate requirements.
+
 ## Two native private chats — 2026-10-09
 
 Run scripts/test-two-client-messaging.ps1 -PrivateChat after a local x86 instrumentation build. Reuses native registration/key-publication setup, then sends encrypted text through SignalMessages as a fixture in both directions. Actual private ChatActivity cells and native database rows are checked on both clients, including force-stop and offline reopen with each18443 reverse removed. Restore mappings and remove private fixtures in finally. Screenshots remain ignored in .local for visual verification. Native composer sending is not exercised or enabled by this test.
