@@ -1,5 +1,9 @@
 # Decisions
 
+## Native private cancellation uses the original encrypted journal — 2026-10-09
+
+Intercept private pending Cancel before ordinary Telegram cancellation; reject unsupported or changed rows while preserving them. Cache only a validated original user/session/device tuple and persist intent through the existing IO executor, independent of the private HTTP-held SEND/vault lock. The existing worker reloads the original record after claiming its durable lease and asks the same server cancellation endpoint to arbitrate. Live committed messages retain normal confirmation; cancelled and already-deleted committed work retain only cleanup metadata. Native cleanup checks the original row, installs persistent negative and known deleted-positive fences, removes storage/UI rows and verifies absence before encrypted acknowledgement. Filter late negative private placeholder objects and skip cancelled local IDs during new allocation. Composer, trust/device UI and calls remain gated pending their separate acceptance requirements.
+
 ## Private cancellation journal — 2026-10-09
 
 Persist cancellation intent in the original encrypted SignalStore without waiting for the TokenVault lock held by private HTTP requests. Validate the cached original owner/session, authenticated device proof and full native account/local/dialog/random/date tuple before accepting intent. Repeated intent retains its budget; original ciphertext and ratchets remain unchanged until server arbitration. The existing cancel endpoint permanently fences an unsent client ID and returns a previously committed message instead of deleting it. Retain scrubbed cleanup identity for cancelled work and committed messages already deleted or expired, until exact native cleanup acknowledgement. Native Cancel interception, worker arbitration and negative-row replay fencing remain unfinished; this tested journal primitive does not activate private composer controls.

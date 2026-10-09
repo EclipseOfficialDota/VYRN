@@ -159,6 +159,7 @@ public final class VyrnBridge {
     private final int account;
     private final AtomicBoolean uiReconciling=new AtomicBoolean();
     private final AtomicBoolean privateRecovering=new AtomicBoolean();
+    private volatile String[] privateLocalDevice;
     private java.util.concurrent.CompletableFuture<Void> privateKeysPreparation;
     private volatile String privateKeysSession;
     private volatile long privateKeysOwner;
@@ -185,6 +186,11 @@ public final class VyrnBridge {
     public static boolean cancelSendingMessages(int account,ArrayList<MessageObject> objects){
         ArrayList<MessageObject> other=new ArrayList<>();boolean handled=false;
         for(MessageObject object:objects){
+            if(object!=null&&object.messageOwner!=null&&object.getId()<0&&privateSendUnavailable(object.getDialogId())){
+                handled=true;VyrnBridge bridge=forAccount(account);long owner=UserConfig.getInstance(account).getClientUserId(),dialog=object.getDialogId(),random=object.messageOwner.random_id;int local=object.getId(),date=object.messageOwner.date;String session=bridge.repository.vault.cachedSession();String[] device=bridge.privateLocalDevice;
+                if(object.currentAccount!=account||owner==0||session==null||device==null||!session.equals(device[1])||isLoggingOut(account)||!samePrivatePending(object,object.messageOwner,local,dialog,owner,date,random)){bridge.privateCancelFailure(owner,session);continue;}
+                execute(()->{try{String peer=bridge.ids.remote("user",dialog);bridge.requirePrivateOrigin(device[0],session,owner,peer,dialog);if(isLoggingOut(account))throw new SecurityException("private_origin_changed");SignalMessages.requestNativeCancellation(ApplicationLoader.applicationContext,bridge.repository,device[0],session,device[2],account,local,dialog,random,date,peer);}catch(Exception unavailable){bridge.privateCancelFailure(owner,session);}});continue;
+            }
             if(object==null || object.messageOwner==null || object.getId()>=0 || object.getDialogId()>=0 || object.messageOwner.random_id==0 || object.type!=MessageObject.TYPE_TEXT || object.scheduled || object.isQuickReply() || MessageObject.isWelcomeMessage(object.messageOwner)){other.add(object);continue;}
             handled=true;final int localId=object.getId(),token=object.messageOwner.reqId;final long dialog=object.getDialogId(),random=object.messageOwner.random_id;final String text=object.messageOwner.message;
             execute(()->{try{VyrnBridge bridge=forAccount(account);String user=bridge.repository.vault.load().getString("user_id");String client=UUID.nameUUIDFromBytes((user+":"+random).getBytes(StandardCharsets.UTF_8)).toString();
@@ -195,6 +201,7 @@ public final class VyrnBridge {
         if(handled && !other.isEmpty())SendMessagesHelper.getInstance(account).cancelSendingMessage(other);
         return handled;
     }
+    private void privateCancelFailure(long owner,String session){AndroidUtilities.runOnUIThread(()->{if(owner!=0&&session!=null&&UserConfig.getInstance(account).getClientUserId()==owner&&session.equals(repository.vault.cachedSession()))android.widget.Toast.makeText(ApplicationLoader.applicationContext,org.telegram.messenger.LocaleController.isRTL?"لغو تأیید نشد؛ پیام حفظ شد.":"Cancellation was not confirmed; your message is kept.",android.widget.Toast.LENGTH_LONG).show();});}
     private void resolveUi(List<OutboxStore.UiResolution> resolutions){
         if(!uiReconciling.compareAndSet(false,true))return;
         execute(()->{try{for(OutboxStore.UiResolution resolution:resolutions)try{resolveUiOne(resolution);}catch(Exception unavailable){/* Retry the durable journal; never erase on a failed cache operation. */}}finally{uiReconciling.set(false);}});
@@ -258,7 +265,7 @@ public final class VyrnBridge {
             Models.Conversation model=repository.conversationDetails(conversation).conversation;List<Models.User> members=repository.members(conversation);boolean own=false,other=false;ArrayList<TLRPC.User> mapped=new ArrayList<>();
             for(Models.User member:members){own|=member.id.equals(user);other|=member.id.equals(peer);mapped.add(mapUser(member));}
             if(!model.kind.equals("private")||members.size()!=2||!own||!other)throw new SecurityException("private_conversation_changed");
-            java.util.concurrent.CompletableFuture<long[]> reserved=new java.util.concurrent.CompletableFuture<>();AndroidUtilities.runOnUIThread(()->{try{requirePrivateOrigin(user,session,owner,peer,dialog);int local=UserConfig.getInstance(account).getNewMessageId();UserConfig.getInstance(account).saveConfig(false);MessagesController.getInstance(account).putUsers(mapped,false);reserved.complete(new long[]{local,SendMessagesHelper.getInstance(account).getNextRandomId()});}catch(Exception unavailable){reserved.completeExceptionally(unavailable);}});
+            java.util.concurrent.CompletableFuture<long[]> reserved=new java.util.concurrent.CompletableFuture<>();AndroidUtilities.runOnUIThread(()->{try{requirePrivateOrigin(user,session,owner,peer,dialog);Map<Long,java.util.Set<Integer>> fences=MessagesStorage.getInstance(account).getVyrnDeletedMessages();if(fences==null)throw new SecurityException("private_native_storage_unavailable");java.util.Set<Integer> deleted=fences.get(dialog);int local;do{local=UserConfig.getInstance(account).getNewMessageId();}while(deleted!=null&&deleted.contains(local));UserConfig.getInstance(account).saveConfig(false);MessagesController.getInstance(account).putUsers(mapped,false);reserved.complete(new long[]{local,SendMessagesHelper.getInstance(account).getNextRandomId()});}catch(Exception unavailable){reserved.completeExceptionally(unavailable);}});
             long[] identity=reserved.get(20,TimeUnit.SECONDS);String client=UUID.nameUUIDFromBytes((user+":"+identity[1]).getBytes(StandardCharsets.UTF_8)).toString();JSONObject binding;
             try(SignalDeviceKeys keys=SignalDeviceKeys.openLocal(ApplicationLoader.applicationContext,repository)){if(!user.equals(keys.user))throw new SecurityException("private_origin_changed");SignalMessages messages=new SignalMessages(keys);messages.prepareNative(peer,conversation,client,text,account,(int)identity[0],dialog,identity[1]);binding=messages.nativeBinding(account,client);}
             writePrivateNative(binding,user,session,owner,null);return binding;
@@ -316,7 +323,11 @@ public final class VyrnBridge {
             org.json.JSONArray rows;String user;try(SignalDeviceKeys keys=SignalDeviceKeys.openLocal(ApplicationLoader.applicationContext,repository)){user=keys.user;rows=new SignalMessages(keys).nativePending(account);}
             for(int i=0;i<rows.length();i++){JSONObject row=rows.getJSONObject(i);if(!row.getBoolean("scheduled")||row.getBoolean("failed"))continue;String attempt=null,client=row.getString("client_id");
                 try{requirePrivateOrigin(user,session,owner,row.getString("peer"),row.getLong("dialog_id"));if(isLoggingOut(account))return;
+                    privateLocalDevice=new String[]{user,session,row.getString("device")};
+                    if(row.getBoolean("cancelled")){resolvePrivateCancellation(row,user,session,owner);continue;}
                     try(SignalDeviceKeys keys=SignalDeviceKeys.openLocal(ApplicationLoader.applicationContext,repository)){attempt=new SignalMessages(keys).claimNative(account,client);}if(attempt==null)continue;
+                    try(SignalDeviceKeys keys=SignalDeviceKeys.openLocal(ApplicationLoader.applicationContext,repository)){SignalMessages messages=new SignalMessages(keys);row=messages.nativeBinding(account,client);if(row.getBoolean("cancel_requested")){messages.resolveNativeCancellation(account,client);row=messages.nativeBinding(account,client);}}
+                    if(row.getBoolean("cancelled")){resolvePrivateCancellation(row,user,session,owner);continue;}
                     if(row.isNull("message_id"))writePrivateNative(row,user,session,owner,null);deliverPrivateTextNow(client,owner,session);
                 }catch(Exception unavailable){if(attempt!=null)try{JSONObject failed;try(SignalDeviceKeys keys=SignalDeviceKeys.openLocal(ApplicationLoader.applicationContext,repository)){requirePrivateOrigin(user,session,owner,row.getString("peer"),row.getLong("dialog_id"));SignalMessages messages=new SignalMessages(keys);messages.failNative(account,client,attempt,unavailable);failed=messages.nativeBinding(account,client);}if(failed.isNull("message_id"))writePrivateNative(failed,user,session,owner,null);}catch(Exception preserved){/* Keep original encrypted work if its owner/storage changed. */}}
             }
@@ -326,9 +337,23 @@ public final class VyrnBridge {
     private void requirePrivateOrigin(String user,String session,long owner,String peer,long dialog) throws Exception {
         if(owner==0||session==null||!repository.vault.isUser(user)||!session.equals(repository.vault.cachedSession())||UserConfig.getInstance(account).getClientUserId()!=owner||!user.equals(ids.remote("user",owner))||!peer.equals(ids.remote("user",dialog)))throw new SecurityException("private_origin_changed");
     }
+    private void resolvePrivateCancellation(JSONObject binding,String user,String session,long owner) throws Exception {
+        int local=binding.getInt("local_id"),date=binding.getInt("date"),ordinal=binding.getInt("ordinal");long dialog=binding.getLong("dialog_id"),random=binding.getLong("random_id");String peer=binding.getString("peer"),client=binding.getString("client_id");
+        requirePrivateOrigin(user,session,owner,peer,dialog);if(local>=0||date<=0||random==0||!binding.getBoolean("cancelled")||binding.getBoolean("ui_done")||!binding.isNull("message_id")&&ordinal<=0)throw new SecurityException("private_cancel_binding_changed");
+        ArrayList<Integer> removed=new ArrayList<>();removed.add(local);if(ordinal>0)removed.add(ordinal);MessagesStorage storage=MessagesStorage.getInstance(account);java.util.concurrent.CompletableFuture<Void> written=new java.util.concurrent.CompletableFuture<>();
+        storage.getStorageQueue().postRunnable(()->{try{
+            requirePrivateOrigin(user,session,owner,peer,dialog);org.telegram.SQLite.SQLiteDatabase db=storage.getDatabase();org.telegram.SQLite.SQLiteCursor cursor=db.queryFinalized("SELECT r.random_id,m.data FROM messages_v2 m LEFT JOIN randoms_v2 r ON r.mid=m.mid AND r.uid=m.uid WHERE m.uid="+dialog+" AND m.mid="+local);
+            try{if(cursor.next()){if(cursor.isNull(0)||cursor.longValue(0)!=random)throw new SecurityException("private_cancel_row_changed");org.telegram.tgnet.NativeByteBuffer data=cursor.byteBufferValue(1);try{TLRPC.Message row=TLRPC.Message.TLdeserialize(data,data.readInt32(true),true);if(row.peer_id==null||row.peer_id.user_id!=dialog||row.from_id==null||row.from_id.user_id!=owner||row.date!=date||!row.out||!PRIVATE_PENDING_PLACEHOLDER.equals(row.message))throw new SecurityException("private_cancel_row_changed");}finally{data.reuse();}}}finally{cursor.dispose();}
+            String sql="INSERT OR REPLACE INTO vyrn_deleted_messages(uid,mid) VALUES ("+dialog+","+local+")"+(ordinal>0?",("+dialog+","+ordinal+")":"");db.executeFast(sql).stepThis().dispose();storage.vyrnReloadDeletedMessages();storage.markMessagesAsDeleted(dialog,removed,false,false,0,0);storage.updateDialogsWithDeletedMessages(dialog,0,removed,null);written.complete(null);
+        }catch(Exception failure){written.completeExceptionally(failure);}});written.get(20,TimeUnit.SECONDS);
+        java.util.concurrent.CompletableFuture<Void> displayed=new java.util.concurrent.CompletableFuture<>();AndroidUtilities.runOnUIThread(()->{try{requirePrivateOrigin(user,session,owner,peer,dialog);for(int id:removed)SendMessagesHelper.getInstance(account).vyrnResolveCancellation(id,dialog,null);displayed.complete(null);}catch(Exception failure){displayed.completeExceptionally(failure);}});displayed.get(20,TimeUnit.SECONDS);
+        java.util.concurrent.CompletableFuture<Void> verified=new java.util.concurrent.CompletableFuture<>();storage.getStorageQueue().postRunnable(()->{try{requirePrivateOrigin(user,session,owner,peer,dialog);for(int id:removed){org.telegram.SQLite.SQLiteCursor cursor=storage.getDatabase().queryFinalized("SELECT (SELECT count(*) FROM messages_v2 WHERE uid="+dialog+" AND mid="+id+"),(SELECT count(*) FROM vyrn_deleted_messages WHERE uid="+dialog+" AND mid="+id+")");try{if(!cursor.next()||cursor.intValue(0)!=0||cursor.intValue(1)!=1)throw new SecurityException("private_cancel_cleanup_missing");}finally{cursor.dispose();}}verified.complete(null);}catch(Exception failure){verified.completeExceptionally(failure);}});verified.get(20,TimeUnit.SECONDS);
+        try(SignalDeviceKeys keys=SignalDeviceKeys.openLocal(ApplicationLoader.applicationContext,repository)){requirePrivateOrigin(user,session,owner,peer,dialog);new SignalMessages(keys).acknowledgeNativeCancellation(account,client,local,dialog,random);}
+    }
     private void writePrivateNative(JSONObject binding,String user,String session,long owner,TLRPC.Message committed) throws Exception {
         int local=binding.getInt("local_id"),date=binding.getInt("date");long dialog=binding.getLong("dialog_id"),random=binding.getLong("random_id");String peer=binding.getString("peer");requirePrivateOrigin(user,session,owner,peer,dialog);
         if(local>=0||date<=0||random==0||dialog<=0||binding.getBoolean("ui_done"))throw new SecurityException("private_native_binding_changed");
+        privateLocalDevice=new String[]{user,session,binding.getString("device")};
         final TLRPC.Message row;
         if(committed!=null)row=committed;
         else{TLRPC.TL_message pending=new TLRPC.TL_message();pending.id=pending.local_id=local;pending.dialog_id=dialog;pending.date=date;pending.random_id=random;pending.flags=256;pending.out=true;pending.from_id=new TLRPC.TL_peerUser();pending.from_id.user_id=owner;pending.peer_id=new TLRPC.TL_peerUser();pending.peer_id.user_id=dialog;pending.message=PRIVATE_PENDING_PLACEHOLDER;pending.media=new TLRPC.TL_messageMediaEmpty();pending.send_state=binding.optBoolean("failed")?MessageObject.MESSAGE_SEND_STATE_SEND_ERROR:MessageObject.MESSAGE_SEND_STATE_SENDING;row=pending;}
@@ -412,7 +437,7 @@ public final class VyrnBridge {
                 try(SignalDeviceKeys keys=SignalDeviceKeys.openLocal(ApplicationLoader.applicationContext,bridge.repository)){
                     if(user==null){user=keys.user;peer=bridge.ids.remote("user",dialog);}
                     if(!user.equals(keys.user)||!session.equals(bridge.repository.vault.cachedSession())||!user.equals(bridge.ids.remote("user",owner))||!peer.equals(bridge.ids.remote("user",dialog)))throw new SecurityException("signal_native_identity_changed");
-                    SignalMessages messages=new SignalMessages(keys);text=messages.nativePendingText(peer,account,id,dialog,random,date);
+                    bridge.privateLocalDevice=new String[]{user,session,keys.device};SignalMessages messages=new SignalMessages(keys);text=messages.nativePendingText(peer,account,id,dialog,random,date);
                     if(text!=null){String client=UUID.nameUUIDFromBytes((user+":"+random).getBytes(StandardCharsets.UTF_8)).toString();pendingState=messages.nativeBinding(account,client).getBoolean("failed")?MessageObject.MESSAGE_SEND_STATE_SEND_ERROR:MessageObject.MESSAGE_SEND_STATE_SENDING;}
                 }
             }catch(Exception unavailable){/* Missing, acknowledged or changed origin clears volatile text. */}
@@ -434,7 +459,7 @@ public final class VyrnBridge {
             TLRPC.Update update=updates.get(i);TLRPC.Message message=null;
             if(update instanceof TL_update.TL_updateNewMessage)message=((TL_update.TL_updateNewMessage)update).message;
             else if(update instanceof TL_update.TL_updateEditMessage)message=((TL_update.TL_updateEditMessage)update).message;
-            if(message!=null&&message.id>0&&deletionDialog(message)!=0){positions.add(i);messages.add(message);}
+            if(deletionFenceEligible(message)){positions.add(i);messages.add(message);}
         }
         if(messages.isEmpty())return true;
         ArrayList<Integer> deleted=deletedMessagePositions(account,messages);if(deleted==null)return false;
@@ -449,7 +474,7 @@ public final class VyrnBridge {
         for(int i=deleted.size()-1;i>=0;i--)objects.remove((int)deleted.get(i));return true;
     }
     public static boolean isDeletedDialogTop(int account,TLRPC.Dialog dialog){
-        if(dialog==null||dialog.id==0||org.telegram.messenger.DialogObject.isEncryptedDialog(dialog.id)||dialog.top_message<=0)return false;
+        if(dialog==null||dialog.id==0||org.telegram.messenger.DialogObject.isEncryptedDialog(dialog.id)||(dialog.top_message==0||dialog.top_message<0&&dialog.id<0))return false;
         Map<Long,java.util.Set<Integer>> snapshot=MessagesStorage.getInstance(account).getVyrnDeletedMessages();
         java.util.Set<Integer> ids=snapshot==null?null:snapshot.get(dialog.id);return ids!=null&&ids.contains(dialog.top_message);
     }
@@ -470,7 +495,7 @@ public final class VyrnBridge {
         return message.peer_id.user_id>0?message.peer_id.user_id:0;
     }
     private static ArrayList<Integer> deletedMessagePositions(int account,ArrayList<TLRPC.Message> messages){
-        boolean eligible=false;for(TLRPC.Message message:messages)if(message!=null&&message.id>0&&deletionDialog(message)!=0){eligible=true;break;}
+        boolean eligible=false;for(TLRPC.Message message:messages)if(deletionFenceEligible(message)){eligible=true;break;}
         if(!eligible)return new ArrayList<>();
         MessagesStorage storage=MessagesStorage.getInstance(account);Map<Long,java.util.Set<Integer>> snapshot=storage.getVyrnDeletedMessages();
         if(snapshot==null){
@@ -482,11 +507,12 @@ public final class VyrnBridge {
         }
         ArrayList<Integer> deleted=new ArrayList<>();
         for(int i=0;i<messages.size();i++){
-            TLRPC.Message message=messages.get(i);if(message==null||message.id<=0)continue;long dialog=deletionDialog(message);if(dialog==0)continue;
+            TLRPC.Message message=messages.get(i);if(!deletionFenceEligible(message))continue;long dialog=deletionDialog(message);if(dialog==0)continue;
             java.util.Set<Integer> ids=snapshot.get(dialog);if(ids!=null&&ids.contains(message.id))deleted.add(i);
         }
         return deleted;
     }
+    private static boolean deletionFenceEligible(TLRPC.Message message){return message!=null&&deletionDialog(message)!=0&&(message.id>0||message.id<0&&message.peer_id.user_id>0&&PRIVATE_PENDING_PLACEHOLDER.equals(message.message));}
     /** Install and normalize app-private guards before any cached rows are exposed. */
     public static void initializeDeletedCache(org.telegram.SQLite.SQLiteDatabase db) throws org.telegram.SQLite.SQLiteException {
         db.executeFast("CREATE TABLE IF NOT EXISTS vyrn_deleted_messages(uid INTEGER NOT NULL, mid INTEGER NOT NULL, PRIMARY KEY(uid,mid))").stepThis().dispose();

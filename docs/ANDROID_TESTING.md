@@ -1,5 +1,11 @@
 # Local Android integration
 
+## Native private cancellation — 2026-10-09
+
+Run `rtk proxy pwsh -NoProfile -File scripts/test-two-client-messaging.ps1 -PrivateCancel` after the local instrumentation build. This is a separate scenario and cannot combine with private automatic/manual Retry, lost-ACK, deletion or mutation restart. It registers both emulator clients, publishes distinct keys and prepares encrypted pending rows programmatically. With actual HTTPS disconnected, open the existing message-options accessibility menu and click Cancel Sending. Require durable intent and unchanged original ciphertext/ratchet while the bubble is kept. Restore transport, force-stop/reopen and require the app worker to resolve cancellation, scrub payload and acknowledge only after native storage/UI cleanup. Another cold process restart must retain original server/negative native fences. Explicit late negative object/storage replay and actual reopened ChatActivity must remain free of the cancelled bubble.
+
+Final report artifacts/android-two-client-private-cancellation.json passes164 recorded checks at23:30:49 on APK729e2721fb953611db29cffa1f10177520260f4f78dae154a6c15fa230d887b4. This proves unsent offline cancellation in both emulator directions; committed-send UI races, all cleanup interruption windows, cancellation retry exhaustion, physical touch/phones and native composer/device trust remain separate work. An initial final attempt terminated at pre-runner process startup ANR; a single terminal retry passed. Do not reinterpret that failed attempt as a cancellation assertion failure or claim its startup root cause fixed.
+
 ## Native private Retry scenario
 
 Shared-entry regression: scripts/test-two-client-messaging.ps1 -PrivateKeys -ManualRetry passes325 checks at22:48:17 on the same298b1... APK, report artifacts/android-two-client-private-keys.json. Actual failed-send/cold-failed/native Retry phases and group send/edit/delete/cancellation/offline recovery pass. Actual worker terminated; a verified childless owned RTK wrapper required cleanup and outer exit1 reflects that cleanup, not failed instrumentation.
