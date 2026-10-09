@@ -1,5 +1,9 @@
 # Decisions
 
+## Recover only explicitly scheduled encrypted private journal entries — 2026-10-09
+
+Persist scheduling intent in the original encrypted Signal outgoing record after native pending storage/UI proof. Reuse the existing account worker lifecycle for a5s enqueue callback and the existing serialized SEND executor for recovery; do not introduce a second plaintext outbox or new key claim/publication during recovery. Revalidate original user/session/native owner and inverse peer UUID bindings, reuse exact ciphertext or recorded ACK, then reconcile native storage/UI before journal acknowledgement. Unscheduled component/adapter preparation remains inert. One scan per account is bounded; failures preserve original work with an account-wide30s in-memory delay. Per-record durable backoff/failed/manual-retry/cancellation/trust and native composer activation remain required. This foreground/process-reopen worker does not establish closed-app push or screen-off acceptance.
+
 ## Reconcile private native rows through the existing encrypted journal — 2026-10-09
 
 Use the existing Signal outgoing record for the original account/session, client/random ID, negative native ID, peer dialog, conversation and creation date. Preparation creates a placeholder-only native row after encrypted preparation succeeds. Delivery reuses the persisted ciphertext or recorded server ACK, replaces the original negative identity, and acknowledges journal UI work only after native storage and UI reconciliation. Native history must restore random IDs for negative private rows as it already does for pending group rows; otherwise authenticated pending text cannot be restored. Keep the composer gated while automatic scheduling, retry/cancellation, unknown-ACK lifecycle and peer/device trust screens remain incomplete. Programmatic adapter tests do not establish native composer or physical-phone acceptance.

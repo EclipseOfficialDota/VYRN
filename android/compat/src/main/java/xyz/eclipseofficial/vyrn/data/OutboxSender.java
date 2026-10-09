@@ -22,6 +22,8 @@ public final class OutboxSender implements AutoCloseable {
     private volatile Consumer<List<OutboxStore.UiResolution>> uiListener;
     public OutboxSender(Context context,int account,RestRepository repository){this.repository=repository;store=new OutboxStore(context,account);store.recover();worker.scheduleWithFixedDelay(this::drain,1,1,TimeUnit.SECONDS);worker.scheduleWithFixedDelay(this::publishUi,1,1,TimeUnit.SECONDS);worker.scheduleWithFixedDelay(store::prune,1,1,TimeUnit.HOURS);}
     public void setUiListener(Consumer<List<OutboxStore.UiResolution>> listener){uiListener=listener;}
+    /** Share the existing account worker lifecycle; the callback must only enqueue bounded work. */
+    public void setRecoveryListener(Runnable listener){worker.scheduleWithFixedDelay(()->{try{listener.run();}catch(Exception unavailable){/* Preserve durable work for the next tick. */}},1,5,TimeUnit.SECONDS);}
     private void publishUi(){try{Consumer<List<OutboxStore.UiResolution>> listener=uiListener;if(listener==null)return;String user=repository.vault.load().optString("user_id");List<OutboxStore.UiResolution> ready=store.resolvedUi(user);if(!ready.isEmpty())listener.accept(ready);}catch(Exception unavailable){/* Keep the journal for the next attempt. */}}
     public void cancelFromUi(String user,String client,String conversation,String text,int localId,long dialogId,long randomId) throws Exception {
         if(!user.equals(repository.vault.load().optString("user_id")))throw new SecurityException("account_changed");

@@ -55,7 +55,11 @@ public final class SignalMessages {
         keys.requireSession();id(client);if(account<0||account>3)throw new SecurityException("signal_native_identity_changed");
         JSONObject value=load("private-outgoing",client);if(value==null||!value.has("native_ui"))throw new SecurityException("signal_native_identity_missing");JSONArray identity=value.getJSONArray("native_ui");
         if(identity.length()!=5||identity.getInt(0)!=account||!keys.sessionId().equals(identity.getString(4)))throw new SecurityException("signal_native_identity_changed");
-        return new JSONObject().put("client_id",client).put("peer",value.getString("peer")).put("conversation",value.getString("conversation")).put("local_id",identity.getInt(1)).put("dialog_id",identity.getLong(2)).put("random_id",identity.getLong(3)).put("message_id",value.get("message_id")).put("date",value.optInt("native_date")).put("ui_done",value.optBoolean("native_ui_done"));
+        return new JSONObject().put("client_id",client).put("peer",value.getString("peer")).put("conversation",value.getString("conversation")).put("local_id",identity.getInt(1)).put("dialog_id",identity.getLong(2)).put("random_id",identity.getLong(3)).put("message_id",value.get("message_id")).put("date",value.optInt("native_date")).put("ui_done",value.optBoolean("native_ui_done")).put("scheduled",value.optBoolean("native_scheduled"));
+    }}
+    /** Scheduling intent belongs to the original encrypted record, never the group plaintext outbox. */
+    public void scheduleNative(int account,String client) throws Exception {synchronized(keys.guard()){
+        keys.requireSession();store.transaction(()->{JSONObject binding=nativeBinding(account,client);if(binding.getInt("date")<=0||store.loadValue("private-send-fence",client)!=null)throw new SecurityException("signal_native_identity_changed");if(!binding.getBoolean("ui_done")){JSONObject value=load("private-outgoing",client);value.put("native_scheduled",true);save("private-outgoing",client,value);}return null;});
     }}
     /** Only the adapter calls this after native cache/UI reconciliation is proved. */
     public void acknowledgeNative(int account,String client,int localId,long dialog,long random,String message) throws Exception {synchronized(keys.guard()){

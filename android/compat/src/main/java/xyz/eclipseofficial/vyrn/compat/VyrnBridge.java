@@ -158,11 +158,13 @@ public final class VyrnBridge {
     private final RealtimeSync realtime;
     private final int account;
     private final AtomicBoolean uiReconciling=new AtomicBoolean();
+    private final AtomicBoolean privateRecovering=new AtomicBoolean();
+    private volatile long privateRetryAt;
     private java.util.concurrent.CompletableFuture<Void> privateKeysPreparation;
     private volatile String privateKeysSession;
     private volatile long privateKeysOwner;
     private final Map<Long,String> privateConversations=new HashMap<>();
-    private VyrnBridge(int account){this.account=account;repository=new RestRepository(new TokenVault(ApplicationLoader.applicationContext,account));ids=new IdMap(ApplicationLoader.applicationContext,account);outbox=new OutboxSender(ApplicationLoader.applicationContext,account,repository);realtime=new RealtimeSync(ApplicationLoader.applicationContext,account,repository,this::applyEvent);outbox.setUiListener(this::resolveUi);}
+    private VyrnBridge(int account){this.account=account;repository=new RestRepository(new TokenVault(ApplicationLoader.applicationContext,account));ids=new IdMap(ApplicationLoader.applicationContext,account);outbox=new OutboxSender(ApplicationLoader.applicationContext,account,repository);realtime=new RealtimeSync(ApplicationLoader.applicationContext,account,repository,this::applyEvent);outbox.setUiListener(this::resolveUi);outbox.setRecoveryListener(this::recoverPrivateSends);}
     public boolean privateKeysReady(){return privateKeysOwner!=0&&privateKeysOwner==UserConfig.getInstance(account).getClientUserId()&&privateKeysSession!=null&&privateKeysSession.equals(repository.vault.cachedSession());}
     public synchronized java.util.concurrent.CompletableFuture<Void> preparePrivateKeys(){
         if(privateKeysReady())return java.util.concurrent.CompletableFuture.completedFuture(null);
@@ -265,7 +267,9 @@ public final class VyrnBridge {
     }
     public java.util.concurrent.CompletableFuture<Models.Message> deliverPrivateText(String client){
         final long owner=UserConfig.getInstance(account).getClientUserId();final String session=repository.vault.cachedSession();
-        return java.util.concurrent.CompletableFuture.supplyAsync(()->{try{
+        return java.util.concurrent.CompletableFuture.supplyAsync(()->{try{return deliverPrivateTextNow(client,owner,session);}catch(Exception unavailable){throw new java.util.concurrent.CompletionException(unavailable);}},SEND);
+    }
+    private Models.Message deliverPrivateTextNow(String client,long owner,String session) throws Exception {
             String user=repository.vault.load().getString("user_id");JSONObject binding;String message;
             try(SignalDeviceKeys keys=SignalDeviceKeys.openLocal(ApplicationLoader.applicationContext,repository)){
                 SignalMessages messages=new SignalMessages(keys);binding=messages.nativeBinding(account,client);requirePrivateOrigin(user,session,owner,binding.getString("peer"),binding.getLong("dialog_id"));message=binding.isNull("message_id")?messages.send(client):binding.getString("message_id");binding=messages.nativeBinding(account,client);
@@ -274,7 +278,27 @@ public final class VyrnBridge {
             if(!binding.getBoolean("ui_done")){TLRPC.TL_peerUser peer=new TLRPC.TL_peerUser();peer.user_id=binding.getLong("dialog_id");TLRPC.Message committed=message(remote,peer);committed.dialog_id=peer.user_id;committed.random_id=binding.getLong("random_id");committed.send_state=MessageObject.MESSAGE_SEND_STATE_SENT;writePrivateNative(binding,user,session,owner,committed);
                 try(SignalDeviceKeys keys=SignalDeviceKeys.openLocal(ApplicationLoader.applicationContext,repository)){new SignalMessages(keys).acknowledgeNative(account,client,binding.getInt("local_id"),peer.user_id,binding.getLong("random_id"),message);}
             }return remote;
+    }
+    public java.util.concurrent.CompletableFuture<Void> schedulePrivateText(String client){
+        final long owner=UserConfig.getInstance(account).getClientUserId();final String session=repository.vault.cachedSession();
+        return java.util.concurrent.CompletableFuture.runAsync(()->{try{
+            String user=repository.vault.load().getString("user_id");JSONObject binding;try(SignalDeviceKeys keys=SignalDeviceKeys.openLocal(ApplicationLoader.applicationContext,repository)){binding=new SignalMessages(keys).nativeBinding(account,client);}
+            requirePrivateOrigin(user,session,owner,binding.getString("peer"),binding.getLong("dialog_id"));if(binding.getBoolean("ui_done"))return;
+            if(binding.isNull("message_id"))writePrivateNative(binding,user,session,owner,null);
+            try(SignalDeviceKeys keys=SignalDeviceKeys.openLocal(ApplicationLoader.applicationContext,repository)){requirePrivateOrigin(user,session,owner,binding.getString("peer"),binding.getLong("dialog_id"));new SignalMessages(keys).scheduleNative(account,client);}
         }catch(Exception unavailable){throw new java.util.concurrent.CompletionException(unavailable);}},SEND);
+    }
+    private void recoverPrivateSends(){
+        final long owner=UserConfig.getInstance(account).getClientUserId();final String session=repository.vault.cachedSession();
+        if(owner==0||session==null||isLoggingOut(account)||android.os.SystemClock.elapsedRealtime()<privateRetryAt||!privateRecovering.compareAndSet(false,true))return;
+        SEND.execute(()->{try{
+            org.json.JSONArray rows;String user;try(SignalDeviceKeys keys=SignalDeviceKeys.openLocal(ApplicationLoader.applicationContext,repository)){user=keys.user;rows=new SignalMessages(keys).nativePending(account);}
+            for(int i=0;i<rows.length();i++){JSONObject row=rows.getJSONObject(i);if(!row.getBoolean("scheduled"))continue;
+                try{requirePrivateOrigin(user,session,owner,row.getString("peer"),row.getLong("dialog_id"));if(isLoggingOut(account))return;deliverPrivateTextNow(row.getString("client_id"),owner,session);}
+                catch(Exception unavailable){privateRetryAt=android.os.SystemClock.elapsedRealtime()+30000;/* Retain original ciphertext and journal; never recreate a send. */}
+            }
+        }catch(Exception unavailable){/* Missing original device/session: no publication, claim or send. */}finally{privateRecovering.set(false);}});
+        // ponytail: one shared SEND queue and account-wide 30s retry delay; per-record backoff/failed UI remains pending before composer activation.
     }
     private void requirePrivateOrigin(String user,String session,long owner,String peer,long dialog) throws Exception {
         if(owner==0||session==null||!repository.vault.isUser(user)||!session.equals(repository.vault.cachedSession())||UserConfig.getInstance(account).getClientUserId()!=owner||!user.equals(ids.remote("user",owner))||!peer.equals(ids.remote("user",dialog)))throw new SecurityException("private_origin_changed");
