@@ -1,5 +1,11 @@
 # Local Android integration
 
+## Private lost-ACK adapter recovery — 2026-10-09
+
+Run scripts/test-two-client-messaging.ps1 -PrivateChat -LostAck. Fresh local instrumentation build53s; final report artifacts/android-two-client-private-lost-ack.json passes288 checks (registration30 + rounds258) at19:32:10, SHA2562029becfd909d8ff261fc83683d3515650e5267a2c9a38a54df1fc7e53fc6a9b. The second sender's prepared/displayed native pending row uses the original encrypted outgoing record. Existing owned local HTTPS helper holds server success; force-stop occurs210ms from request start. Reopen with the same pending metadata, compare original ciphertext and sorted Signal-session fingerprints, redeliver and require the pre-interruption server UUID, one matching sender/client live server record, one confirmed native bubble, original negative removed, idempotent delivery and journal UI ACK. Existing both-direction confirmed/offline/draft/send-gate checks remain included. Helper test: go test main.go main_test.go from scripts/lost-ack-proxy. No root Go module is added.
+
+This is actual process interruption/native ChatActivity with programmatic adapter invocation, not native composer Send or automatic private recovery. Post-persisted-ACK/native/UI-journal crash windows and device trust remain separate. Only tests changed; prior verified b43c114 phone APKs remain current for app sources. Prior Signal137/group261 reports belong to their earlier local APK hash and are not reattributed to this build.
+
 ## Private app adapter and native pending process restart — 2026-10-09
 
 Same final local APK scripts/test-two-client-messaging.ps1 -PrivateKeys -Offline passes261 checks (registration30 + rounds231) at19:18:43 local. Actual group composer send/edit/delete cancellation/confirmation, receiving changes, cold deleted absence and offline queue/automatic reconnect/confirmed cold reopen remain valid after the shared history change.

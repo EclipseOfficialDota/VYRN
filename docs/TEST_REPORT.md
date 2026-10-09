@@ -1,5 +1,11 @@
 # Verification report
 
+## Private app adapter: lost ACK and interrupted process — 2026-10-09
+
+scripts/test-two-client-messaging.ps1 -PrivateChat -LostAck passes288 recorded checks (registration30 + rounds258), report19:32:10 local, APK SHA2562029becfd909d8ff261fc83683d3515650e5267a2c9a38a54df1fc7e53fc6a9b. Existing local HTTPS helper holds the successful private send response; app force-stop completes210ms from request start. After actual process restart, encrypted journal client/local/random/date and SHA256 fingerprints of ciphertext and all sorted target sessions match. Redelivery returns the exact server UUID recorded before interruption; one matching sender/client live server message and one confirmed native bubble/no negative original remain. Repeated delivery and journal UI ACK pass. Both private receiving/draft/offline/gate directions still pass.
+
+Local instrumentation build53s successful. Existing helper go test main.go main_test.go passes from scripts/lost-ack-proxy. Test and owned fault proxy terminate normally; outer exit0. Only instrumentation and host test changed; normal b43c114 phone APKs remain current for production app sources. No repeated Signal/group claim on this new APK. REST conversation setup/programmatic adapter entry remain fixture boundaries. This covers crash before server response delivery, not native composer or automatic scheduling/retry/cancellation, post-ACK/native/UI-journal crash windows, device trust or physical phones. Full objective incomplete.
+
 ## Private app adapter pending/ACK and disconnected restart — 2026-10-09
 
 Same final local APK -PrivateKeys -Offline group regression passes261 recorded checks (registration30 + rounds231), report19:18:43 local. Actual native send/edit/delete cancellation/confirmation, receiving changes, both cold deleted reopens, offline pending native identity, automatic reconnect/delivery and confirmed cold reopen remain valid after the shared native history random-ID change. This is two dedicated emulators, not physical phones.

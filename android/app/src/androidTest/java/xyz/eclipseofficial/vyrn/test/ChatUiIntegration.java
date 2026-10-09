@@ -45,7 +45,7 @@ final class ChatUiIntegration {
             }return;
         }
         if(phase.equals("chat-identity")){write(instrumentation,new JSONObject().put("user",user));return;}
-        if(phase.startsWith("chat-private-")){privateChat(instrumentation,activity,fixture,repository,user,phase,check);return;}
+        if(phase.startsWith("chat-private-")){privateChat(instrumentation,activity,fixture,repository,user,phase,check,checkpoints);return;}
         if(phase.equals("chat-create")){
             String peer=fixture.getString("peer_user");check.verify(!user.equals(peer),"chat_distinct_accounts");
             String group=repository.createGroup(fixture.getString("title"),java.util.Collections.singletonList(peer),0).id;
@@ -147,7 +147,7 @@ final class ChatUiIntegration {
         if(view instanceof ViewGroup)for(int i=0;i<((ViewGroup)view).getChildCount();i++)if(bubble(((ViewGroup)view).getChildAt(i),text,outgoing))return true;
         return false;
     }
-    private static void privateChat(Instrumentation instrumentation,Activity activity,JSONObject fixture,RestRepository repository,String user,String phase,AuthUiIntegration.Check check) throws Exception {
+    private static void privateChat(Instrumentation instrumentation,Activity activity,JSONObject fixture,RestRepository repository,String user,String phase,AuthUiIntegration.Check check,java.util.List<String> checkpoints) throws Exception {
         final int account=UserConfig.selectedAccount;String peer=fixture.getString("peer_user"),text=fixture.getString("text");check.verify(!peer.equals(user),"private_native_distinct_peer");
         check.verify(text.startsWith("چت خصوصی بومی "),"private_native_utf8_fixture_preserved");
         if(phase.equals("chat-private-delete-fixture")){
@@ -169,10 +169,14 @@ final class ChatUiIntegration {
             await(()->{boolean[] visible={false};instrumentation.runOnMainSync(()->visible[0]=privateCell(activity.getWindow().getDecorView(),local,text)!=null);return visible[0];},check,"private_native_actual_pending_chat_bubble_from_encrypted_journal");
             instrumentation.runOnMainSync(()->check.verify(xyz.eclipseofficial.vyrn.compat.VyrnBridge.PRIVATE_PENDING_PLACEHOLDER.equals(privateCell(activity.getWindow().getDecorView(),local,text).getMessageObject().messageOwner.message),"private_native_pending_visible_bubble_keeps_owner_placeholder"));
             if(!phase.equals("chat-private-fixture-send")){write(instrumentation,binding);return;}
+            if(fixture.has("server_id")){JSONObject proof=privateSendProof(instrumentation,repository,binding.getString("client_id"));check.verify(fixture.getString("ciphertext_sha256").equals(proof.getString("ciphertext_sha256"))&&fixture.getString("ratchet_sha256").equals(proof.getString("ratchet_sha256")),"private_unknown_ack_cold_original_ciphertext_and_ratchet_preserved");}
+            if(fixture.optBoolean("interrupt_send")){JSONObject proof=privateSendProof(instrumentation,repository,binding.getString("client_id"));write(instrumentation,new JSONObject(binding.toString()).put("pending",true).put("interrupted_checks",new org.json.JSONArray(checkpoints)).put("ciphertext_sha256",proof.getString("ciphertext_sha256")).put("ratchet_sha256",proof.getString("ratchet_sha256")));}
             xyz.eclipseofficial.vyrn.domain.Models.Message value=bridge.deliverPrivateText(binding.getString("client_id")).get(45,java.util.concurrent.TimeUnit.SECONDS);
+            if(fixture.optBoolean("interrupt_send"))throw new AssertionError("private_held_response_escaped_before_interruption");
             check.verify(value.encrypted&&!value.deleted&&value.conversation.equals(conversation)&&value.sender.equals(user),"private_encrypted_fixture_committed");
             await(()->{boolean[] confirmed={false};instrumentation.runOnMainSync(()->{ChatActivity chat=(ChatActivity)LaunchActivity.getLastFragment();confirmed[0]=privateCell(activity.getWindow().getDecorView(),value.ordinal,text)!=null&&chat.messages.stream().noneMatch(message->message.getId()==local)&&chat.messages.stream().filter(message->message.getId()==value.ordinal).count()==1;});return confirmed[0];},check,"private_native_pending_reconciled_to_one_actual_confirmed_bubble");
             check.verify(bridge.deliverPrivateText(binding.getString("client_id")).get(30,java.util.concurrent.TimeUnit.SECONDS).id.equals(value.id),"private_native_repeated_delivery_preserves_server_identity");
+            if(fixture.has("server_id")){JSONObject proof=privateSendProof(instrumentation,repository,binding.getString("client_id"));org.json.JSONArray history=(org.json.JSONArray)repository.request("GET","/v1/conversations/"+conversation+"/messages?limit=100&live_only=true",null,true);int copies=0;for(int i=0;i<history.length();i++){JSONObject message=history.getJSONObject(i);if(user.equals(message.getString("sender_id"))&&binding.getString("client_id").equals(message.getString("client_id")))copies++;}check.verify(value.id.equals(fixture.getString("server_id"))&&fixture.getString("ciphertext_sha256").equals(proof.getString("ciphertext_sha256"))&&fixture.getString("ratchet_sha256").equals(proof.getString("ratchet_sha256"))&&copies==1,"private_unknown_ack_recovers_exact_server_identity_without_duplicate_or_ratchet_advance");}
             try(xyz.eclipseofficial.vyrn.data.SignalDeviceKeys keys=xyz.eclipseofficial.vyrn.data.SignalDeviceKeys.openLocal(instrumentation.getTargetContext(),repository)){xyz.eclipseofficial.vyrn.data.SignalMessages messages=new xyz.eclipseofficial.vyrn.data.SignalMessages(keys);check.verify(messages.nativePending(account).length()==0&&messages.nativeBinding(account,binding.getString("client_id")).getBoolean("ui_done"),"private_native_ui_acknowledgement_removes_only_resolved_journal_work");}
             write(instrumentation,new JSONObject().put("conversation",conversation).put("message_id",value.id).put("ordinal",value.ordinal));return;
         }
@@ -330,6 +334,13 @@ final class ChatUiIntegration {
         check.verify(!changed.deleted&&edited.equals(changed.text)&&changed.ordinal==fixture.getInt("original_ordinal")&&changed.revision>fixture.getInt("original_revision")&&changed.editedDate>0,"edit_restart_original_server_identity_new_revision");
         java.util.List<xyz.eclipseofficial.vyrn.domain.Models.Message> live=repository.liveMessages(fixture.getString("group"),null,100);
         check.verify(live.stream().filter(message->edited.equals(message.text)&&id.equals(message.id)).count()==1&&live.stream().noneMatch(message->old.equals(message.text)),"edit_restart_one_server_message_no_old_text");
+    }
+    private static JSONObject privateSendProof(Instrumentation instrumentation,RestRepository repository,String client) throws Exception {
+        try(xyz.eclipseofficial.vyrn.data.SignalDeviceKeys keys=xyz.eclipseofficial.vyrn.data.SignalDeviceKeys.openLocal(instrumentation.getTargetContext(),repository)){
+            String body=new JSONObject(new String(keys.store.loadValue("private-outgoing",client),StandardCharsets.UTF_8)).getString("body");java.security.MessageDigest ratchet=java.security.MessageDigest.getInstance("SHA-256");java.util.TreeSet<String> addresses=new java.util.TreeSet<>();new JSONObject(body).getJSONObject("payload").getJSONObject("devices").keys().forEachRemaining(addresses::add);
+            for(String address:addresses){ratchet.update(address.getBytes(StandardCharsets.UTF_8));ratchet.update(keys.store.loadSession(new org.signal.libsignal.protocol.SignalProtocolAddress(address,1)).serialize());}
+            return new JSONObject().put("ciphertext_sha256",android.util.Base64.encodeToString(java.security.MessageDigest.getInstance("SHA-256").digest(body.getBytes(StandardCharsets.UTF_8)),android.util.Base64.NO_WRAP)).put("ratchet_sha256",android.util.Base64.encodeToString(ratchet.digest(),android.util.Base64.NO_WRAP));
+        }
     }
     private static void await(BooleanSupplier condition,AuthUiIntegration.Check check,String name) throws Exception {await(condition,check,name,40);}
     private static void await(BooleanSupplier condition,AuthUiIntegration.Check check,String name,int seconds) throws Exception {long deadline=System.nanoTime()+java.util.concurrent.TimeUnit.SECONDS.toNanos(seconds);while(!condition.getAsBoolean()&&System.nanoTime()<deadline)Thread.sleep(100);check.verify(condition.getAsBoolean(),name);}
