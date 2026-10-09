@@ -1,5 +1,11 @@
 # Decisions
 
+## Keep private retry state with its original encrypted send — 2026-10-09
+
+Private sends use the existing Keystore-encrypted Signal outgoing journal, never the group plaintext outbox. Persist a unique attempt token, attempt count, numeric error and next-at deadline before transport. A60s claim lease survives process death; a wall-clock rollback rebases an excessive lease instead of stranding the message. Only the current attempt token may record failure. IOException/429/5xx use per-record exponential backoff capped at60s; eight unsuccessful attempts require explicit retry. Permanent errors stop immediately. Explicit retry only revives failed entries and invalidates old callbacks while retaining ciphertext, native identity and ratchet. Ordinary scheduling cannot reset failure. Native UI acknowledgement clears failure/lease fields. No exception strings are stored.
+
+Pending native rows contain the existing placeholder and numeric sending/error state. Hydration obtains both volatile private text and failed state from the authenticated encrypted journal so stale native sending state can be corrected on cold reopen. Composer activation and manual-retry gesture wiring, cancellation, identity verification and remaining crash reconciliation are separate incomplete requirements.
+
 ## Recover only explicitly scheduled encrypted private journal entries — 2026-10-09
 
 Persist scheduling intent in the original encrypted Signal outgoing record after native pending storage/UI proof. Reuse the existing account worker lifecycle for a5s enqueue callback and the existing serialized SEND executor for recovery; do not introduce a second plaintext outbox or new key claim/publication during recovery. Revalidate original user/session/native owner and inverse peer UUID bindings, reuse exact ciphertext or recorded ACK, then reconcile native storage/UI before journal acknowledgement. Unscheduled component/adapter preparation remains inert. One scan per account is bounded; failures preserve original work with an account-wide30s in-memory delay. Per-record durable backoff/failed/manual-retry/cancellation/trust and native composer activation remain required. This foreground/process-reopen worker does not establish closed-app push or screen-off acceptance.

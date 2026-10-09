@@ -159,7 +159,6 @@ public final class VyrnBridge {
     private final int account;
     private final AtomicBoolean uiReconciling=new AtomicBoolean();
     private final AtomicBoolean privateRecovering=new AtomicBoolean();
-    private volatile long privateRetryAt;
     private java.util.concurrent.CompletableFuture<Void> privateKeysPreparation;
     private volatile String privateKeysSession;
     private volatile long privateKeysOwner;
@@ -288,17 +287,27 @@ public final class VyrnBridge {
             try(SignalDeviceKeys keys=SignalDeviceKeys.openLocal(ApplicationLoader.applicationContext,repository)){requirePrivateOrigin(user,session,owner,binding.getString("peer"),binding.getLong("dialog_id"));new SignalMessages(keys).scheduleNative(account,client);}
         }catch(Exception unavailable){throw new java.util.concurrent.CompletionException(unavailable);}},SEND);
     }
+    public java.util.concurrent.CompletableFuture<Boolean> retryPrivateText(String client){
+        final long owner=UserConfig.getInstance(account).getClientUserId();final String session=repository.vault.cachedSession();
+        return java.util.concurrent.CompletableFuture.supplyAsync(()->{try{
+            String user=repository.vault.load().getString("user_id");JSONObject binding;boolean retried;
+            try(SignalDeviceKeys keys=SignalDeviceKeys.openLocal(ApplicationLoader.applicationContext,repository)){SignalMessages messages=new SignalMessages(keys);binding=messages.nativeBinding(account,client);requirePrivateOrigin(user,session,owner,binding.getString("peer"),binding.getLong("dialog_id"));retried=messages.retryNative(account,client);binding=messages.nativeBinding(account,client);}
+            if(retried&&binding.isNull("message_id"))writePrivateNative(binding,user,session,owner,null);return retried;
+        }catch(Exception unavailable){throw new java.util.concurrent.CompletionException(unavailable);}},SEND);
+    }
     private void recoverPrivateSends(){
         final long owner=UserConfig.getInstance(account).getClientUserId();final String session=repository.vault.cachedSession();
-        if(owner==0||session==null||isLoggingOut(account)||android.os.SystemClock.elapsedRealtime()<privateRetryAt||!privateRecovering.compareAndSet(false,true))return;
+        if(owner==0||session==null||isLoggingOut(account)||!privateRecovering.compareAndSet(false,true))return;
         SEND.execute(()->{try{
             org.json.JSONArray rows;String user;try(SignalDeviceKeys keys=SignalDeviceKeys.openLocal(ApplicationLoader.applicationContext,repository)){user=keys.user;rows=new SignalMessages(keys).nativePending(account);}
-            for(int i=0;i<rows.length();i++){JSONObject row=rows.getJSONObject(i);if(!row.getBoolean("scheduled"))continue;
-                try{requirePrivateOrigin(user,session,owner,row.getString("peer"),row.getLong("dialog_id"));if(isLoggingOut(account))return;deliverPrivateTextNow(row.getString("client_id"),owner,session);}
-                catch(Exception unavailable){privateRetryAt=android.os.SystemClock.elapsedRealtime()+30000;/* Retain original ciphertext and journal; never recreate a send. */}
+            for(int i=0;i<rows.length();i++){JSONObject row=rows.getJSONObject(i);if(!row.getBoolean("scheduled")||row.getBoolean("failed"))continue;String attempt=null,client=row.getString("client_id");
+                try{requirePrivateOrigin(user,session,owner,row.getString("peer"),row.getLong("dialog_id"));if(isLoggingOut(account))return;
+                    try(SignalDeviceKeys keys=SignalDeviceKeys.openLocal(ApplicationLoader.applicationContext,repository)){attempt=new SignalMessages(keys).claimNative(account,client);}if(attempt==null)continue;
+                    if(row.isNull("message_id"))writePrivateNative(row,user,session,owner,null);deliverPrivateTextNow(client,owner,session);
+                }catch(Exception unavailable){if(attempt!=null)try{JSONObject failed;try(SignalDeviceKeys keys=SignalDeviceKeys.openLocal(ApplicationLoader.applicationContext,repository)){requirePrivateOrigin(user,session,owner,row.getString("peer"),row.getLong("dialog_id"));SignalMessages messages=new SignalMessages(keys);messages.failNative(account,client,attempt,unavailable);failed=messages.nativeBinding(account,client);}if(failed.isNull("message_id"))writePrivateNative(failed,user,session,owner,null);}catch(Exception preserved){/* Keep original encrypted work if its owner/storage changed. */}}
             }
         }catch(Exception unavailable){/* Missing original device/session: no publication, claim or send. */}finally{privateRecovering.set(false);}});
-        // ponytail: one shared SEND queue and account-wide 30s retry delay; per-record backoff/failed UI remains pending before composer activation.
+        // ponytail: shared SEND executor; parallel transport can be added only if measured queue latency requires it.
     }
     private void requirePrivateOrigin(String user,String session,long owner,String peer,long dialog) throws Exception {
         if(owner==0||session==null||!repository.vault.isUser(user)||!session.equals(repository.vault.cachedSession())||UserConfig.getInstance(account).getClientUserId()!=owner||!user.equals(ids.remote("user",owner))||!peer.equals(ids.remote("user",dialog)))throw new SecurityException("private_origin_changed");
@@ -308,7 +317,7 @@ public final class VyrnBridge {
         if(local>=0||date<=0||random==0||dialog<=0||binding.getBoolean("ui_done"))throw new SecurityException("private_native_binding_changed");
         final TLRPC.Message row;
         if(committed!=null)row=committed;
-        else{TLRPC.TL_message pending=new TLRPC.TL_message();pending.id=pending.local_id=local;pending.dialog_id=dialog;pending.date=date;pending.random_id=random;pending.flags=256;pending.out=true;pending.from_id=new TLRPC.TL_peerUser();pending.from_id.user_id=owner;pending.peer_id=new TLRPC.TL_peerUser();pending.peer_id.user_id=dialog;pending.message=PRIVATE_PENDING_PLACEHOLDER;pending.media=new TLRPC.TL_messageMediaEmpty();pending.send_state=MessageObject.MESSAGE_SEND_STATE_SENDING;row=pending;}
+        else{TLRPC.TL_message pending=new TLRPC.TL_message();pending.id=pending.local_id=local;pending.dialog_id=dialog;pending.date=date;pending.random_id=random;pending.flags=256;pending.out=true;pending.from_id=new TLRPC.TL_peerUser();pending.from_id.user_id=owner;pending.peer_id=new TLRPC.TL_peerUser();pending.peer_id.user_id=dialog;pending.message=PRIVATE_PENDING_PLACEHOLDER;pending.media=new TLRPC.TL_messageMediaEmpty();pending.send_state=binding.optBoolean("failed")?MessageObject.MESSAGE_SEND_STATE_SEND_ERROR:MessageObject.MESSAGE_SEND_STATE_SENDING;row=pending;}
         MessagesStorage storage=MessagesStorage.getInstance(account);java.util.concurrent.CompletableFuture<Void> written=new java.util.concurrent.CompletableFuture<>();
         storage.getStorageQueue().postRunnable(()->{try{
             requirePrivateOrigin(user,session,owner,peer,dialog);org.telegram.SQLite.SQLiteCursor cursor=storage.getDatabase().queryFinalized("SELECT r.random_id,m.data,m.send_state FROM messages_v2 m LEFT JOIN randoms_v2 r ON r.mid=m.mid AND r.uid=m.uid WHERE m.uid="+dialog+" AND m.mid="+local);try{if(cursor.next()){
@@ -385,18 +394,19 @@ public final class VyrnBridge {
         // ponytail: one existing-style liveness timer per pending object; batch only if profiling shows pressure.
         execute(new Runnable(){String user,peer;volatile String displayed;public void run(){
             MessageObject target=reference.get();if(target==null)return;if(target.messageOwner!=row){AndroidUtilities.runOnUIThread(()->clearReplacedPrivateText(reference.get(),row,displayed));return;}
-            String text=null;try{
+            String text=null;int pendingState=-1;try{
                 try(SignalDeviceKeys keys=SignalDeviceKeys.openLocal(ApplicationLoader.applicationContext,bridge.repository)){
                     if(user==null){user=keys.user;peer=bridge.ids.remote("user",dialog);}
                     if(!user.equals(keys.user)||!session.equals(bridge.repository.vault.cachedSession())||!user.equals(bridge.ids.remote("user",owner))||!peer.equals(bridge.ids.remote("user",dialog)))throw new SecurityException("signal_native_identity_changed");
-                    text=new SignalMessages(keys).nativePendingText(peer,account,id,dialog,random,date);
+                    SignalMessages messages=new SignalMessages(keys);text=messages.nativePendingText(peer,account,id,dialog,random,date);
+                    if(text!=null){String client=UUID.nameUUIDFromBytes((user+":"+random).getBytes(StandardCharsets.UTF_8)).toString();pendingState=messages.nativeBinding(account,client).getBoolean("failed")?MessageObject.MESSAGE_SEND_STATE_SEND_ERROR:MessageObject.MESSAGE_SEND_STATE_SENDING;}
                 }
             }catch(Exception unavailable){/* Missing, acknowledged or changed origin clears volatile text. */}
-            final String display=text;AndroidUtilities.runOnUIThread(()->{
+            final String display=text;final int state=pendingState;AndroidUtilities.runOnUIThread(()->{
                 MessageObject current=reference.get();if(current==null)return;if(current.messageOwner!=row){clearReplacedPrivateText(current,row,displayed);return;}
                 boolean live=display!=null&&samePrivatePending(current,row,id,dialog,owner,date,random)&&UserConfig.getInstance(account).getClientUserId()==owner&&bridge.repository.vault.isUser(user)&&session.equals(bridge.repository.vault.cachedSession());
                 try{live &= user!=null&&user.equals(bridge.ids.remote("user",owner))&&peer!=null&&peer.equals(bridge.ids.remote("user",dialog));}catch(Exception unavailable){live=false;}
-                current.applyNewText(live?display:PRIVATE_PENDING_PLACEHOLDER);NotificationCenter.getInstance(account).postNotificationName(NotificationCenter.updateInterfaces,PRIVATE_TEXT_UPDATE);
+                if(live&&state>=0)row.send_state=state;current.applyNewText(live?display:PRIVATE_PENDING_PLACEHOLDER);NotificationCenter.getInstance(account).postNotificationName(NotificationCenter.updateInterfaces,PRIVATE_TEXT_UPDATE);
                 if(live)displayed=display;
                 if(live)AndroidUtilities.runOnUIThread(()->execute(this),1000);
             });

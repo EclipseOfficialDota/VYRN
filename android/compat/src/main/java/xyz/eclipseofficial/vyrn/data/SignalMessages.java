@@ -13,7 +13,7 @@ import org.json.JSONObject;
 import org.signal.libsignal.protocol.*;
 import org.signal.libsignal.protocol.message.*;
 
-/** Text transport/cache primitive. UI, scheduling, verification and device lifecycle remain gated. */
+/** Encrypted text transport/cache and native recovery journal; composer/trust/device lifecycle remain gated. */
 public final class SignalMessages {
     private final SignalDeviceKeys keys;
     private final SignalStore store;
@@ -55,15 +55,42 @@ public final class SignalMessages {
         keys.requireSession();id(client);if(account<0||account>3)throw new SecurityException("signal_native_identity_changed");
         JSONObject value=load("private-outgoing",client);if(value==null||!value.has("native_ui"))throw new SecurityException("signal_native_identity_missing");JSONArray identity=value.getJSONArray("native_ui");
         if(identity.length()!=5||identity.getInt(0)!=account||!keys.sessionId().equals(identity.getString(4)))throw new SecurityException("signal_native_identity_changed");
-        return new JSONObject().put("client_id",client).put("peer",value.getString("peer")).put("conversation",value.getString("conversation")).put("local_id",identity.getInt(1)).put("dialog_id",identity.getLong(2)).put("random_id",identity.getLong(3)).put("message_id",value.get("message_id")).put("date",value.optInt("native_date")).put("ui_done",value.optBoolean("native_ui_done")).put("scheduled",value.optBoolean("native_scheduled"));
+        return new JSONObject().put("client_id",client).put("peer",value.getString("peer")).put("conversation",value.getString("conversation")).put("local_id",identity.getInt(1)).put("dialog_id",identity.getLong(2)).put("random_id",identity.getLong(3)).put("message_id",value.get("message_id")).put("date",value.optInt("native_date")).put("ui_done",value.optBoolean("native_ui_done")).put("scheduled",value.optBoolean("native_scheduled")).put("attempts",value.optInt("native_attempts")).put("next_at",value.optLong("native_next_at")).put("error",value.optInt("native_error")).put("failed",value.optBoolean("native_failed"));
     }}
     /** Scheduling intent belongs to the original encrypted record, never the group plaintext outbox. */
     public void scheduleNative(int account,String client) throws Exception {synchronized(keys.guard()){
         keys.requireSession();store.transaction(()->{JSONObject binding=nativeBinding(account,client);if(binding.getInt("date")<=0||store.loadValue("private-send-fence",client)!=null)throw new SecurityException("signal_native_identity_changed");if(!binding.getBoolean("ui_done")){JSONObject value=load("private-outgoing",client);value.put("native_scheduled",true);save("private-outgoing",client,value);}return null;});
     }}
+    /** Persist the recovery lease before HTTP; an interrupted attempt keeps its exact ciphertext. */
+    public String claimNative(int account,String client) throws Exception {synchronized(keys.guard()){
+        keys.requireSession();return store.transaction(()->{JSONObject binding=nativeBinding(account,client);long now=System.currentTimeMillis();
+            if(store.loadValue("private-send-fence",client)!=null||binding.getInt("date")<=0)throw new SecurityException("signal_native_identity_changed");
+            if(!binding.getBoolean("scheduled")||binding.getBoolean("ui_done")||binding.getBoolean("failed"))return null;
+            long next=binding.getLong("next_at");JSONObject value=load("private-outgoing",client);
+            // Wall-clock rollback cannot strand a lease indefinitely; rebase without sending early.
+            if(next>now+60000){value.put("native_next_at",now+60000);save("private-outgoing",client,value);return null;}if(next>now)return null;
+            String attempt=UUID.randomUUID().toString();value.put("native_attempt",attempt).put("native_attempts",Math.min(Integer.MAX_VALUE-1,binding.getInt("attempts"))+1).put("native_next_at",now+60000).put("native_error",0);save("private-outgoing",client,value);return attempt;
+        });
+    }}
+    /** Store only a bounded numeric status; exception text may contain sensitive transport data. */
+    public void failNative(int account,String client,String attempt,Exception failure) throws Exception {synchronized(keys.guard()){
+        keys.requireSession();id(attempt);store.transaction(()->{JSONObject binding=nativeBinding(account,client),value=load("private-outgoing",client);
+            if(binding.getBoolean("ui_done")||!attempt.equals(value.optString("native_attempt"))||store.loadValue("private-send-fence",client)!=null)throw new SecurityException("signal_native_attempt_changed");
+            int status=failure instanceof RestRepository.ApiException?((RestRepository.ApiException)failure).status:failure instanceof java.io.IOException?503:0;
+            boolean transientFailure=failure instanceof java.io.IOException||failure instanceof RestRepository.ApiException&&(status==429||status>=500);
+            boolean retry=transientFailure&&binding.getInt("attempts")<8;long delay=Math.min(60000L,1000L<<Math.min(Math.max(0,binding.getInt("attempts")-1),6));
+            value.remove("native_attempt");value.put("native_error",status).put("native_failed",!retry).put("native_next_at",retry?System.currentTimeMillis()+delay:0);save("private-outgoing",client,value);return null;
+        });
+    }}
+    /** Explicit manual retry revives only failed work; scheduling alone never resets its budget. */
+    public boolean retryNative(int account,String client) throws Exception {synchronized(keys.guard()){
+        keys.requireSession();return store.transaction(()->{JSONObject binding=nativeBinding(account,client);if(store.loadValue("private-send-fence",client)!=null||binding.getInt("date")<=0)throw new SecurityException("signal_native_identity_changed");if(binding.getBoolean("ui_done")||!binding.getBoolean("failed"))return false;
+            JSONObject value=load("private-outgoing",client);value.remove("native_attempt");value.put("native_scheduled",true).put("native_failed",false).put("native_attempts",0).put("native_error",0).put("native_next_at",0);save("private-outgoing",client,value);return true;
+        });
+    }}
     /** Only the adapter calls this after native cache/UI reconciliation is proved. */
     public void acknowledgeNative(int account,String client,int localId,long dialog,long random,String message) throws Exception {synchronized(keys.guard()){
-        keys.requireSession();id(message);store.transaction(()->{JSONObject binding=nativeBinding(account,client);if(binding.getInt("local_id")!=localId||binding.getLong("dialog_id")!=dialog||binding.getLong("random_id")!=random||!message.equals(binding.optString("message_id")))throw new SecurityException("signal_native_identity_changed");JSONObject value=load("private-outgoing",client);value.put("native_ui_done",true);save("private-outgoing",client,value);return null;});
+        keys.requireSession();id(message);store.transaction(()->{JSONObject binding=nativeBinding(account,client);if(binding.getInt("local_id")!=localId||binding.getLong("dialog_id")!=dialog||binding.getLong("random_id")!=random||!message.equals(binding.optString("message_id")))throw new SecurityException("signal_native_identity_changed");JSONObject value=load("private-outgoing",client);value.remove("native_attempt");value.put("native_ui_done",true).put("native_failed",false).put("native_error",0).put("native_next_at",0);save("private-outgoing",client,value);return null;});
     }}
 
     /** Volatile pending text only for the exact original unacknowledged native row and session. */

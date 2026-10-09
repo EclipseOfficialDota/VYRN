@@ -1,5 +1,15 @@
 # Local Android integration
 
+## Persistent private retry checks — 2026-10-09
+
+Same984898... APK group -PrivateKeys -Offline regression passes261 checks at22:22:24. Shared SEND/worker changes preserve actual native group send/edit/delete/cancellation and disconnected cold recovery. Actual worker exited; verified childless owned RTK wrapper was closed, producing outer exit1. Fresh passed report and final PASS output establish test outcome; physical-phone acceptance remains separate.
+
+Same984898... APK -PrivateChat -LostAck passes288 checks at22:19:30 with161ms interruption, original ciphertext/ratchet/server identity and no duplicate native/server message. It remains a programmatic adapter delivery interruption, separate from automatic worker recovery; an interrupted worker claim lease is not proved by this test.
+
+scripts/test-signal.ps1 -Network passes152 checks at22:13:31 on local APK SHA256984898bdfb59fce3fb8a696237a72a908832bb5ab76e23038ec833c036d8b812 (118 network/JNI,28 disconnected cold,6 online restart). Tests exercise unique claim tokens and stale callback rejection, independent durable retry metadata, bounded failures/manual revival and original ciphertext/ratchet. A real HTTP404 supplies the permanent API error. The eight-attempt test makes the encrypted fixture deadline due between attempts rather than sleeping through transport backoff. Cold restart keeps the failed record and reconstructs native SEND_ERROR from authenticated encrypted metadata. Manual retry here is a component API, not a native gesture.
+
+-PrivateAutomatic now requires a real offline app-worker IOException with persisted attempt/status/deadline, then original retry count increasing on automatic cold reconnect and error/deadline cleanup after native UI acknowledgement. Final318-check report passes at22:16:32 on the same984898... APK. Preparation/scheduling stay programmatic and composer remains gated. Earlier314-check report belongs to the older APK; the new report proves the strengthened318-check scope.
+
 ## Automatic encrypted private recovery — 2026-10-09
 
 Same final APK -PrivateKeys -Offline regression passes261 recorded checks at22:03:08, report artifacts/android-two-client-private-keys.json. Shared worker/SEND changes preserve native group send/edit/delete/cancellation and cold/offline recovery. The real test worker exited; a childless RTK wrapper remained and was closed only after PID/path command/parent/no-child verification. Outer exit1 records wrapper cleanup; use the fresh passed report and final suite PASS output for test outcome. No emulator data wipe was needed to restore the stopped local runtime.
