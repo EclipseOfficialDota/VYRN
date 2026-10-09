@@ -1,5 +1,11 @@
 # Local Android integration
 
+## Encrypted pending row component — 2026-10-09
+
+Final suite132 checks at18:03:07 local, APK6d2ee49dcd55c80c992b05003796f8a2ab99b436a665c52ded425f66552e94a9. Added received/pending native-owner replacement with empty body and original-owner restoration. Old volatile text must clear even though native applyNewText ignores empty strings. Pending replacement is exercised again from the cold native row offline. Null-owner clearing branch is not separately exercised. Native composer delivery remains gated.
+
+scripts/test-signal.ps1 -Network now covers126 checks at17:49:10 local on APK49455be4b8a5dbe9ac0e228e457f9abfc2df1476cafb52313499b68de6d4108b. Prepare the native identity using an actual IdMap peer, persist a real placeholder negative native row, force-stop/remove transport, read its actual serialized row/random/send state and require constructor-restored volatile text. Scan native blobs/serialization for fixture plaintext; mutate random and vault user and require clearing. Preserve account3 borrowed-slot guard/cleanup; delete only the dedicated native fixture row after cold read. No account reset or security bypass. Actual composer creation/scheduling/retry/cancellation/ACK reconciliation and foreground pending chat remain unfinished.
+
 ## Private send safety gate — 2026-10-09
 
 Latest -PrivateChat passes226 recorded checks at17:31:20 on local APKfd3046e6098665f97eddc606ef4afd105acfa501a09b8d17d8f3ec7b97945bd8. Check actual disabled/dimmed Send, force composer submission, invoke shared native send/forward/screenshot entries and query native messages_v2: no negative private row or plaintext pending bubble; composer draft stays intact and cold-restores offline. This gate prevents the earlier bridge-only rejection from clearing/persisting private text. It does not enable encrypted private delivery; remaining media preparation/UI and legacy storage require separate acceptance.

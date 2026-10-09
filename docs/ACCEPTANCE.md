@@ -2,6 +2,12 @@
 
 Updated 2026-10-09. A route existing or a build compiling does **not** establish end-to-end completion.
 
+Final same-APK private ChatActivity226 checks pass at18:06:02; existing receiving/private draft/offline/safety-gate behavior remains valid. Phone artifacts122/108/159MB verify successfully and include pending-display/replacement-cleanup DEX markers. These prove package construction and bounded emulator scenarios, not physical installation, actual private composer delivery or completion of the full original objective.
+
+Final pending display component suite132 checks passes at18:03:07: original native pending row cold-restores offline without native plaintext; changed origin clears display. Received/pending owner replacement with empty body clears old layout and original authenticated owner restores it. Null-owner clearing branch is not separately exercised; native composer queue/retry/cancellation/ACK/trust and physical/full-goal acceptance remain incomplete.
+
+Latest pending display checkpoint:126 Signal component checks pass at17:49:10. Actual placeholder native pending row persists without private text and constructor restores volatile text after disconnected cold restart. Changed native/authenticated identity clears text; acknowledged rows no longer supply pending text. This advances durable encrypted native UI integration but does not prove actual composer queueing, pending ChatActivity, retry/cancellation/ACK reconciliation or full private sending. Send remains gated and the original goal remains active.
+
 Same fresh APK group regression passes261 recorded checks at17:34:47 for actual native send/edit/delete/cold/offline recovery. Updated normal phone artifacts remain122/108/159MB and all three package verifiers pass. This preserves emulator group acceptance only; physical phones, complete private sending/trust/device lifecycle, background/media/remaining screens and release/external backup remain unfinished.
 
 Latest private Send rejection checkpoint:226 recorded checks pass at17:31:20. Unsupported Send is disabled/dimmed, forced composer/native send/forward/screenshot paths reject before negative native-row construction, and the draft stays intact. This closes the ordinary private composer/shared entry persistence gap for tested paths; encrypted native send delivery, other media controls, historical cleanup and physical acceptance remain incomplete. Full goal stays active.

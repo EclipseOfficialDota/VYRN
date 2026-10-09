@@ -52,6 +52,19 @@ public final class SignalMessages {
         }return pending;
     }}
 
+    /** Volatile pending text only for the exact original unacknowledged native row and session. */
+    public String nativePendingText(String peer,int account,int localId,long dialogId,long randomId) throws Exception {synchronized(keys.guard()){
+        keys.requireSession();id(peer);
+        if(peer.equals(keys.user)||account<0||account>3||localId>=0||dialogId<=0||dialogId>Integer.MAX_VALUE||randomId==0)throw new SecurityException("signal_native_identity_changed");
+        String client=UUID.nameUUIDFromBytes((keys.user+":"+randomId).getBytes(StandardCharsets.UTF_8)).toString();
+        if(store.loadValue("private-send-fence",client)!=null)return null;
+        JSONObject value=load("private-outgoing",client);if(value==null||!value.has("native_ui"))return null;
+        JSONArray identity=value.getJSONArray("native_ui");
+        if(identity.length()!=5||identity.getInt(0)!=account||identity.getInt(1)!=localId||identity.getLong(2)!=dialogId||identity.getLong(3)!=randomId||!keys.sessionId().equals(identity.getString(4))||!peer.equals(value.getString("peer")))throw new SecurityException("signal_native_identity_changed");
+        if(!value.isNull("message_id"))return null;
+        String pending=value.getString("text");text(pending);return pending;
+    }}
+
     private String prepare(String peer,String conversation,String client,String text,List<SignalDeviceKeys.ClaimedKey> targets,JSONArray nativeIdentity) throws Exception {
         keys.requireSession();id(peer);id(conversation);id(client);text(text);if(peer.equals(keys.user))throw new IllegalArgumentException("signal_private_peer_required");
         return store.transaction(()->{

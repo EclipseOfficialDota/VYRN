@@ -1,5 +1,9 @@
 # Decisions
 
+## Render pending text from the existing encrypted outgoing journal — 2026-10-09
+
+Persist only a dedicated placeholder and normal native routing/random/send metadata in native message rows. Resolve volatile pending text from the existing Keystore-encrypted Signal outgoing record, requiring its exact original session/account/peer/native/random/client binding and no server ACK. Recheck native object/authenticated owner and inverse UUID mappings; crypto reads stay off the UI thread. Clear on changed provenance or acknowledged/missing record. Keep native composer sending gated until it can create/recover/reconcile/cancel these rows through the encrypted journal.
+
 ## Gate private sends before ordinary native row construction — 2026-10-09
 
 Reject unsupported private send at both composer submission and shared native send/forward/screenshot entry points. A bridge network rejection is too late: native code has already cleared input and persisted the ordinary outgoing row. Keep private drafts editable, disable/dim Send and explain why through localized hint/accessibility text. Preserve supported group sending. Replace this temporary gate only after encrypted native row/outbox, reconciliation/cancellation and peer/device trust flows have actual acceptance; do not route private text through the group outbox.

@@ -247,11 +247,13 @@ public final class VyrnBridge {
         AndroidUtilities.runOnUIThread(()->android.widget.Toast.makeText(ApplicationLoader.applicationContext,privateSendUnavailableLabel(),android.widget.Toast.LENGTH_LONG).show());return true;
     }
     public static final int PRIVATE_TEXT_UPDATE=1<<29;
+    public static final String PRIVATE_PENDING_PLACEHOLDER="Encrypted pending message";
     private static boolean samePrivateRow(MessageObject object,TLRPC.Message row,int id,long dialog,long sender,int date,int edited,String placeholder){
         return object!=null&&!object.deleted&&object.messageOwner==row&&object.getId()==id&&object.getDialogId()==dialog&&row.peer_id!=null&&row.peer_id.user_id==dialog&&row.from_id!=null&&row.from_id.user_id==sender&&row.date==date&&row.edit_date==edited&&java.util.Objects.equals(row.message,placeholder);
     }
     /** Native messageOwner remains a placeholder. Only the exact object receives volatile layout text. */
     public static void hydratePrivateText(MessageObject object){
+        if(object!=null&&object.messageOwner!=null&&object.getId()<0){hydratePrivatePending(object);return;}
         if(object==null||object.messageOwner==null||object.getId()<=0||object.getDialogId()<=0||object.messageOwner.peer_id==null||object.messageOwner.peer_id.user_id==0)return;
         final int account=object.currentAccount,id=object.getId();final long dialog=object.getDialogId(),owner=UserConfig.getInstance(account).getClientUserId();
         if(owner==0||dialog==owner)return;VyrnBridge bridge=forAccount(account);final String session=bridge.repository.vault.cachedSession();if(session==null)return;
@@ -274,7 +276,7 @@ public final class VyrnBridge {
                 MessageObject target=reference.get();if(!samePrivateRow(target,row,id,dialog,senderId,date,edited,placeholder)||UserConfig.getInstance(account).getClientUserId()!=owner||!bridge.repository.vault.isUser(authenticatedUser)||!session.equals(bridge.repository.vault.cachedSession())||expiry<=System.currentTimeMillis()||!context.toString().equals(String.valueOf(bridge.ids.privateContext(id))))return;
                 Map<Long,java.util.Set<Integer>> deleted=MessagesStorage.getInstance(account).getVyrnDeletedMessages();if(deleted==null||deleted.containsKey(dialog)&&deleted.get(dialog).contains(id))return;
                 target.applyNewText(text);NotificationCenter.getInstance(account).postNotificationName(NotificationCenter.updateInterfaces,PRIVATE_TEXT_UPDATE);
-                AndroidUtilities.runOnUIThread(new Runnable(){public void run(){MessageObject current=reference.get();if(current==null||current.messageOwner!=row)return;
+                AndroidUtilities.runOnUIThread(new Runnable(){public void run(){MessageObject current=reference.get();if(current==null)return;if(current.messageOwner!=row){clearReplacedPrivateText(current,row,text);return;}
                     boolean live=false;try{Map<Long,java.util.Set<Integer>> fences=MessagesStorage.getInstance(account).getVyrnDeletedMessages();live=fences!=null&&(!fences.containsKey(dialog)||!fences.get(dialog).contains(id))&&context.toString().equals(String.valueOf(bridge.ids.privateContext(id)));}catch(Exception unavailable){/* Clear volatile text if provenance cannot be checked. */}
                     if(!live||!samePrivateRow(current,row,id,dialog,senderId,date,edited,placeholder)||UserConfig.getInstance(account).getClientUserId()!=owner||!bridge.repository.vault.isUser(authenticatedUser)||!session.equals(bridge.repository.vault.cachedSession())||expiry<=System.currentTimeMillis()){
                         current.applyNewText(placeholder);NotificationCenter.getInstance(account).postNotificationName(NotificationCenter.updateInterfaces,PRIVATE_TEXT_UPDATE);return;
@@ -282,6 +284,43 @@ public final class VyrnBridge {
                 }},1000);
             }catch(Exception unavailable){/* Preserve the placeholder on changed or unavailable provenance. */}});
         }catch(Exception unavailable){/* No plaintext fallback or identity regeneration. */}});
+    }
+    private static boolean samePrivatePending(MessageObject object,TLRPC.Message row,int id,long dialog,long owner,int date,long random){
+        return samePrivateRow(object,row,id,dialog,owner,date,0,PRIVATE_PENDING_PLACEHOLDER)&&row.random_id==random&&row.out&&!object.scheduled&&object.type==MessageObject.TYPE_TEXT&&(row.media==null||row.media instanceof TLRPC.TL_messageMediaEmpty)&&(row.send_state==MessageObject.MESSAGE_SEND_STATE_SENDING||row.send_state==MessageObject.MESSAGE_SEND_STATE_SEND_ERROR);
+    }
+    /** UI thread only: do not carry old private layout text into a replacement native owner. */
+    private static void clearReplacedPrivateText(MessageObject object,TLRPC.Message previous,String text){
+        if(object!=null&&object.messageOwner!=previous&&text!=null&&object.messageText!=null&&text.contentEquals(object.messageText)){
+            if(object.messageOwner==null){object.messageText="";object.messageTextShort=null;object.messageTextForReply=null;object.textLayoutBlocks=null;}
+            else{String body=object.messageOwner.message;object.applyNewText(body==null||body.isEmpty()?"Encrypted message":body);}
+            NotificationCenter.getInstance(object.currentAccount).postNotificationName(NotificationCenter.updateInterfaces,PRIVATE_TEXT_UPDATE);
+        }
+    }
+    private static void hydratePrivatePending(MessageObject object){
+        final int account=object.currentAccount,id=object.getId();final long dialog=object.getDialogId(),owner=UserConfig.getInstance(account).getClientUserId();
+        final TLRPC.Message row=object.messageOwner;final int date=row.date;final long random=row.random_id;
+        if(owner==0||dialog<=0||dialog==owner||random==0||!samePrivatePending(object,row,id,dialog,owner,date,random))return;
+        VyrnBridge bridge=forAccount(account);final String session=bridge.repository.vault.cachedSession();if(session==null)return;
+        final java.lang.ref.WeakReference<MessageObject> reference=new java.lang.ref.WeakReference<>(object);
+        // ponytail: one existing-style liveness timer per pending object; batch only if profiling shows pressure.
+        execute(new Runnable(){String user,peer;volatile String displayed;public void run(){
+            MessageObject target=reference.get();if(target==null)return;if(target.messageOwner!=row){AndroidUtilities.runOnUIThread(()->clearReplacedPrivateText(reference.get(),row,displayed));return;}
+            String text=null;try{
+                try(SignalDeviceKeys keys=SignalDeviceKeys.openLocal(ApplicationLoader.applicationContext,bridge.repository)){
+                    if(user==null){user=keys.user;peer=bridge.ids.remote("user",dialog);}
+                    if(!user.equals(keys.user)||!session.equals(bridge.repository.vault.cachedSession())||!user.equals(bridge.ids.remote("user",owner))||!peer.equals(bridge.ids.remote("user",dialog)))throw new SecurityException("signal_native_identity_changed");
+                    text=new SignalMessages(keys).nativePendingText(peer,account,id,dialog,random);
+                }
+            }catch(Exception unavailable){/* Missing, acknowledged or changed origin clears volatile text. */}
+            final String display=text;AndroidUtilities.runOnUIThread(()->{
+                MessageObject current=reference.get();if(current==null)return;if(current.messageOwner!=row){clearReplacedPrivateText(current,row,displayed);return;}
+                boolean live=display!=null&&samePrivatePending(current,row,id,dialog,owner,date,random)&&UserConfig.getInstance(account).getClientUserId()==owner&&bridge.repository.vault.isUser(user)&&session.equals(bridge.repository.vault.cachedSession());
+                try{live &= user!=null&&user.equals(bridge.ids.remote("user",owner))&&peer!=null&&peer.equals(bridge.ids.remote("user",dialog));}catch(Exception unavailable){live=false;}
+                current.applyNewText(live?display:PRIVATE_PENDING_PLACEHOLDER);NotificationCenter.getInstance(account).postNotificationName(NotificationCenter.updateInterfaces,PRIVATE_TEXT_UPDATE);
+                if(live)displayed=display;
+                if(live)AndroidUtilities.runOnUIThread(()->execute(this),1000);
+            });
+        }});
     }
     boolean isLocalUser(String user,long expected){return expected!=0&&user!=null&&!user.isEmpty()&&ids.local("user",user)==expected;}
     /** Replayed live updates must follow a confirmed deletion through the native delete path. */
