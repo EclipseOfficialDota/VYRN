@@ -1,5 +1,9 @@
 # Decisions
 
+## Reuse the native Retry action for failed encrypted private rows — 2026-10-09
+
+Intercept the shared SendMessagesHelper retry entry before ordinary native retry logic. Reuse the existing message-options Retry UI and app-owned encrypted recovery worker. Only explicit user retry of an original failed placeholder text row is eligible; automatic unsent scans and unsupported/positive/other-account rows cannot revive work. Capture the immutable local/dialog/random/date and owner/session at the native entry, derive the deterministic client inside SEND and compare the full tuple with the original encrypted journal before resetting failure. Revalidate owner/session/peer and preserve exact ciphertext, preventing ordinary plaintext enqueue or a native retry snapshot rebinding to a different record. Show localized failure feedback only to the original still-current owner/session. Composer activation, cancellation and trust/device UX remain separate incomplete requirements.
+
 ## Keep private retry state with its original encrypted send — 2026-10-09
 
 Private sends use the existing Keystore-encrypted Signal outgoing journal, never the group plaintext outbox. Persist a unique attempt token, attempt count, numeric error and next-at deadline before transport. A60s claim lease survives process death; a wall-clock rollback rebases an excessive lease instead of stranding the message. Only the current attempt token may record failure. IOException/429/5xx use per-record exponential backoff capped at60s; eight unsuccessful attempts require explicit retry. Permanent errors stop immediately. Explicit retry only revives failed entries and invalidates old callbacks while retaining ciphertext, native identity and ratchet. Ordinary scheduling cannot reset failure. Native UI acknowledgement clears failure/lease fields. No exception strings are stored.

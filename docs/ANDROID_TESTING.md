@@ -1,5 +1,15 @@
 # Local Android integration
 
+## Native private Retry scenario
+
+Shared-entry regression: scripts/test-two-client-messaging.ps1 -PrivateKeys -ManualRetry passes325 checks at22:48:17 on the same298b1... APK, report artifacts/android-two-client-private-keys.json. Actual failed-send/cold-failed/native Retry phases and group send/edit/delete/cancellation/offline recovery pass. Actual worker terminated; a verified childless owned RTK wrapper required cleanup and outer exit1 reflects that cleanup, not failed instrumentation.
+
+Final300-check result passes at22:41:03 on local APK SHA256298b1bbc4a848b9790659357d394f9e948de258ceb15b408c63a3e196afbcc50 (registration30 + rounds270), actual worker/host terminal exit0. Both directions include the real eight-attempt offline phase, cold failed bubble, visible native Retry click and original encrypted confirmation. The first failed-bubble screenshot was visually inspected. This proves native action wiring through accessibility, not physical touch or composer activation.
+
+Run scripts/test-two-client-messaging.ps1 -PrivateManualRetry on the two dedicated local-TLS emulators. This mode rejects combination with PrivateAutomatic/LostAck/MutationRestart/PrivateDelete. It prepares/schedules the encrypted native pending row programmatically, removes the actual localhost transport, allows eight real app-worker attempts with natural per-record backoff, requires the failed native bubble and retains ciphertext/ratchet fingerprints. Offline instrumentation allows300s; the internal exhausted wait allows220s. Then force-stop/cold-open, require original encrypted failed state, open the existing native message-options accessibility action and click the visible localized Retry control. Confirmation must come from the app worker, without a test delivery/direct-retry API call. Require original ciphertext/ratchet, one server sender/client identity, one confirmed native bubble/no original negative and encrypted UI acknowledgement. Automatic native unsent scanning and a wrong placeholder body must not revive failure. Both directions then reuse receiving/private draft/offline/send-gate checks.
+
+Report: artifacts/android-two-client-private-manual-retry.json. Inspect its fresh result/hash/date; command availability or successful build is not a passing result. The original accessibility action returns View's fallback after dispatch, so the visible Retry control and subsequent confirmation establish UI success. Physical touch gestures, composer activation, cancellation, device trust and full objective remain separate acceptance requirements.
+
 ## Persistent private retry checks — 2026-10-09
 
 Same984898... APK group -PrivateKeys -Offline regression passes261 checks at22:22:24. Shared SEND/worker changes preserve actual native group send/edit/delete/cancellation and disconnected cold recovery. Actual worker exited; verified childless owned RTK wrapper was closed, producing outer exit1. Fresh passed report and final PASS output establish test outcome; physical-phone acceptance remains separate.

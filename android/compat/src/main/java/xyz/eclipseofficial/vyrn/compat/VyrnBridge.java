@@ -289,9 +289,23 @@ public final class VyrnBridge {
     }
     public java.util.concurrent.CompletableFuture<Boolean> retryPrivateText(String client){
         final long owner=UserConfig.getInstance(account).getClientUserId();final String session=repository.vault.cachedSession();
+        return retryPrivateText(client,owner,session,0,0,0,0);
+    }
+    /** Handle only the original failed encrypted row; automatic native unsent scans cannot revive it. */
+    public static boolean retryPrivateMessage(int account,MessageObject object,boolean unsent){
+        if(unsent||object==null||object.messageOwner==null||object.currentAccount!=account||object.getId()>=0||!object.isSendError())return false;
+        long owner=UserConfig.getInstance(account).getClientUserId(),dialog=object.getDialogId(),random=object.messageOwner.random_id;int local=object.getId(),date=object.messageOwner.date;
+        if(owner==0||dialog<=0||dialog==owner||random==0||date<=0||!samePrivatePending(object,object.messageOwner,local,dialog,owner,date,random))return false;
+        VyrnBridge bridge=forAccount(account);String session=bridge.repository.vault.cachedSession();if(session==null||isLoggingOut(account))return false;
+        bridge.retryPrivateText(null,owner,session,local,dialog,random,date).whenComplete((retried,failure)->{if(failure!=null)AndroidUtilities.runOnUIThread(()->{
+            if(UserConfig.getInstance(account).getClientUserId()==owner&&session.equals(bridge.repository.vault.cachedSession()))android.widget.Toast.makeText(ApplicationLoader.applicationContext,org.telegram.messenger.LocaleController.isRTL?"تلاش دوباره انجام نشد؛ پیام حفظ شد.":"Could not retry; your message is kept.",android.widget.Toast.LENGTH_LONG).show();
+        });});return true;
+    }
+    private java.util.concurrent.CompletableFuture<Boolean> retryPrivateText(String client,long owner,String session,int local,long dialog,long random,int date){
         return java.util.concurrent.CompletableFuture.supplyAsync(()->{try{
             String user=repository.vault.load().getString("user_id");JSONObject binding;boolean retried;
-            try(SignalDeviceKeys keys=SignalDeviceKeys.openLocal(ApplicationLoader.applicationContext,repository)){SignalMessages messages=new SignalMessages(keys);binding=messages.nativeBinding(account,client);requirePrivateOrigin(user,session,owner,binding.getString("peer"),binding.getLong("dialog_id"));retried=messages.retryNative(account,client);binding=messages.nativeBinding(account,client);}
+            String original=client!=null?client:UUID.nameUUIDFromBytes((user+":"+random).getBytes(StandardCharsets.UTF_8)).toString();
+            try(SignalDeviceKeys keys=SignalDeviceKeys.openLocal(ApplicationLoader.applicationContext,repository)){SignalMessages messages=new SignalMessages(keys);binding=messages.nativeBinding(account,original);requirePrivateOrigin(user,session,owner,binding.getString("peer"),binding.getLong("dialog_id"));if(local!=0&&(binding.getInt("local_id")!=local||binding.getLong("dialog_id")!=dialog||binding.getLong("random_id")!=random||binding.getInt("date")!=date))throw new SecurityException("private_native_retry_changed");if(isLoggingOut(account))throw new SecurityException("private_origin_changed");retried=messages.retryNative(account,original);binding=messages.nativeBinding(account,original);}
             if(retried&&binding.isNull("message_id"))writePrivateNative(binding,user,session,owner,null);return retried;
         }catch(Exception unavailable){throw new java.util.concurrent.CompletionException(unavailable);}},SEND);
     }

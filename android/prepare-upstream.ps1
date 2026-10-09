@@ -474,7 +474,9 @@ Edit 'TMessagesProj/src/main/java/org/telegram/messenger/SendMessagesHelper.java
     }
 
 '@
- $t.Replace('    public boolean retrySendMessage(MessageObject messageObject, boolean unsent, long payStars) {',$proof+'    public boolean retrySendMessage(MessageObject messageObject, boolean unsent, long payStars) {')
+ $retry='    public boolean retrySendMessage(MessageObject messageObject, boolean unsent, long payStars) {'
+ if(!$t.Contains($retry)){throw 'Pinned native retry entry marker missing'}
+ $t.Replace($retry,$proof+$retry+"`n        if (messageObject != null && xyz.eclipseofficial.vyrn.compat.VyrnBridge.privateSendUnavailable(messageObject.getDialogId())) return xyz.eclipseofficial.vyrn.compat.VyrnBridge.retryPrivateMessage(currentAccount, messageObject, unsent);")
 }
 Edit 'TMessagesProj/src/main/java/org/telegram/ui/Components/AlertsCreator.java' {
  param($t)

@@ -2,6 +2,10 @@
 
 Updated 2026-10-09. A route existing or a build compiling does **not** establish end-to-end completion.
 
+Same latest298b1... APK -PrivateKeys -ManualRetry group325 passes at22:48:17: actual native group Retry after eight offline failures/cold restart, group send/edit/delete/cancellation and ordinary offline recovery remain valid through the shared retry entry. This proves a bounded two-emulator regression, not physical-phone or full-app acceptance.
+
+Latest native private Retry checkpoint: -PrivateManualRetry300 passes at22:41:03 on local APK298b1bbc4a848b9790659357d394f9e948de258ceb15b408c63a3e196afbcc50. Both real offline workers exhaust eight attempts, retain failed state after force-stop, and recover through the actual native message-options Retry click with unchanged ciphertext/ratchet and one confirmed native/server message. Preparation/scheduling remain programmatic; the retry action is actual UI via accessibility. Composer/cancellation/trust/device lifecycle and full crash/physical/background/media/release acceptance remain incomplete. Latest normal verified Debug packages122/108/159MB; physical install remains unproved.
+
 Latest same984898... APK group -PrivateKeys -Offline261 passes at22:22:24, preserving native send/receipt/edit/delete/cancellation and cold/offline recovery after per-record private retry changes. Full native private composer/manual-retry/cancellation/trust/device lifecycle and two physical phones remain incomplete; full original objective is still active.
 
 Latest same984898... APK adapter lost-ACK regression288 passes at22:19:30,161ms interruption, preserving original ciphertext/ratchet/server/native identity. The held response test invokes adapter delivery, not an automatic worker claim. Worker-lease interruption, manual retry gestures/cancellation, composer and remaining crash/trust/device/physical acceptance still require completion.
