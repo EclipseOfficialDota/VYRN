@@ -1,5 +1,11 @@
 # Decisions
 
+## Device-pair safety numbers and earlier pin checks — 2026-10-09
+
+Use the installed official libsignal NumericFingerprintGenerator(5200), version2, with canonical(user UUID,device UUID) identifiers and the two pinned identity keys. Verification is local to this exact device pair, not account-wide or evidence of a currently active remote device. Explicit confirmation/unverification must match the current60-digit number, address ownership and libsignal identity pin under the original session/store transaction; never replace identity material to make a number match. Unknown devices start unverified. Store status only in the existing encrypted private-peer record.
+
+Validate all signed roster snapshots against stored peer/address/identity pins before any target prekey claims. Reuse this check for sender metadata and binding. This prevents discovering an identity conflict only after consuming keys. The native verification screen, current-roster/device-change acceptance and composer activation remain unfinished; the offline verification primitive does not establish those requirements.
+
 ## Native private cancellation uses the original encrypted journal — 2026-10-09
 
 Intercept private pending Cancel before ordinary Telegram cancellation; reject unsupported or changed rows while preserving them. Cache only a validated original user/session/device tuple and persist intent through the existing IO executor, independent of the private HTTP-held SEND/vault lock. The existing worker reloads the original record after claiming its durable lease and asks the same server cancellation endpoint to arbitrate. Live committed messages retain normal confirmation; cancelled and already-deleted committed work retain only cleanup metadata. Native cleanup checks the original row, installs persistent negative and known deleted-positive fences, removes storage/UI rows and verifies absence before encrypted acknowledgement. Filter late negative private placeholder objects and skip cancelled local IDs during new allocation. Composer, trust/device UI and calls remain gated pending their separate acceptance requirements.

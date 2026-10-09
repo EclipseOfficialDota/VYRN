@@ -1,5 +1,13 @@
 # Verification report
 
+## Device-pair safety number and identity pin checks — 2026-10-09
+
+Sameb957f... APK -PrivateAutomatic regression318 (registration30 + rounds288) passes23:46:57, exec52163 exit0. Actual offline app-worker failure, cold reconnect automatic original-journal delivery, one native/server message, receiving/private draft/offline/send-gate assertions pass in both directions. Preparation/scheduling remain programmatic; this does not prove native composer or verification-screen interaction.
+
+Local instrumentation build1m43s passes, exec86664 exit0. Signal suite188 checks (154 network/JNI,28 disconnected cold restart,6 online restart) passes at23:42:35 on APKb957f2506c2a56a8d34f2d3d1abf052445f9a42fd88a871c4246d548e383c68d, exec84514 exit0. New checks prove60-digit symmetry using actual libsignal/JNI, initially unverified status, stale-number rejection, idempotent local-only confirmation, encrypted store reopen, unknown device rejection and explicit unverify without changing identity/ratchet. With the original session temporarily absent, altered pinned address and identity both reject fresh signed roster processing/session creation; an old displayed number cannot repair altered bindings. Restore exact original encrypted records/session in finally.
+
+These are programmatic component checks, not a verification screen, current remote-device activity proof or complete device/key-change acceptance. The roster API exposes no prekey count, so this suite does not directly measure count invariance; admission order before claims is inspected in source. Native composer remains gated. Normal phone build2m13s passes, exec77691 exit0; all3 package verifications pass. ARM64/ARMv7/universal122461001/108174307/158686418 bytes; SHA256ebfd9c462e56c6f749a7dc7e5eb09677df351ba71b0e138c2f78749690f20ae9 /19075e5b0beb17ce1a89371d10ea7895c14e0f06da99f44246054b140e4500e3 /2990f51f77a81404738265846de16ed4056329d6e96614cf709cf35ffd63ba9c. Read-only normal universal DEX confirms signal_verification_changed/NumericFingerprintGenerator/validateKnownIdentity. Debug/public TLS/no local CA; physical installation unproven. No production/signing/external-backup/TURN change.
+
 ## Native private Cancel Sending and replay fencing — 2026-10-09
 
 Final same729e... APK group -PrivateKeys -Offline regression passes261 recorded checks (registration30 + rounds231) at23:35:32. Native group send/receive/edit/delete/cancellation, both deleted cold reopens and actual offline queue/automatic recovery pass. Actual test worker exited; RTK wrapper26632/parent20644 was verified exact-command/childless before closing. Outer exec32377 exit1 reflects terminal wrapper cleanup; fresh passed report and final PASS establish test success.

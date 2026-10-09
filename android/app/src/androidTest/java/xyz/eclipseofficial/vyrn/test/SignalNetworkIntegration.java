@@ -401,6 +401,7 @@ final class SignalNetworkIntegration {
         }catch(Throwable failure){nativePrivacy.completeExceptionally(failure);}});
         check.accept(nativePrivacy.get(20,java.util.concurrent.TimeUnit.SECONDS),"signal_native_volatile_layout_does_not_serialize_private_text");
         nativeHydration(context,b,delivered,text,check);
+        identityVerification(context,a,alice,sending,bob,receiving,check);
         byte[] after=bob.store.loadSession(senderKey.address).serialize();
         check.accept(text.equals(receiving.receive(alice.user,conversation,delivered,null)) && Arrays.equals(after,bob.store.loadSession(senderKey.address).serialize()) && text.equals(sending.receive(bob.user,conversation,(JSONObject)a.request("GET","/v1/messages/"+message,null,true),null)),"signal_codec_duplicate_and_producing_device_history_cache");
         changed=new JSONObject(delivered.toString()).put("id",UUID.randomUUID().toString());denied=false;try{receiving.receive(alice.user,conversation,changed,null);}catch(SecurityException expected){denied=true;}
@@ -437,6 +438,23 @@ final class SignalNetworkIntegration {
         check.accept(receiving.receive(alice.user,conversation,extension,null)==null && receiving.cachedText(expiresMessage)==null,"signal_codec_expired_stale_extension_cannot_resurrect");
         a.request("PATCH","/v1/conversations/"+conversation,new JSONObject().put("disappearing_seconds",0),true);
         nativeCancellation(context,a,alice,sending,bob.user,conversation,targets.get(0).address,check);
+    }
+
+    private static void identityVerification(Context context,RestRepository repository,SignalDeviceKeys alice,SignalMessages sending,SignalDeviceKeys bob,SignalMessages receiving,BiConsumer<Boolean,String> check) throws Exception {
+        JSONObject own=sending.verification(bob.user,bob.device),other=receiving.verification(alice.user,alice.device);String number=own.getString("fingerprint");
+        check.accept(number.matches("[0-9]{60}")&&number.equals(other.getString("fingerprint"))&&!own.getBoolean("verified")&&!other.getBoolean("verified"),"signal_identity_pair_safety_number_symmetric_and_initially_unverified");
+        boolean denied=false;try{sending.verifyPeer(bob.user,bob.device,(number.charAt(0)=='0'?"1":"0")+number.substring(1),true);}catch(SecurityException expected){denied=true;}check.accept(denied&&!sending.verification(bob.user,bob.device).getBoolean("verified"),"signal_verification_changed_display_number_cannot_verify");
+        sending.verifyPeer(bob.user,bob.device,number,true);sending.verifyPeer(bob.user,bob.device,number,true);check.accept(sending.verification(bob.user,bob.device).getBoolean("verified")&&!receiving.verification(alice.user,alice.device).getBoolean("verified"),"signal_verification_explicit_local_confirmation_is_idempotent_not_remote_confirmation");
+        try(SignalDeviceKeys reopened=SignalDeviceKeys.openLocal(context,repository)){check.accept(new SignalMessages(reopened).verification(bob.user,bob.device).toString().equals(sending.verification(bob.user,bob.device).toString()),"signal_verification_encrypted_status_and_original_number_survive_store_reopen");}
+        denied=false;try{sending.verification(bob.user,UUID.randomUUID().toString());}catch(SecurityException expected){denied=true;}check.accept(denied,"signal_verification_unknown_device_cannot_inherit_verified_status");
+        String name=bob.user+"_"+bob.device,address=own.getString("address");SignalProtocolAddress remote=new SignalProtocolAddress(address,1);byte[] record=alice.store.loadValue("private-peer",name),session=alice.store.loadSession(remote).serialize();
+        try{
+            for(int variant=0;variant<2;variant++){final boolean changedAddress=variant==0;alice.store.transaction(()->{JSONObject pinned=new JSONObject(new String(record,StandardCharsets.UTF_8));if(changedAddress)pinned.put("address",UUID.randomUUID().toString());else pinned.put("identity",Base64.encodeToString(alice.store.getIdentityKeyPair().getPublicKey().serialize(),Base64.NO_WRAP));alice.store.saveValue("private-peer",name,pinned.toString().getBytes(StandardCharsets.UTF_8));alice.store.deleteSession(remote);return null;});
+                denied=false;try{alice.targets(bob.user);}catch(SecurityException expected){denied=true;}check.accept(denied&&!alice.store.containsSession(remote),"signal_changed_pinned_"+(changedAddress?"address":"identity")+"_rejects_new_roster_before_session_creation");
+                denied=false;try{sending.verifyPeer(bob.user,bob.device,number,true);}catch(SecurityException expected){denied=true;}check.accept(denied,"signal_changed_pinned_binding_cannot_be_repaired_by_old_verification_number_"+variant);
+            }
+        }finally{alice.store.transaction(()->{alice.store.saveValue("private-peer",name,record);alice.store.storeSession(remote,new org.signal.libsignal.protocol.state.SessionRecord(session));return null;});}
+        sending.verifyPeer(bob.user,bob.device,number,false);check.accept(!sending.verification(bob.user,bob.device).getBoolean("verified")&&number.equals(sending.verification(bob.user,bob.device).getString("fingerprint"))&&Arrays.equals(session,alice.store.loadSession(remote).serialize()),"signal_verification_explicit_unverify_preserves_identity_number_and_ratchet");
     }
 
     private static void nativeCancellation(Context context,RestRepository repository,SignalDeviceKeys keys,SignalMessages messages,String peer,String conversation,SignalProtocolAddress address,BiConsumer<Boolean,String> check) throws Exception {

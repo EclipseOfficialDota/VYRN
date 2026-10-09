@@ -96,7 +96,7 @@ public final class SignalDeviceKeys implements AutoCloseable {
             if(!senderDevice.equals(device))continue;if(item.get("ready")!=Boolean.TRUE)throw new SecurityException("signal_sender_key_required");
             found=parseClaim(new JSONObject(item.toString()).put("user_id",owner).put("prekey",JSONObject.NULL),owner,device,integer(item,"version"));
         }
-        if(found==null||found.version<version||!address.equals(found.address.getName()))throw new SecurityException("signal_sender_changed");return found;
+        if(found==null||found.version<version||!address.equals(found.address.getName()))throw new SecurityException("signal_sender_changed");validateKnownIdentity(found);return found;
     }}
     /** Validate both complete rosters before consuming any one-time keys. */
     public List<ClaimedKey> targets(String peer) throws Exception {synchronized(guard()){
@@ -109,6 +109,7 @@ public final class SignalDeviceKeys implements AutoCloseable {
                 if(!devices.add(targetDevice) || item.get("ready")!=Boolean.TRUE)throw new SecurityException("signal_device_not_ready");
                 ClaimedKey target=parseClaim(new JSONObject(item.toString()).put("user_id",owner).put("prekey",JSONObject.NULL),owner,targetDevice,integer(item,"version"));
                 if(!addresses.add(target.address.getName()))throw new SecurityException("invalid_signal_roster");
+                validateKnownIdentity(target);
                 if(owner.equals(user) && targetDevice.equals(device)){
                     producer=true;if(!target.address.getName().equals(local.getString("signal_address_id")) || target.version!=integer(local,"version") || !target.bundle.getIdentityKey().equals(store.getIdentityKeyPair().getPublicKey()) || target.bundle.getRegistrationId()!=store.getLocalRegistrationId())throw new SecurityException("signal_local_publication_changed");
                 }else targets.add(target);
@@ -139,6 +140,12 @@ public final class SignalDeviceKeys implements AutoCloseable {
         JSONObject ec=response.isNull("prekey")?null:response.getJSONObject("prekey");
         PreKeyBundle bundle=new PreKeyBundle(registration,1,ec==null?PreKeyBundle.NULL_PRE_KEY_ID:keyId(ec),ec==null?null:new ECPublicKey(bytes(ec.getString("public_key"),33,5),0),keyId(signed),new ECPublicKey(signedBytes,0),signedSignature,identity,keyId(kyber),new KEMPublicKey(kyberBytes),kyberSignature);
         return new ClaimedKey(recipient,device,address,bundle,version);
+    }
+    /** Reject a changed pinned identity/address before a new send consumes any one-time keys. */
+    void validateKnownIdentity(ClaimedKey key) throws Exception {
+        byte[] peer=store.loadValue("private-peer",key.user+"_"+key.device),owner=store.loadValue("private-address",key.address.getName());String identity=Base64.encodeToString(key.bundle.getIdentityKey().serialize(),Base64.NO_WRAP);
+        if(peer!=null){JSONObject pinned=new JSONObject(new String(peer,StandardCharsets.UTF_8));if(!key.address.getName().equals(pinned.getString("address"))||!identity.equals(pinned.getString("identity")))throw new SecurityException("signal_identity_changed");}
+        if(owner!=null&&!new JSONObject(new String(owner,StandardCharsets.UTF_8)).getString("owner").equals(key.user+"_"+key.device)||!store.isTrustedIdentity(key.address,key.bundle.getIdentityKey(),org.signal.libsignal.protocol.state.IdentityKeyStore.Direction.SENDING))throw new SecurityException("signal_identity_changed");
     }
     private static int integer(JSONObject object,String field) throws Exception {Object value=object.get(field);if(!(value instanceof Integer) && !(value instanceof Long))throw new SecurityException("invalid_signal_integer");long number=((Number)value).longValue();if(number<0 || number>Integer.MAX_VALUE)throw new SecurityException("invalid_signal_integer");return (int)number;}
     private static int keyId(JSONObject key) throws Exception {int id=integer(key,"id");if(id>16777215)throw new SecurityException("invalid_signal_key_id");return id;}

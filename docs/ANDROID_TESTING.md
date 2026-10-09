@@ -1,5 +1,11 @@
 # Local Android integration
 
+## Device-pair verification component checks — 2026-10-09
+
+Signal network suite188 checks passes23:42:35 onb957f2506c2a56a8d34f2d3d1abf052445f9a42fd88a871c4246d548e383c68d. The codec fixture establishes real peer sessions before comparing both device-pair60-digit numbers. Confirm only a currently displayed number; check local-only/idempotent status and encrypted store reopen, then reject a wrong number/unknown device. Temporarily alter each original pinned address/identity and remove only the fixture's session; fresh target-roster processing must reject it without creating a session and an old number must not repair it. Finally restore exact original encrypted record/session and check explicit unverify leaves identities/ratchet/number unchanged. These are component checks; the native verification screen and active-roster/device-change acceptance remain unfinished.
+
+Same-APK -PrivateAutomatic318 checks passes23:46:57, preserving real offline worker/cold reconnect/private receiving and duplicate-prevention behavior after the early pin checks. Composer remains gated.
+
 ## Native private cancellation — 2026-10-09
 
 Run `rtk proxy pwsh -NoProfile -File scripts/test-two-client-messaging.ps1 -PrivateCancel` after the local instrumentation build. This is a separate scenario and cannot combine with private automatic/manual Retry, lost-ACK, deletion or mutation restart. It registers both emulator clients, publishes distinct keys and prepares encrypted pending rows programmatically. With actual HTTPS disconnected, open the existing message-options accessibility menu and click Cancel Sending. Require durable intent and unchanged original ciphertext/ratchet while the bubble is kept. Restore transport, force-stop/reopen and require the app worker to resolve cancellation, scrub payload and acknowledge only after native storage/UI cleanup. Another cold process restart must retain original server/negative native fences. Explicit late negative object/storage replay and actual reopened ChatActivity must remain free of the cancelled bubble.

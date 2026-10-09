@@ -19,6 +19,20 @@ public final class SignalMessages {
     private final SignalStore store;
     public SignalMessages(SignalDeviceKeys keys){this.keys=keys;store=keys.store;}
 
+    /** Offline device-pair safety number from pinned identities; unknown devices are never marked verified. */
+    public JSONObject verification(String peer,String device) throws Exception {synchronized(keys.guard()){
+        keys.requireSession();id(peer);id(device);if(peer.equals(keys.user))throw new SecurityException("signal_private_peer_required");JSONObject pinned=load("private-peer",peer+"_"+device);if(pinned==null)throw new SecurityException("signal_sender_key_required");
+        String address=id(pinned.getString("address"));JSONObject owner=load("private-address",address);IdentityKey remote=new IdentityKey(Base64.decode(pinned.getString("identity"),Base64.NO_WRAP));IdentityKey saved=store.getIdentity(new SignalProtocolAddress(address,1));
+        if(owner==null||!owner.getString("owner").equals(peer+"_"+device)||saved==null||!remote.equals(saved))throw new SecurityException("signal_identity_changed");
+        byte[] localId=new JSONArray().put(keys.user).put(keys.device).toString().getBytes(StandardCharsets.UTF_8),remoteId=new JSONArray().put(peer).put(device).toString().getBytes(StandardCharsets.UTF_8);
+        String fingerprint=new org.signal.libsignal.protocol.fingerprint.NumericFingerprintGenerator(5200).createFor(2,localId,store.getIdentityKeyPair().getPublicKey(),remoteId,remote).getDisplayableFingerprint().getDisplayText();
+        return new JSONObject().put("peer",peer).put("device",device).put("local_device",keys.device).put("address",address).put("fingerprint",fingerprint).put("verified",pinned.optBoolean("verified"));
+    }}
+    /** Confirm only the currently displayed exact device-pair number; never replace an identity to make it match. */
+    public void verifyPeer(String peer,String device,String expected,boolean verified) throws Exception {synchronized(keys.guard()){
+        keys.requireSession();if(expected==null||!expected.matches("[0-9]{60}"))throw new SecurityException("signal_verification_changed");store.transaction(()->{JSONObject current=verification(peer,device);if(!MessageDigest.isEqual(expected.getBytes(StandardCharsets.US_ASCII),current.getString("fingerprint").getBytes(StandardCharsets.US_ASCII)))throw new SecurityException("signal_verification_changed");JSONObject pinned=load("private-peer",peer+"_"+device);pinned.put("verified",verified);save("private-peer",peer+"_"+device,pinned);return null;});
+    }}
+
     /** Existing ciphertext retries stay offline; only new sends acquire the complete current roster. */
     public String prepare(String peer,String conversation,String client,String text) throws Exception {synchronized(keys.guard()){
         keys.requireSession();id(peer);id(conversation);id(client);text(text);if(peer.equals(keys.user))throw new IllegalArgumentException("signal_private_peer_required");if(store.loadValue("private-send-fence",client)!=null || store.loadValue("private-outgoing",client)!=null)return prepare(peer,conversation,client,text,null);
@@ -261,8 +275,8 @@ public final class SignalMessages {
     }
 
     private void bind(SignalDeviceKeys.ClaimedKey key) throws Exception {
-        String identity=Base64.encodeToString(key.bundle.getIdentityKey().serialize(),Base64.NO_WRAP),name=key.user+"_"+key.device;JSONObject prior=load("private-peer",name),addressOwner=load("private-address",key.address.getName());
-        if(prior!=null && (!key.address.getName().equals(prior.getString("address")) || !identity.equals(prior.getString("identity"))) || addressOwner!=null && !name.equals(addressOwner.getString("owner")) || !store.isTrustedIdentity(key.address,key.bundle.getIdentityKey(),org.signal.libsignal.protocol.state.IdentityKeyStore.Direction.SENDING))throw new SecurityException("signal_identity_changed");
+        String identity=Base64.encodeToString(key.bundle.getIdentityKey().serialize(),Base64.NO_WRAP),name=key.user+"_"+key.device;JSONObject prior=load("private-peer",name);
+        keys.validateKnownIdentity(key);
         save("private-peer",name,new JSONObject().put("address",key.address.getName()).put("identity",identity).put("version",prior==null?key.version:Math.max(key.version,prior.getInt("version"))).put("verified",prior!=null && prior.optBoolean("verified")));save("private-address",key.address.getName(),new JSONObject().put("owner",name));
     }
     private JSONObject sender(JSONObject local) throws Exception {return new JSONObject().put("user_id",keys.user).put("device_id",keys.device).put("signal_address_id",local.getString("signal_address_id")).put("version",number(local,"version"));}
