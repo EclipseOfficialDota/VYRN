@@ -508,6 +508,19 @@ Edit 'TMessagesProj/src/main/java/org/telegram/messenger/MessageObject.java' {
  if(!$t.Contains($marker)){throw 'Pinned private text constructor marker missing'}
  $t.Replace($marker,$marker+"`n        xyz.eclipseofficial.vyrn.compat.VyrnBridge.hydratePrivateText(this);")
 }
+Edit 'TMessagesProj/src/main/java/org/telegram/messenger/MediaDataController.java' {
+ param($t)
+ $t=(& git -c "safe.directory=$($upstream.Replace('\','/'))" -C $upstream show "${pin}:TMessagesProj/src/main/java/org/telegram/messenger/MediaDataController.java") -join "`n"
+ $read='byte[] bytes = Utilities.hexToBytes((String) entry.getValue());'
+ if(!$t.Contains($read)){throw 'Pinned draft read marker missing'}
+ $t=$t.Replace($read,'byte[] bytes = xyz.eclipseofficial.vyrn.data.DraftVault.decode(currentAccount, key, (String) entry.getValue());')
+ foreach($record in @('threadId == 0 ? ("" + dialogId) : ("t_" + dialogId + "_" + threadId)','threadId == 0 ? ("r_" + dialogId) : ("rt_" + dialogId + "_" + threadId)')){
+  $write="putString($record, Utilities.bytesToHex(serializedData.toByteArray()))"
+  if(!$t.Contains($write)){throw 'Pinned draft write marker missing'}
+  $t=$t.Replace($write,"putString($record, xyz.eclipseofficial.vyrn.data.DraftVault.encode(currentAccount, $record, serializedData.toByteArray()))")
+ }
+ $t
+}
 Edit 'TMessagesProj/src/main/java/org/telegram/ui/ChatActivity.java' {
  param($t)
  $t=(& git -c "safe.directory=$($upstream.Replace('\','/'))" -C $upstream show "${pin}:TMessagesProj/src/main/java/org/telegram/ui/ChatActivity.java") -join "`n"

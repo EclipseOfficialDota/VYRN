@@ -1,5 +1,9 @@
 # Local Android integration
 
+## Private draft checkpoint — 2026-10-09
+
+Run scripts/test-two-client-messaging.ps1 -PrivateChat against the existing local HTTPS/DB and two dedicated emulator fixtures. Latest run passes202 recorded checks at17:13:17, APK416d289422d42f49cac5889ef9db59070720e1e53a10c49e3b956a3ee40784e5. Besides actual receiving bubbles/native SQL privacy, it enters a private draft into the actual composer, calls native saveDraft, checks encrypted preferences and restores the same draft after force-stop with transport disconnected. Reject corrupted/swapped/legacy records and peer UUID reuse; preserve group serialization. This is programmatic input, not physical UI acceptance or actual reply-save coverage. Unknown legacy drafts are retained but unavailable; migration/recovery feedback remains required. Phone compatibility report remains unresolved pending model/OS/file; universal includes ARM64/ARMv7, Android8+.
+
 ## Native-send identity component — 2026-10-09
 
 scripts/test-signal.ps1 -Network also prepares deterministic user:random_id native identities through SignalMessages.prepareNative. Check transaction rollback, changed row rejection, server ACK retention, removal after deletion and metadata-only account-scoped recovery. A real disconnected cold app restart must preserve original local/dialog/random/client IDs and exact ciphertext without ratchet advance. The borrowed inactive native account3 must remain empty on disk after cleanup; refuse an already active slot, never clear it to make the test pass. This component does not create or send a native composer row. Before wiring it, protect native pending-message/draft persistence from plaintext and bind the mapped native peer/account to the authenticated owner. Private Send stays gated until UI recovery/reconciliation is verified.

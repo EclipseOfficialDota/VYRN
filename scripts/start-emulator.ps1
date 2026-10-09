@@ -50,3 +50,4 @@ if(!$ready){throw 'VYRN emulator did not finish booting'}
 [IO.File]::WriteAllText((Join-Path $root ".local/$logName.pid"),[string]$process.Id)
 Write-Output "VYRN Android35 emulator ready on $Serial."
 if($Monitor){$process.WaitForExit();throw "VYRN emulator launcher exited with code $($process.ExitCode)"}
+exit 0

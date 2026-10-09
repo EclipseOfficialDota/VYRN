@@ -1,5 +1,9 @@
 # Decisions
 
+## Bind native private drafts to their authenticated owner and peer — 2026-10-09
+
+Reuse native draft preferences and Android Keystore AES-GCM instead of adding a second draft database. Encrypt the original native serialization at all private draft/reply writes; bind account, authenticated UUID/native owner, actual peer UUID and complete record key as AAD. Require current owner/peer mapping before and after cryptography. Keep group serialization unchanged. Reject legacy private hex because its owner cannot be authenticated; retain it pending explicit migration/recovery UX rather than assigning it to a later login. Actual reply paths, account-switch UI and legacy handling still require acceptance.
+
 ## Recheck mutable native row provenance — 2026-10-08
 
 Validate the exact native object/row, message ID/dialog/peer/sender/date/edit and stored placeholder before assigning private text and while retaining it. Native owner/session checks alone cannot detect a changed vault user that reuses the session string; also require the originally authenticated user. Test mutable sender/date and same-session user changes, metadata deletion, populated v3 migration, and actual native row persistence. Keep private text in volatile formatting; native messageOwner remains the placeholder. Complete ChatActivity/device/lifecycle acceptance remains required.
