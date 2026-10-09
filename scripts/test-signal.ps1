@@ -65,5 +65,5 @@ foreach($phase in $phases){
     }
 }
 $fanout='not tested'
-if($Network){$fanout='single and two-recipient-device ciphertext delivery; authenticated text codec, atomic outbox/cache; service only'}
-@{date=[DateTimeOffset]::UtcNow.ToString('o');sha256=(Get-FileHash -LiteralPath $apk).Hash.ToLowerInvariant();api=35;library='org.signal:libsignal-client:0.103.0';rounds=$rounds;private_chat_ui='not implemented';server_fanout=$fanout;network_key_exchange=$Network.IsPresent} | ConvertTo-Json -Depth 6 | Set-Content (Join-Path $root "artifacts/$report") -Encoding utf8
+if($Network){$fanout='single and two-recipient-device ciphertext delivery; authenticated text codec, atomic encrypted outgoing/native-identity/cache records and cold offline recovery; service only'}
+@{date=[DateTimeOffset]::UtcNow.ToString('o');sha256=(Get-FileHash -LiteralPath $apk).Hash.ToLowerInvariant();api=35;library='org.signal:libsignal-client:0.103.0';rounds=$rounds;private_chat_ui='foreground chat not exercised by this suite; synthetic constructor hydration only; native composer Send gated';server_fanout=$fanout;network_key_exchange=$Network.IsPresent} | ConvertTo-Json -Depth 6 | Set-Content (Join-Path $root "artifacts/$report") -Encoding utf8

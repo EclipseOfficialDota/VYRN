@@ -1,5 +1,9 @@
 # Local Android integration
 
+## Native-send identity component — 2026-10-09
+
+scripts/test-signal.ps1 -Network also prepares deterministic user:random_id native identities through SignalMessages.prepareNative. Check transaction rollback, changed row rejection, server ACK retention, removal after deletion and metadata-only account-scoped recovery. A real disconnected cold app restart must preserve original local/dialog/random/client IDs and exact ciphertext without ratchet advance. The borrowed inactive native account3 must remain empty on disk after cleanup; refuse an already active slot, never clear it to make the test pass. This component does not create or send a native composer row. Before wiring it, protect native pending-message/draft persistence from plaintext and bind the mapped native peer/account to the authenticated owner. Private Send stays gated until UI recovery/reconciliation is verified.
+
 ## Private deletion replay — 2026-10-09
 
 Run scripts/test-two-client-messaging.ps1 -PrivateDelete after a local x86 instrumentation build. Includes the full -PrivateChat receiving/cache scenario, deletes the second fixture message through authenticated REST, and cold-opens both actual private chats online and offline. Require stream-learned persistent native tombstones and a visible known-live first bubble before asserting the deleted message is absent. Controlled stale plaintext objects, new/edit updates, real notification dispatch, dialog previews and MessagesStorage.putMessages must not restore it. A newer object from another dialog must never replace this dialog's preview; absent same-dialog fallback clears the preview. Query actual messages_v2 and the existing dialogs row after replay. No fixture directly seeds the tombstone. Native private composer Send/Delete controls remain gated and untested; physical phones and deletion not yet learned before disconnect remain separate requirements.

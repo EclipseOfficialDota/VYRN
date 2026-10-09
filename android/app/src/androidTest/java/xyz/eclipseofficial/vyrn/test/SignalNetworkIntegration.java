@@ -169,8 +169,8 @@ final class SignalNetworkIntegration {
         SignalMessages outgoing=new SignalMessages(alice),incoming=new SignalMessages(bob);
         java.util.List<SignalDeviceKeys.ClaimedKey> targets=java.util.Collections.singletonList(alice.claim(bob.user,bob.device,1));
         SignalDeviceKeys.ClaimedKey sender=bob.claim(alice.user,alice.device,1);
-        String pending=UUID.randomUUID().toString(),committed=UUID.randomUUID().toString();
-        String body=outgoing.prepare(bob.user,conversation,pending,RESTART_TEXT,targets);
+        String pending=UUID.nameUUIDFromBytes((alice.user+":7190319").getBytes(StandardCharsets.UTF_8)).toString(),committed=UUID.randomUUID().toString();
+        String body=outgoing.prepareNative(bob.user,conversation,pending,RESTART_TEXT,3,-995,991,7190319L);
         outgoing.prepare(bob.user,conversation,committed,RESTART_TEXT,targets);String message=outgoing.send(committed);
         JSONObject delivered=(JSONObject)b.request("GET","/v1/messages/"+message,null,true);
         check.accept(RESTART_TEXT.equals(incoming.receive(alice.user,conversation,delivered,sender)),"signal_codec_restart_fixture_committed_cache");
@@ -184,11 +184,15 @@ final class SignalNetworkIntegration {
         JSONObject state=new JSONObject(new String(Files.readAllBytes(new File(context.getFilesDir(),"vyrn-signal-network-state.json").toPath()),StandardCharsets.UTF_8));
         RestRepository a=new RestRepository(new TokenVault(context,9101)),b=new RestRepository(new TokenVault(context,9102));
         boolean unavailable=false;try{a.me();}catch(java.io.IOException expected){unavailable=true;}check.accept(unavailable,"signal_offline_actual_authenticated_request_unavailable");
+        check.accept(org.telegram.messenger.UserConfig.getInstance(3).getClientUserId()==0&&!new TokenVault(context,3).load().has("access_token"),"signal_native_borrowed_slot_cleanup_survives_process_restart");
         try(SignalDeviceKeys alice=SignalDeviceKeys.openLocal(context,a);SignalDeviceKeys bob=SignalDeviceKeys.openLocal(context,b)){
             check.accept(alice.user.equals(state.getString("alice"))&&bob.user.equals(state.getString("bob")),"signal_offline_existing_authenticated_devices");
             SignalMessages outgoing=new SignalMessages(alice),incoming=new SignalMessages(bob);String message=state.getString("message");
             check.accept(RESTART_TEXT.equals(outgoing.cachedText(message))&&RESTART_TEXT.equals(incoming.cachedText(message)),"signal_offline_cold_encrypted_history_both_devices");
             check.accept(state.getString("body").equals(outgoing.prepare(bob.user,state.getString("conversation"),state.getString("pending"),RESTART_TEXT,null))&&state.getString("sender_ratchet").equals(fingerprint(alice.store.loadSession(new SignalProtocolAddress(state.getString("recipient_address"),1)).serialize())),"signal_offline_pending_exact_ciphertext_without_ratchet_advance");
+            JSONArray nativeRows=outgoing.nativePending(3);JSONObject nativeRow=nativeRows.length()==1?nativeRows.getJSONObject(0):new JSONObject();
+            check.accept(state.getString("pending").equals(nativeRow.optString("client_id"))&&nativeRow.optInt("local_id")==-995&&nativeRow.optLong("dialog_id")==991&&nativeRow.optLong("random_id")==7190319L&&nativeRow.isNull("message_id")&&!nativeRows.toString().contains(RESTART_TEXT)&&outgoing.nativePending(0).length()==0,"signal_offline_native_identity_recovered_without_plaintext_or_other_account");
+            check.accept(state.getString("body").equals(outgoing.prepareNative(bob.user,state.getString("conversation"),state.getString("pending"),RESTART_TEXT,3,-995,991,7190319L))&&state.getString("sender_ratchet").equals(fingerprint(alice.store.loadSession(new SignalProtocolAddress(state.getString("recipient_address"),1)).serialize())),"signal_offline_native_retry_exact_identity_ciphertext_and_ratchet");
             check.accept(RESTART_TEXT.equals(incoming.receive(alice.user,state.getString("conversation"),state.getJSONObject("delivered")))&&state.getString("receiver_ratchet").equals(fingerprint(bob.store.loadSession(new SignalProtocolAddress(state.getString("sender_address"),1)).serialize())),"signal_offline_cached_duplicate_without_directory");
             JSONObject original=a.vault.load();try{a.vault.save(new JSONObject(original.toString()).put("session_id",UUID.randomUUID().toString()));boolean denied=false;try{outgoing.cachedText(message);}catch(SecurityException expected){denied=true;}check.accept(denied,"signal_offline_changed_session_cannot_read_history");denied=false;try(SignalDeviceKeys ignored=SignalDeviceKeys.openLocal(context,a)){}catch(SecurityException expected){denied=true;}check.accept(denied,"signal_offline_new_session_cannot_reuse_old_device_proof");}finally{a.vault.save(original);}
             try{a.vault.save(b.vault.load());boolean denied=false;try{outgoing.cachedText(message);}catch(SecurityException expected){denied=true;}check.accept(denied,"signal_offline_changed_account_cannot_read_history");}finally{a.vault.save(original);}
@@ -298,26 +302,30 @@ final class SignalNetworkIntegration {
             check.accept(awaitNativeText(target,"Encrypted message"),"signal_native_metadata_deletion_clears_displayed_private_text");
         }finally{
             vault.clear();java.util.concurrent.CountDownLatch cleared=new java.util.concurrent.CountDownLatch(1);
-            org.telegram.messenger.AndroidUtilities.runOnUIThread(()->{org.telegram.messenger.NotificationCenter.getInstance(account).removeObserver(observer,org.telegram.messenger.NotificationCenter.updateInterfaces);org.telegram.messenger.UserConfig.getInstance(account).setCurrentUser(new org.telegram.tgnet.TLRPC.TL_user());cleared.countDown();});cleared.await(10,java.util.concurrent.TimeUnit.SECONDS);
+            org.telegram.messenger.AndroidUtilities.runOnUIThread(()->{org.telegram.messenger.NotificationCenter.getInstance(account).removeObserver(observer,org.telegram.messenger.NotificationCenter.updateInterfaces);org.telegram.messenger.UserConfig.getInstance(account).setCurrentUser(new org.telegram.tgnet.TLRPC.TL_user());org.telegram.messenger.UserConfig.getInstance(account).saveConfig(true);cleared.countDown();});if(!cleared.await(10,java.util.concurrent.TimeUnit.SECONDS))throw new IllegalStateException("native_test_slot_cleanup_timeout");
         }
     }
     private static void codec(Context context,RestRepository a,RestRepository b,RestRepository second,SignalDeviceKeys alice,SignalDeviceKeys bob,SignalDeviceKeys bob2,String conversation,java.util.List<SignalDeviceKeys.ClaimedKey> targets,BiConsumer<Boolean,String> check) throws Exception {
         metadataMigration(context,check);
         SignalMessages sending=new SignalMessages(alice),receiving=new SignalMessages(bob),receiving2=new SignalMessages(bob2);
         SignalDeviceKeys.ClaimedKey senderKey=bob.claim(alice.user,alice.device,1);
-        String client=UUID.randomUUID().toString(),text="پیام خصوصی پایدار 🔐";
+        String client=UUID.nameUUIDFromBytes((alice.user+":6190319").getBytes(StandardCharsets.UTF_8)).toString(),text="پیام خصوصی پایدار 🔐";
+        boolean invalid=false;try{sending.prepareNative(bob.user,conversation,client,text,3,-991,-9102,6190319L);}catch(IllegalArgumentException expected){invalid=true;}check.accept(invalid&&alice.store.loadValue("private-outgoing",client)==null,"signal_native_send_rejects_group_identity_before_prepare");
         byte[] before=alice.store.loadSession(targets.get(0).address).serialize();
         File database=new File(context.getNoBackupFilesDir(),"vyrn_signal_"+alice.user+"_"+alice.device+".db");
         try(SQLiteDatabase db=SQLiteDatabase.openDatabase(database.getAbsolutePath(),null,SQLiteDatabase.OPEN_READWRITE)){db.execSQL("CREATE TRIGGER fail_private_outgoing BEFORE INSERT ON records WHEN NEW.kind='app:private-outgoing' BEGIN SELECT RAISE(ABORT,'fixture_outgoing_failure'); END");}
-        boolean denied=false;try{sending.prepare(bob.user,conversation,client,text,targets);}catch(Exception expected){denied=true;}
+        boolean denied=false;try{sending.prepareNative(bob.user,conversation,client,text,3,-991,9102,6190319L);}catch(Exception expected){denied=true;}
         check.accept(denied && alice.store.loadValue("private-outgoing",client)==null && alice.store.loadValue("private-own",client)==null && Arrays.equals(before,alice.store.loadSession(targets.get(0).address).serialize()),"signal_codec_outgoing_failure_rolls_back_ratchet_and_cache");
         try(SQLiteDatabase db=SQLiteDatabase.openDatabase(database.getAbsolutePath(),null,SQLiteDatabase.OPEN_READWRITE)){db.execSQL("DROP TRIGGER fail_private_outgoing");}
-        String body=sending.prepare(bob.user,conversation,client,text,targets);byte[] prepared=alice.store.loadSession(targets.get(0).address).serialize();
+        String body=sending.prepareNative(bob.user,conversation,client,text,3,-991,9102,6190319L);byte[] prepared=alice.store.loadSession(targets.get(0).address).serialize();
+        JSONObject nativeIdentity=sending.nativePending(3).getJSONObject(0);check.accept(client.equals(nativeIdentity.getString("client_id"))&&nativeIdentity.getInt("local_id")==-991&&nativeIdentity.getLong("dialog_id")==9102&&nativeIdentity.getLong("random_id")==6190319L&&nativeIdentity.isNull("message_id")&&!nativeIdentity.toString().contains(text),"signal_native_send_identity_committed_with_ciphertext");
+        denied=false;try{sending.prepareNative(bob.user,conversation,client,text,3,-992,9102,6190319L);}catch(SecurityException expected){denied=true;}check.accept(denied&&Arrays.equals(prepared,alice.store.loadSession(targets.get(0).address).serialize()),"signal_native_send_changed_local_identity_rejected_without_ratchet_advance");
         check.accept(body.equals(sending.prepare(bob.user,conversation,client,text,targets)) && Arrays.equals(prepared,alice.store.loadSession(targets.get(0).address).serialize()) && !body.contains(text),"signal_codec_prepare_retry_exact_ciphertext_no_ratchet_advance");
         denied=false;try{sending.prepare(bob.user,conversation,client,"changed",targets);}catch(SecurityException expected){denied=true;}
         check.accept(denied,"signal_codec_client_id_plaintext_conflict");
         String message=sending.send(client);
         check.accept(message.equals(sending.send(client)) && text.equals(sending.cachedText(message)) && Arrays.equals(prepared,alice.store.loadSession(targets.get(0).address).serialize()),"signal_codec_http_retry_and_own_cache");
+        check.accept(message.equals(sending.nativePending(3).getJSONObject(0).getString("message_id")),"signal_native_identity_keeps_authoritative_acknowledgement");
         JSONObject delivered=(JSONObject)b.request("GET","/v1/messages/"+message,null,true);
         JSONObject changed=new JSONObject(delivered.toString()).put("client_id",UUID.randomUUID().toString());
         byte[] receiveBefore=bob.store.loadSession(senderKey.address).serialize(),bindingBefore=bob.store.loadValue("private-peer",alice.user+"_"+alice.device);
@@ -353,6 +361,7 @@ final class SignalNetworkIntegration {
         check.accept(denied,"signal_codec_deleted_history_cannot_resurrect");
         sending.receive(bob.user,conversation,tombstone,null);denied=false;try{sending.send(client);}catch(SecurityException expected){denied=true;}
         check.accept(denied && sending.cachedText(message)==null && alice.store.loadValue("private-outgoing",client)==null,"signal_codec_deleted_own_message_fences_outbox");
+        check.accept(sending.nativePending(3).length()==0,"signal_native_deleted_identity_not_recovered");
         a.request("PATCH","/v1/conversations/"+conversation,new JSONObject().put("disappearing_seconds",5),true);
         String expiresClient=UUID.randomUUID().toString();sending.prepare(bob.user,conversation,expiresClient,text,targets);String expiresMessage=sending.send(expiresClient);
         JSONObject expiring=(JSONObject)b.request("GET","/v1/messages/"+expiresMessage,null,true);

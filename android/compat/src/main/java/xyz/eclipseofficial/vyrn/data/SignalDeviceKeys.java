@@ -45,6 +45,7 @@ public final class SignalDeviceKeys implements AutoCloseable {
         }
     }
     Object guard(){return repository.vault.guard();}
+    String sessionId(){return session;}
     void requireSession() throws Exception {JSONObject tokens=repository.vault.load();if(!user.equals(tokens.optString("user_id")) || !session.equals(tokens.optString("session_id")))throw new SecurityException("signal_session_changed");}
     Object request(String method,String path,JSONObject body) throws Exception {return repository.requestForSession(user,session,method,path,body);}
     JSONObject acknowledged() throws Exception {byte[] bytes=store.loadValue("keys","acknowledged");if(bytes==null)throw new SecurityException("signal_publication_required");JSONObject value=new JSONObject(new String(bytes,StandardCharsets.UTF_8));id(value.getString("signal_address_id"));if(integer(value,"version")<1)throw new SecurityException("invalid_signal_version");return value;}

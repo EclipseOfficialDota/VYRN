@@ -27,11 +27,37 @@ public final class SignalMessages {
 
     /** Caller obtains the complete verified ready-device snapshot before entering this transaction. */
     public String prepare(String peer,String conversation,String client,String text,List<SignalDeviceKeys.ClaimedKey> targets) throws Exception {synchronized(keys.guard()){
+        return prepare(peer,conversation,client,text,targets,null);
+    }}
+
+    /** Bind the original native row in the same encrypted transaction as ciphertext and ratchet state. */
+    public String prepareNative(String peer,String conversation,String client,String text,int account,int localId,long dialogId,long randomId) throws Exception {synchronized(keys.guard()){
+        keys.requireSession();id(peer);id(conversation);id(client);text(text);
+        if(peer.equals(keys.user))throw new IllegalArgumentException("signal_private_peer_required");
+        if(account<0||account>3||localId>=0||dialogId<=0||dialogId>Integer.MAX_VALUE||randomId==0||!client.equals(UUID.nameUUIDFromBytes((keys.user+":"+randomId).getBytes(StandardCharsets.UTF_8)).toString()))throw new IllegalArgumentException("invalid_signal_native_identity");
+        JSONArray identity=new JSONArray().put(account).put(localId).put(dialogId).put(randomId).put(keys.sessionId());
+        JSONObject prior=load("private-outgoing",client);
+        if(prior!=null&&prior.has("native_ui")&&!identity.toString().equals(prior.getJSONArray("native_ui").toString()))throw new SecurityException("signal_native_identity_changed");
+        return prepare(peer,conversation,client,text,prior==null&&store.loadValue("private-send-fence",client)==null?keys.targets(peer):null,identity);
+    }}
+
+    /** Recovery returns metadata only; private text remains in the encrypted outgoing record. */
+    public JSONArray nativePending(int account) throws Exception {synchronized(keys.guard()){
+        keys.requireSession();if(account<0||account>3)throw new IllegalArgumentException("invalid_signal_native_account");JSONArray pending=new JSONArray();
+        for(String client:store.valueNames("private-outgoing")){
+            JSONObject value=load("private-outgoing",client);if(value==null||!value.has("native_ui"))continue;JSONArray identity=value.getJSONArray("native_ui");
+            if(identity.length()!=5)throw new SecurityException("invalid_signal_native_identity");
+            if(identity.getInt(0)!=account||!keys.sessionId().equals(identity.getString(4)))continue;
+            pending.put(new JSONObject().put("client_id",client).put("peer",value.getString("peer")).put("conversation",value.getString("conversation")).put("local_id",identity.getInt(1)).put("dialog_id",identity.getLong(2)).put("random_id",identity.getLong(3)).put("message_id",value.get("message_id")));
+        }return pending;
+    }}
+
+    private String prepare(String peer,String conversation,String client,String text,List<SignalDeviceKeys.ClaimedKey> targets,JSONArray nativeIdentity) throws Exception {
         keys.requireSession();id(peer);id(conversation);id(client);text(text);if(peer.equals(keys.user))throw new IllegalArgumentException("signal_private_peer_required");
         return store.transaction(()->{
             if(store.loadValue("private-send-fence",client)!=null)throw new SecurityException("signal_message_deleted");
             JSONObject prior=load("private-outgoing",client);
-            if(prior!=null){if(!peer.equals(prior.getString("peer")) || !conversation.equals(prior.getString("conversation")) || !text.equals(prior.getString("text")))throw new SecurityException("signal_client_conflict");return prior.getString("body");}
+            if(prior!=null){if(!peer.equals(prior.getString("peer")) || !conversation.equals(prior.getString("conversation")) || !text.equals(prior.getString("text")))throw new SecurityException("signal_client_conflict");if(nativeIdentity!=null){if(prior.has("native_ui")&&!nativeIdentity.toString().equals(prior.getJSONArray("native_ui").toString()))throw new SecurityException("signal_native_identity_changed");prior.put("native_ui",nativeIdentity);save("private-outgoing",client,prior);}return prior.getString("body");}
             JSONObject local=keys.acknowledged();JSONObject sender=sender(local);TreeMap<String,SignalDeviceKeys.ClaimedKey> ordered=new TreeMap<>();Set<String> owners=new HashSet<>();boolean hasPeer=false;
             if(targets==null || targets.isEmpty() || targets.size()>5)throw new IllegalArgumentException("invalid_signal_targets");
             for(SignalDeviceKeys.ClaimedKey target:targets){id(target.user);id(target.device);id(target.address.getName());if(!target.user.equals(peer) && !target.user.equals(keys.user) || target.user.equals(keys.user) && target.device.equals(keys.device) || ordered.put(target.address.getName(),target)!=null || !owners.add(target.user+"_"+target.device))throw new SecurityException("invalid_signal_targets");hasPeer|=target.user.equals(peer);}
@@ -49,10 +75,10 @@ public final class SignalMessages {
             }
             JSONObject envelope=new JSONObject().put("protocol","signal-v2").put("sender",sender).put("devices",devices);
             String body=new JSONObject().put("client_id",client).put("encrypted",true).put("payload",envelope).toString();
-            save("private-outgoing",client,new JSONObject().put("peer",peer).put("conversation",conversation).put("text",text).put("body",body).put("message_id",JSONObject.NULL));
+            JSONObject outgoing=new JSONObject().put("peer",peer).put("conversation",conversation).put("text",text).put("body",body).put("message_id",JSONObject.NULL);if(nativeIdentity!=null)outgoing.put("native_ui",nativeIdentity);save("private-outgoing",client,outgoing);
             save("private-own",client,own);return body;
         });
-    }}
+    }
 
     /** Retry only the exact persisted body, never advance a ratchet for an HTTP retry. */
     public String send(String client) throws Exception {synchronized(keys.guard()){
