@@ -1,5 +1,9 @@
 # Decisions
 
+## Private cancellation journal — 2026-10-09
+
+Persist cancellation intent in the original encrypted SignalStore without waiting for the TokenVault lock held by private HTTP requests. Validate the cached original owner/session, authenticated device proof and full native account/local/dialog/random/date tuple before accepting intent. Repeated intent retains its budget; original ciphertext and ratchets remain unchanged until server arbitration. The existing cancel endpoint permanently fences an unsent client ID and returns a previously committed message instead of deleting it. Retain scrubbed cleanup identity for cancelled work and committed messages already deleted or expired, until exact native cleanup acknowledgement. Native Cancel interception, worker arbitration and negative-row replay fencing remain unfinished; this tested journal primitive does not activate private composer controls.
+
 ## Reuse the native Retry action for failed encrypted private rows — 2026-10-09
 
 Intercept the shared SendMessagesHelper retry entry before ordinary native retry logic. Reuse the existing message-options Retry UI and app-owned encrypted recovery worker. Only explicit user retry of an original failed placeholder text row is eligible; automatic unsent scans and unsupported/positive/other-account rows cannot revive work. Capture the immutable local/dialog/random/date and owner/session at the native entry, derive the deterministic client inside SEND and compare the full tuple with the original encrypted journal before resetting failure. Revalidate owner/session/peer and preserve exact ciphertext, preventing ordinary plaintext enqueue or a native retry snapshot rebinding to a different record. Show localized failure feedback only to the original still-current owner/session. Composer activation, cancellation and trust/device UX remain separate incomplete requirements.

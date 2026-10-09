@@ -55,7 +55,33 @@ public final class SignalMessages {
         keys.requireSession();id(client);if(account<0||account>3)throw new SecurityException("signal_native_identity_changed");
         JSONObject value=load("private-outgoing",client);if(value==null||!value.has("native_ui"))throw new SecurityException("signal_native_identity_missing");JSONArray identity=value.getJSONArray("native_ui");
         if(identity.length()!=5||identity.getInt(0)!=account||!keys.sessionId().equals(identity.getString(4)))throw new SecurityException("signal_native_identity_changed");
-        return new JSONObject().put("client_id",client).put("peer",value.getString("peer")).put("conversation",value.getString("conversation")).put("local_id",identity.getInt(1)).put("dialog_id",identity.getLong(2)).put("random_id",identity.getLong(3)).put("message_id",value.get("message_id")).put("date",value.optInt("native_date")).put("ui_done",value.optBoolean("native_ui_done")).put("scheduled",value.optBoolean("native_scheduled")).put("attempts",value.optInt("native_attempts")).put("next_at",value.optLong("native_next_at")).put("error",value.optInt("native_error")).put("failed",value.optBoolean("native_failed"));
+        return new JSONObject().put("client_id",client).put("peer",value.getString("peer")).put("conversation",value.getString("conversation")).put("local_id",identity.getInt(1)).put("dialog_id",identity.getLong(2)).put("random_id",identity.getLong(3)).put("device",keys.device).put("message_id",value.get("message_id")).put("date",value.optInt("native_date")).put("ui_done",value.optBoolean("native_ui_done")).put("scheduled",value.optBoolean("native_scheduled")).put("attempts",value.optInt("native_attempts")).put("next_at",value.optLong("native_next_at")).put("error",value.optInt("native_error")).put("failed",value.optBoolean("native_failed")).put("cancel_requested",value.optBoolean("native_cancel_requested")).put("cancelled",value.optBoolean("native_cancelled"));
+    }}
+    /** Cancellation intent must not wait for the HTTP-held TokenVault lock. Never opens or creates an identity. */
+    public static boolean requestNativeCancellation(android.content.Context context,RestRepository repository,String user,String session,String device,int account,int local,long dialog,long random,int date,String peer) throws Exception {
+        id(user);id(session);id(device);id(peer);if(account<0||account>3||local>=0||dialog<=0||random==0||date<=0)throw new SecurityException("signal_native_identity_changed");String client=UUID.nameUUIDFromBytes((user+":"+random).getBytes(StandardCharsets.UTF_8)).toString();
+        try(SignalStore journal=SignalStore.openExisting(context,user,device)){return journal.transaction(()->{
+            if(!repository.vault.isUser(user)||!session.equals(repository.vault.cachedSession()))throw new SecurityException("signal_session_changed");
+            byte[] proof=journal.loadValue("keys","authenticated-device"),bytes=journal.loadValue("private-outgoing",client);if(proof==null||bytes==null||journal.loadValue("keys","acknowledged")==null)throw new SecurityException("signal_native_identity_missing");JSONObject authenticated=parse(proof),value=parse(bytes);
+            if(!user.equals(authenticated.getString("user"))||!device.equals(authenticated.getString("device"))||!peer.equals(value.getString("peer")))throw new SecurityException("signal_native_identity_changed");JSONArray identity=value.getJSONArray("native_ui");
+            if(identity.length()!=5||identity.getInt(0)!=account||identity.getInt(1)!=local||identity.getLong(2)!=dialog||identity.getLong(3)!=random||!session.equals(identity.getString(4))||date!=value.getInt("native_date"))throw new SecurityException("signal_native_identity_changed");
+            if(value.optBoolean("native_ui_done"))return false;if(value.optBoolean("native_cancel_requested")||value.optBoolean("native_cancelled"))return true;if(journal.loadValue("private-send-fence",client)!=null)throw new SecurityException("signal_message_deleted");
+            value.remove("native_attempt");value.put("native_cancel_requested",true).put("native_scheduled",true).put("native_failed",false).put("native_attempts",0).put("native_next_at",0).put("native_error",0);journal.saveValue("private-outgoing",client,value.toString().getBytes(StandardCharsets.UTF_8));return true;
+        });}
+    }
+    /** The server arbitrates against the original client ID; a committed message is retained, never deleted. */
+    public boolean resolveNativeCancellation(int account,String client) throws Exception {synchronized(keys.guard()){
+        keys.requireSession();JSONObject binding=nativeBinding(account,client);if(binding.getBoolean("cancelled"))return true;if(!binding.getBoolean("cancel_requested")||binding.getBoolean("ui_done"))throw new SecurityException("signal_cancel_not_requested");
+        JSONObject response=(JSONObject)keys.request("PUT","/v1/conversations/"+binding.getString("conversation")+"/sends/"+client+"/cancel",null);
+        if("committed".equals(response.optString("status"))){String message=id(response.getString("message_id"));JSONObject packet=(JSONObject)keys.request("GET","/v1/messages/"+message,null);
+            if(!client.equals(packet.getString("client_id"))||!keys.user.equals(packet.getString("sender_id"))||!binding.getString("conversation").equals(packet.getString("conversation_id"))||!packet.getBoolean("encrypted"))throw new SecurityException("signal_cancel_ack_changed");
+            store.transaction(()->{JSONObject value=load("private-outgoing",client);if(value==null||!value.optBoolean("native_cancel_requested")||!value.isNull("message_id")&&!message.equals(value.getString("message_id")))throw new SecurityException("signal_cancel_ack_changed");value.put("message_id",message);save("private-outgoing",client,value);save("private-own-message",message,new JSONObject().put("client_id",client));return null;});receive(binding.getString("peer"),binding.getString("conversation"),packet);return nativeBinding(account,client).getBoolean("cancelled");
+        }
+        if(!"cancelled".equals(response.optString("status")))throw new SecurityException("signal_cancel_ack_changed");
+        store.transaction(()->{JSONObject value=load("private-outgoing",client);if(value==null||!value.optBoolean("native_cancel_requested")||!value.isNull("message_id"))throw new SecurityException("signal_cancel_ack_changed");value.remove("text");value.remove("body");value.remove("native_attempt");value.put("native_cancelled",true).put("native_failed",false).put("native_error",0).put("native_next_at",0);save("private-outgoing",client,value);store.removeValue("private-own",client);store.saveValue("private-send-fence",client,new byte[]{1});return null;});return true;
+    }}
+    public void acknowledgeNativeCancellation(int account,String client,int local,long dialog,long random) throws Exception {synchronized(keys.guard()){
+        keys.requireSession();store.transaction(()->{JSONObject binding=nativeBinding(account,client);if(!binding.getBoolean("cancelled")||binding.getInt("local_id")!=local||binding.getLong("dialog_id")!=dialog||binding.getLong("random_id")!=random||store.loadValue("private-send-fence",client)==null)throw new SecurityException("signal_cancel_ack_changed");JSONObject value=load("private-outgoing",client);value.put("native_ui_done",true).put("native_cancel_requested",false);save("private-outgoing",client,value);return null;});
     }}
     /** Scheduling intent belongs to the original encrypted record, never the group plaintext outbox. */
     public void scheduleNative(int account,String client) throws Exception {synchronized(keys.guard()){
@@ -64,7 +90,7 @@ public final class SignalMessages {
     /** Persist the recovery lease before HTTP; an interrupted attempt keeps its exact ciphertext. */
     public String claimNative(int account,String client) throws Exception {synchronized(keys.guard()){
         keys.requireSession();return store.transaction(()->{JSONObject binding=nativeBinding(account,client);long now=System.currentTimeMillis();
-            if(store.loadValue("private-send-fence",client)!=null||binding.getInt("date")<=0)throw new SecurityException("signal_native_identity_changed");
+            if(binding.getBoolean("cancelled"))return null;if(store.loadValue("private-send-fence",client)!=null||binding.getInt("date")<=0)throw new SecurityException("signal_native_identity_changed");
             if(!binding.getBoolean("scheduled")||binding.getBoolean("ui_done")||binding.getBoolean("failed"))return null;
             long next=binding.getLong("next_at");JSONObject value=load("private-outgoing",client);
             // Wall-clock rollback cannot strand a lease indefinitely; rebase without sending early.
@@ -90,7 +116,7 @@ public final class SignalMessages {
     }}
     /** Only the adapter calls this after native cache/UI reconciliation is proved. */
     public void acknowledgeNative(int account,String client,int localId,long dialog,long random,String message) throws Exception {synchronized(keys.guard()){
-        keys.requireSession();id(message);store.transaction(()->{JSONObject binding=nativeBinding(account,client);if(binding.getInt("local_id")!=localId||binding.getLong("dialog_id")!=dialog||binding.getLong("random_id")!=random||!message.equals(binding.optString("message_id")))throw new SecurityException("signal_native_identity_changed");JSONObject value=load("private-outgoing",client);value.remove("native_attempt");value.put("native_ui_done",true).put("native_failed",false).put("native_error",0).put("native_next_at",0);save("private-outgoing",client,value);return null;});
+        keys.requireSession();id(message);store.transaction(()->{JSONObject binding=nativeBinding(account,client);if(binding.getInt("local_id")!=localId||binding.getLong("dialog_id")!=dialog||binding.getLong("random_id")!=random||!message.equals(binding.optString("message_id")))throw new SecurityException("signal_native_identity_changed");JSONObject value=load("private-outgoing",client);value.remove("native_attempt");value.put("native_ui_done",true).put("native_cancel_requested",false).put("native_failed",false).put("native_error",0).put("native_next_at",0);save("private-outgoing",client,value);return null;});
     }}
 
     /** Volatile pending text only for the exact original unacknowledged native row and session. */
@@ -145,6 +171,7 @@ public final class SignalMessages {
         String body=queued.getString("body"),conversation=queued.getString("conversation");
         store.transaction(()->{if(!queued.isNull("message_id")){JSONObject head=load("private-head",queued.getString("message_id"));if(head!=null && expired(head))retire(head);}return null;});
         if(store.loadValue("private-send-fence",client)!=null)throw new SecurityException("signal_message_deleted");
+        JSONObject latest=load("private-outgoing",client);if(latest==null||latest.optBoolean("native_cancel_requested"))throw new SecurityException("signal_cancel_requested");
         JSONObject acknowledgement=(JSONObject)keys.request("POST","/v1/conversations/"+conversation+"/messages",new JSONObject(body));String message=id(string(acknowledgement,"id"));
         store.transaction(()->{JSONObject current=load("private-outgoing",client);if(current==null || !body.equals(current.getString("body")))throw new SecurityException("signal_outgoing_changed");if(!current.isNull("message_id") && !message.equals(current.getString("message_id")))throw new SecurityException("signal_ack_changed");current.put("message_id",message);save("private-outgoing",client,current);save("private-own-message",message,new JSONObject().put("client_id",client));return null;});
         receive(queued.getString("peer"),conversation,(JSONObject)keys.request("GET","/v1/messages/"+message,null),null);return message;
@@ -226,7 +253,7 @@ public final class SignalMessages {
     private static boolean expired(JSONObject head) throws Exception {return !head.isNull("expires_at") && !Instant.parse(head.getString("expires_at")).isAfter(Instant.now());}
     private void retire(JSONObject head) throws Exception {
         String message=head.getString("message_id"),client=head.getString("client");save("private-head",message,head.put("deleted",true));store.removeValues("private-cache",message+"_");
-        if(keys.user.equals(head.getString("owner"))){store.removeValue("private-own",client);store.removeValue("private-outgoing",client);store.removeValue("private-own-message",message);store.saveValue("private-send-fence",client,new byte[]{1});}
+        if(keys.user.equals(head.getString("owner"))){store.removeValue("private-own",client);JSONObject outgoing=load("private-outgoing",client);if(outgoing!=null&&outgoing.optBoolean("native_cancel_requested")&&outgoing.has("native_ui")&&!outgoing.optBoolean("native_ui_done")){outgoing.remove("text");outgoing.remove("body");outgoing.remove("native_attempt");outgoing.put("native_cancelled",true).put("native_failed",false).put("native_error",0).put("native_next_at",0);save("private-outgoing",client,outgoing);}else store.removeValue("private-outgoing",client);store.removeValue("private-own-message",message);store.saveValue("private-send-fence",client,new byte[]{1});}
     }
 
     private void bind(SignalDeviceKeys.ClaimedKey key) throws Exception {

@@ -1,5 +1,13 @@
 # Verification report
 
+## Private cancellation journal component verification — 2026-10-09
+
+Two-client native -PrivateKeys -Offline regression passes261 checks (registration30 + rounds231) at23:12:17 on the same local APK06213b...: actual registration, group send/receive/edit/delete/cancellation, both deleted cold reopens and offline queue/automatic recovery pass. Actual test worker exited; verified childless RTK wrapper20632 was closed, making enclosing exec22367 exit1 after terminal PASS and a fresh passed report. This is emulator group acceptance, not actual private cancellation UI or physical phones.
+
+Local instrumentation build passed in1m57s. Signal network suite passes178 checks (144 network/JNI,28 disconnected cold restart,6 online restart) on APK SHA25606213b60261b735c4f8a040bc3e66b9cc803d284827904d7957e5d0a79b949e6 at23:07:42. Real backend arbitration covers unsent cancellation, live unknown-ACK commit retention and deleted unknown-ACK commit cleanup metadata. Checks prove durable intent while another thread holds the actual vault guard, wrong-date rejection, repeat idempotence, original ciphertext/ratchet preservation, pre-POST suppression, server original-ciphertext replay rejection, scrubbed payload, store reopen and exact cleanup acknowledgement. Existing cold offline failed-retry/hydration tests still pass.
+
+These are programmatic component checks. The actual native Cancel gesture, worker resolution, native negative-row replay fencing and two-phone acceptance are not proven by this suite; composer/trust remain gated. Normal phone build passed in2m4s; all three APK verifiers pass. ARM64/ARMv7/universal are122460989/108174295/158686406 bytes, SHA256086532d77450bb867947d66afea84f067aa38df4711803af25bb8a417839fc1e /36e82767ba48009dc080d3fa85b5ff053d160c7341c36a8b210b147c61fe4612 /34ebc1d50a9328edbe9ce6b6da2eb5e18fab5c0516158284b7202db4de0279e0. Debug/public TLS/no local CA; physical installation unproven. No production/signing/TURN/external-backup change.
+
 ## Native private message-options Retry — 2026-10-09
 
 Same final298b1... APK -PrivateKeys -ManualRetry group regression passes325 recorded checks (registration30 + rounds295) at22:48:17, report artifacts/android-two-client-private-keys.json. Failed-send19/cold-failed11/actual native Retry15-check phases pass; native group send/edit/delete/cancellation, both deleted cold reopens and ordinary offline recovery also pass. This verifies the unchanged group path through the shared native retry entry. Actual worker exited; childless owned RTK21960/parent3712 required verified cleanup, so outer exit1 reflects wrapper cleanup rather than instrumentation failure. Fresh passed report/final PASS output establish the bounded emulator outcome.

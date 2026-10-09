@@ -436,6 +436,35 @@ final class SignalNetworkIntegration {
         check.accept(denied,"signal_codec_expired_own_outbox_cannot_retry");
         check.accept(receiving.receive(alice.user,conversation,extension,null)==null && receiving.cachedText(expiresMessage)==null,"signal_codec_expired_stale_extension_cannot_resurrect");
         a.request("PATCH","/v1/conversations/"+conversation,new JSONObject().put("disappearing_seconds",0),true);
+        nativeCancellation(context,a,alice,sending,bob.user,conversation,targets.get(0).address,check);
+    }
+
+    private static void nativeCancellation(Context context,RestRepository repository,SignalDeviceKeys keys,SignalMessages messages,String peer,String conversation,SignalProtocolAddress address,BiConsumer<Boolean,String> check) throws Exception {
+        String session=repository.vault.cachedSession(),text="لغو خصوصی 🔐";
+        for(int outcome=0;outcome<3;outcome++){
+            long random=8190319L+outcome;int local=-996-outcome;String client=UUID.nameUUIDFromBytes((keys.user+":"+random).getBytes(StandardCharsets.UTF_8)).toString();
+            String body=messages.prepareNative(peer,conversation,client,text,3,local,9102,random);JSONObject binding=messages.nativeBinding(3,client);byte[] ratchet=keys.store.loadSession(address).serialize();String committed=null;
+            if(outcome>0){committed=((JSONObject)repository.request("POST","/v1/conversations/"+conversation+"/messages",new JSONObject(body),true)).getString("id");if(outcome==2)repository.request("DELETE","/v1/messages/"+committed,null,true);}
+            boolean denied=false;try{SignalMessages.requestNativeCancellation(context,repository,keys.user,session,keys.device,3,local,9102,random,binding.getInt("date")+1,peer);}catch(SecurityException expected){denied=true;}
+            check.accept(denied&&!messages.nativeBinding(3,client).getBoolean("cancel_requested"),"signal_cancel_changed_original_date_rejected_"+outcome);
+            java.util.concurrent.CountDownLatch locked=new java.util.concurrent.CountDownLatch(1),release=new java.util.concurrent.CountDownLatch(1);
+            java.util.concurrent.CompletableFuture<Void> holder=java.util.concurrent.CompletableFuture.runAsync(()->{synchronized(repository.vault.guard()){locked.countDown();try{if(!release.await(10,java.util.concurrent.TimeUnit.SECONDS))throw new AssertionError("cancel_lock_timeout");}catch(InterruptedException failure){throw new RuntimeException(failure);}}});
+            try{if(!locked.await(5,java.util.concurrent.TimeUnit.SECONDS))throw new AssertionError("cancel_lock_not_held");check.accept(SignalMessages.requestNativeCancellation(context,repository,keys.user,session,keys.device,3,local,9102,random,binding.getInt("date"),peer)&&release.getCount()==1,"signal_cancel_intent_persists_while_transport_vault_lock_held_"+outcome);}finally{release.countDown();holder.get(5,java.util.concurrent.TimeUnit.SECONDS);}
+            JSONObject requested=messages.nativeBinding(3,client);SignalMessages.requestNativeCancellation(context,repository,keys.user,session,keys.device,3,local,9102,random,binding.getInt("date"),peer);
+            check.accept(requested.toString().equals(messages.nativeBinding(3,client).toString())&&body.equals(new JSONObject(new String(keys.store.loadValue("private-outgoing",client),StandardCharsets.UTF_8)).getString("body"))&&Arrays.equals(ratchet,keys.store.loadSession(address).serialize()),"signal_cancel_repeated_intent_preserves_ciphertext_ratchet_and_retry_budget_"+outcome);
+            denied=false;try{messages.send(client);}catch(SecurityException expected){denied=true;}check.accept(denied,"signal_cancel_intent_prevents_new_post_"+outcome);
+            boolean cancelled=messages.resolveNativeCancellation(3,client);JSONObject resolved=messages.nativeBinding(3,client);
+            check.accept(cancelled==(outcome!=1)&&resolved.getBoolean("cancelled")==cancelled&&(outcome==0?resolved.isNull("message_id"):committed.equals(resolved.getString("message_id"))),"signal_cancel_server_arbitrates_unsent_live_and_deleted_commit_"+outcome);
+            if(cancelled){
+                JSONObject retained=new JSONObject(new String(keys.store.loadValue("private-outgoing",client),StandardCharsets.UTF_8));
+                check.accept(!retained.has("text")&&!retained.has("body")&&messages.claimNative(3,client)==null&&keys.store.loadValue("private-send-fence",client)!=null&&messages.nativePendingText(peer,3,local,9102,random)==null,"signal_cancel_retains_cleanup_identity_and_scrubs_payload_"+outcome);
+                if(outcome==0){denied=false;try{repository.request("POST","/v1/conversations/"+conversation+"/messages",new JSONObject(body),true);}catch(RestRepository.ApiException expected){denied=expected.status==409;}check.accept(denied,"signal_cancel_server_fence_rejects_original_ciphertext_replay");}
+                try(SignalDeviceKeys reopened=SignalDeviceKeys.openLocal(context,repository)){check.accept(new SignalMessages(reopened).nativeBinding(3,client).toString().equals(resolved.toString()),"signal_cancel_cleanup_metadata_survives_store_reopen_"+outcome);}
+                denied=false;try{messages.acknowledgeNativeCancellation(3,client,local-1,9102,random);}catch(SecurityException expected){denied=true;}check.accept(denied&&!messages.nativeBinding(3,client).getBoolean("ui_done"),"signal_cancel_cleanup_changed_identity_rejected_"+outcome);
+                messages.acknowledgeNativeCancellation(3,client,local,9102,random);
+            }else{check.accept(text.equals(messages.cachedText(committed)),"signal_cancel_live_commit_keeps_message");messages.acknowledgeNative(3,client,local,9102,random,committed);repository.request("DELETE","/v1/messages/"+committed,null,true);messages.receive(peer,conversation,(JSONObject)repository.request("GET","/v1/messages/"+committed,null,true),null);}
+            check.accept(messages.nativePending(3).length()==0&&Arrays.equals(ratchet,keys.store.loadSession(address).serialize()),"signal_cancel_only_resolved_work_leaves_pending_without_ratchet_advance_"+outcome);
+        }
     }
 
     private static void nativeRetry(RestRepository repository,SignalDeviceKeys keys,SignalMessages messages,String client,String body,SignalProtocolAddress address,byte[] ratchet,BiConsumer<Boolean,String> check) throws Exception {
