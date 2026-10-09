@@ -1,5 +1,19 @@
 # Verification report
 
+## Private app adapter pending/ACK and disconnected restart — 2026-10-09
+
+Same final local APK -PrivateKeys -Offline group regression passes261 recorded checks (registration30 + rounds231), report19:18:43 local. Actual native send/edit/delete cancellation/confirmation, receiving changes, both cold deleted reopens, offline pending native identity, automatic reconnect/delivery and confirmed cold reopen remain valid after the shared native history random-ID change. This is two dedicated emulators, not physical phones.
+
+Actual group test worker exited after success/report/cleanup; only verified childless owned RTK8988 retained output pipes. Closing that wrapper yields outer exit1; it is not a failed instrumentation assertion. Strict local HTTPS health/ready is ready after proxy restoration. Build/private/Signal/group helpers terminal.
+
+Final -PrivateChat passes276 recorded checks (registration30 + rounds246), report19:11:36 local. Both directions use programmatic app adapter preparation/delivery and actual native ChatActivity: pending placeholder-only row, volatile encrypted-journal text, force-stop before delivery, disconnected cold pending bubble with original client/local/random/date, reconnection, replacement by one positive native identity, idempotent redelivery, and UI journal acknowledgement. Confirmed private bubbles and encrypted draft/offline/safety-gate checks remain valid. Main offline screenshot inspected. REST private-conversation setup and programmatic adapter entry remain fixture boundaries; actual native composer scheduling/retry/cancellation/trust and physical phones are not accepted.
+
+Same final local APK SHA256503f8ad5d632f8716472b0843853ba26f7d2bc020a46475e4ee9d0904ce4a676 passes Signal137 checks at19:14:09 local (106 network/JNI,25 disconnected cold,6 online restart), PIDs15850/15984/16107. New checks reject changed native date, premature UI ACK and altered account/local/dialog/random/server message identity; exact repeated ACK retains metadata/server ID without advancing the ratchet. Existing encrypted cache/native privacy/provenance/deletion checks remain covered. These do not establish interrupted post-send/pre-UI-ACK app-adapter recovery.
+
+Final local test build43s successful. First expanded cold startup needed the existing bounded offline foreground path; online restart with pending rows then timed out inside Instrumentation.startActivitySync (saved foreground_activity trace; main drawing through HardwareRenderer). Pending delivery now uses the existing visible-activity startup with a30s deadline; all bubble/identity assertions remain. Every chat phase has the existing50s diagnostic trace.
+
+Normal phone build2m27s and three APK verifications pass. ARM64/ARMv7/universal122444593/108157899/158670010 bytes; SHA2568b0ad9d557559131e2c05283d5b6e68c49a8db46cb93e808e1cd092da6ff9502 /4be89f4b2ab1552771d67680c3fccec77c4160886455850dcf38e46f6a9fcd29 /38e27b60b2fdaf741b0a0198792c0021aaf6c5a12119b3df895ac942eaa36831. Later edits affect only instrumentation startup/diagnostics. Normal Debug/public TLS/no local CA; signatures/package/API26/ARM ABIs verified. Physical installation/release signing/full objective remain unverified.
+
 ## Pending native-row encrypted display — 2026-10-09
 
 Same final APK private ChatActivity regression226 checks passes at18:06:02; final offline screenshot inspected. Normal ARM build2m34s passes, all three package/signature/API/ABI/TLS/size checks pass:122444585/108157891/158670002 bytes. Final universal SHA2560621ce57d9cdfea7651603b6385893918c60fc5661f427be745b75cfe2b3bc4c; Debug/no local CA. Read-only DEX markers confirm pending getter/replacement cleanup code in final local and universal APK. Physical install remains unresolved. Previous group261 is c19ab30 evidence, not repeated here; private-only changes preserve group code.

@@ -248,6 +248,62 @@ public final class VyrnBridge {
     }
     public static final int PRIVATE_TEXT_UPDATE=1<<29;
     public static final String PRIVATE_PENDING_PLACEHOLDER="Encrypted pending message";
+    /** Adapter integration; composer remains gated until retry/cancellation/trust flows are ready. */
+    public java.util.concurrent.CompletableFuture<JSONObject> preparePrivateText(long dialog,String conversation,String text){
+        final long owner=UserConfig.getInstance(account).getClientUserId();final String session=repository.vault.cachedSession();
+        return java.util.concurrent.CompletableFuture.supplyAsync(()->{try{
+            if(owner==0||dialog<=0||dialog>Integer.MAX_VALUE||dialog==owner||session==null||!UUID.fromString(conversation).toString().equals(conversation))throw new SecurityException("private_origin_unavailable");
+            String user=repository.vault.load().getString("user_id"),peer=ids.remote("user",dialog);requirePrivateOrigin(user,session,owner,peer,dialog);
+            Models.Conversation model=repository.conversationDetails(conversation).conversation;List<Models.User> members=repository.members(conversation);boolean own=false,other=false;ArrayList<TLRPC.User> mapped=new ArrayList<>();
+            for(Models.User member:members){own|=member.id.equals(user);other|=member.id.equals(peer);mapped.add(mapUser(member));}
+            if(!model.kind.equals("private")||members.size()!=2||!own||!other)throw new SecurityException("private_conversation_changed");
+            java.util.concurrent.CompletableFuture<long[]> reserved=new java.util.concurrent.CompletableFuture<>();AndroidUtilities.runOnUIThread(()->{try{requirePrivateOrigin(user,session,owner,peer,dialog);int local=UserConfig.getInstance(account).getNewMessageId();UserConfig.getInstance(account).saveConfig(false);MessagesController.getInstance(account).putUsers(mapped,false);reserved.complete(new long[]{local,SendMessagesHelper.getInstance(account).getNextRandomId()});}catch(Exception unavailable){reserved.completeExceptionally(unavailable);}});
+            long[] identity=reserved.get(20,TimeUnit.SECONDS);String client=UUID.nameUUIDFromBytes((user+":"+identity[1]).getBytes(StandardCharsets.UTF_8)).toString();JSONObject binding;
+            try(SignalDeviceKeys keys=SignalDeviceKeys.openLocal(ApplicationLoader.applicationContext,repository)){if(!user.equals(keys.user))throw new SecurityException("private_origin_changed");SignalMessages messages=new SignalMessages(keys);messages.prepareNative(peer,conversation,client,text,account,(int)identity[0],dialog,identity[1]);binding=messages.nativeBinding(account,client);}
+            writePrivateNative(binding,user,session,owner,null);return binding;
+        }catch(Exception unavailable){throw new java.util.concurrent.CompletionException(unavailable);}},SEND);
+    }
+    public java.util.concurrent.CompletableFuture<Models.Message> deliverPrivateText(String client){
+        final long owner=UserConfig.getInstance(account).getClientUserId();final String session=repository.vault.cachedSession();
+        return java.util.concurrent.CompletableFuture.supplyAsync(()->{try{
+            String user=repository.vault.load().getString("user_id");JSONObject binding;String message;
+            try(SignalDeviceKeys keys=SignalDeviceKeys.openLocal(ApplicationLoader.applicationContext,repository)){
+                SignalMessages messages=new SignalMessages(keys);binding=messages.nativeBinding(account,client);requirePrivateOrigin(user,session,owner,binding.getString("peer"),binding.getLong("dialog_id"));message=binding.isNull("message_id")?messages.send(client):binding.getString("message_id");binding=messages.nativeBinding(account,client);
+            }
+            Models.Message remote=repository.messageForUser(user,message);if(!remote.encrypted||remote.deleted||!user.equals(remote.sender)||!binding.getString("conversation").equals(remote.conversation))throw new SecurityException("private_ack_changed");
+            if(!binding.getBoolean("ui_done")){TLRPC.TL_peerUser peer=new TLRPC.TL_peerUser();peer.user_id=binding.getLong("dialog_id");TLRPC.Message committed=message(remote,peer);committed.dialog_id=peer.user_id;committed.random_id=binding.getLong("random_id");committed.send_state=MessageObject.MESSAGE_SEND_STATE_SENT;writePrivateNative(binding,user,session,owner,committed);
+                try(SignalDeviceKeys keys=SignalDeviceKeys.openLocal(ApplicationLoader.applicationContext,repository)){new SignalMessages(keys).acknowledgeNative(account,client,binding.getInt("local_id"),peer.user_id,binding.getLong("random_id"),message);}
+            }return remote;
+        }catch(Exception unavailable){throw new java.util.concurrent.CompletionException(unavailable);}},SEND);
+    }
+    private void requirePrivateOrigin(String user,String session,long owner,String peer,long dialog) throws Exception {
+        if(owner==0||session==null||!repository.vault.isUser(user)||!session.equals(repository.vault.cachedSession())||UserConfig.getInstance(account).getClientUserId()!=owner||!user.equals(ids.remote("user",owner))||!peer.equals(ids.remote("user",dialog)))throw new SecurityException("private_origin_changed");
+    }
+    private void writePrivateNative(JSONObject binding,String user,String session,long owner,TLRPC.Message committed) throws Exception {
+        int local=binding.getInt("local_id"),date=binding.getInt("date");long dialog=binding.getLong("dialog_id"),random=binding.getLong("random_id");String peer=binding.getString("peer");requirePrivateOrigin(user,session,owner,peer,dialog);
+        if(local>=0||date<=0||random==0||dialog<=0||binding.getBoolean("ui_done"))throw new SecurityException("private_native_binding_changed");
+        final TLRPC.Message row;
+        if(committed!=null)row=committed;
+        else{TLRPC.TL_message pending=new TLRPC.TL_message();pending.id=pending.local_id=local;pending.dialog_id=dialog;pending.date=date;pending.random_id=random;pending.flags=256;pending.out=true;pending.from_id=new TLRPC.TL_peerUser();pending.from_id.user_id=owner;pending.peer_id=new TLRPC.TL_peerUser();pending.peer_id.user_id=dialog;pending.message=PRIVATE_PENDING_PLACEHOLDER;pending.media=new TLRPC.TL_messageMediaEmpty();pending.send_state=MessageObject.MESSAGE_SEND_STATE_SENDING;row=pending;}
+        MessagesStorage storage=MessagesStorage.getInstance(account);java.util.concurrent.CompletableFuture<Void> written=new java.util.concurrent.CompletableFuture<>();
+        storage.getStorageQueue().postRunnable(()->{try{
+            requirePrivateOrigin(user,session,owner,peer,dialog);org.telegram.SQLite.SQLiteCursor cursor=storage.getDatabase().queryFinalized("SELECT r.random_id,m.data,m.send_state FROM messages_v2 m LEFT JOIN randoms_v2 r ON r.mid=m.mid AND r.uid=m.uid WHERE m.uid="+dialog+" AND m.mid="+local);try{if(cursor.next()){
+                if(cursor.isNull(0)||cursor.longValue(0)!=random)throw new SecurityException("private_native_row_conflict");org.telegram.tgnet.NativeByteBuffer data=cursor.byteBufferValue(1);try{TLRPC.Message previous=TLRPC.Message.TLdeserialize(data,data.readInt32(true),true);if(previous.peer_id==null||previous.peer_id.user_id!=dialog||previous.from_id==null||previous.from_id.user_id!=owner||previous.date!=date||!PRIVATE_PENDING_PLACEHOLDER.equals(previous.message)||(cursor.intValue(2)!=MessageObject.MESSAGE_SEND_STATE_SENDING&&cursor.intValue(2)!=MessageObject.MESSAGE_SEND_STATE_SEND_ERROR))throw new SecurityException("private_native_row_conflict");}finally{data.reuse();}
+            }}finally{cursor.dispose();}
+            if(committed!=null)storage.updateMessageStateAndId(random,dialog,local,committed.id,committed.date,false,0,0);
+            ArrayList<TLRPC.Message> rows=new ArrayList<>();rows.add(row);storage.putMessages(rows,true,false,false,0,0,0);written.complete(null);
+        }catch(Throwable unavailable){written.completeExceptionally(unavailable);}});written.get(20,TimeUnit.SECONDS);
+        java.util.concurrent.CompletableFuture<Void> shown=new java.util.concurrent.CompletableFuture<>();AndroidUtilities.runOnUIThread(()->{try{
+            requirePrivateOrigin(user,session,owner,peer,dialog);
+            if(committed==null){ArrayList<MessageObject> rows=new ArrayList<>();rows.add(new MessageObject(account,row,true,false));MessagesController.getInstance(account).updateInterfaceWithMessages(dialog,rows,0);NotificationCenter.getInstance(account).postNotificationName(NotificationCenter.dialogsNeedReload);}
+            else SendMessagesHelper.getInstance(account).vyrnResolveCancellation(local,dialog,committed);shown.complete(null);
+        }catch(Throwable unavailable){shown.completeExceptionally(unavailable);}});shown.get(20,TimeUnit.SECONDS);
+        java.util.concurrent.CompletableFuture<Boolean> verified=new java.util.concurrent.CompletableFuture<>();storage.getStorageQueue().postRunnable(()->{try{
+            requirePrivateOrigin(user,session,owner,peer,dialog);org.telegram.SQLite.SQLiteCursor cursor=storage.getDatabase().queryFinalized("SELECT data,send_state FROM messages_v2 WHERE uid="+dialog+" AND mid="+row.id);boolean safe=false;
+            try{if(cursor.next()){org.telegram.tgnet.NativeByteBuffer data=cursor.byteBufferValue(0);try{TLRPC.Message saved=TLRPC.Message.TLdeserialize(data,data.readInt32(true),true);safe=row.message.equals(saved.message)&&saved.peer_id!=null&&saved.peer_id.user_id==dialog&&saved.from_id!=null&&saved.from_id.user_id==owner&&cursor.intValue(1)==row.send_state;}finally{data.reuse();}}}finally{cursor.dispose();}
+            if(safe&&committed!=null){cursor=storage.getDatabase().queryFinalized("SELECT count(*) FROM messages_v2 WHERE uid="+dialog+" AND mid="+local);try{safe=cursor.next()&&cursor.intValue(0)==0;}finally{cursor.dispose();}}verified.complete(safe);
+        }catch(Throwable unavailable){verified.completeExceptionally(unavailable);}});if(!verified.get(20,TimeUnit.SECONDS))throw new SecurityException("private_native_write_unconfirmed");
+    }
     private static boolean samePrivateRow(MessageObject object,TLRPC.Message row,int id,long dialog,long sender,int date,int edited,String placeholder){
         return object!=null&&!object.deleted&&object.messageOwner==row&&object.getId()==id&&object.getDialogId()==dialog&&row.peer_id!=null&&row.peer_id.user_id==dialog&&row.from_id!=null&&row.from_id.user_id==sender&&row.date==date&&row.edit_date==edited&&java.util.Objects.equals(row.message,placeholder);
     }
@@ -309,7 +365,7 @@ public final class VyrnBridge {
                 try(SignalDeviceKeys keys=SignalDeviceKeys.openLocal(ApplicationLoader.applicationContext,bridge.repository)){
                     if(user==null){user=keys.user;peer=bridge.ids.remote("user",dialog);}
                     if(!user.equals(keys.user)||!session.equals(bridge.repository.vault.cachedSession())||!user.equals(bridge.ids.remote("user",owner))||!peer.equals(bridge.ids.remote("user",dialog)))throw new SecurityException("signal_native_identity_changed");
-                    text=new SignalMessages(keys).nativePendingText(peer,account,id,dialog,random);
+                    text=new SignalMessages(keys).nativePendingText(peer,account,id,dialog,random,date);
                 }
             }catch(Exception unavailable){/* Missing, acknowledged or changed origin clears volatile text. */}
             final String display=text;AndroidUtilities.runOnUIThread(()->{

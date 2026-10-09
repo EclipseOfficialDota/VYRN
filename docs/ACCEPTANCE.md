@@ -2,6 +2,10 @@
 
 Updated 2026-10-09. A route existing or a build compiling does **not** establish end-to-end completion.
 
+Same final local APK group -PrivateKeys -Offline regression261 checks passes at19:18:43: actual native send/edit/delete cancel/confirm, receiving changes, both cold deleted reopens and offline pending/reconnect/confirmed reopen remain valid. Physical-phone acceptance and the full objective are still incomplete.
+
+Final private app-adapter suite276 checks (registration30 + rounds246) passes at19:11:36, covering actual pending ChatActivity, interrupted-before-delivery/disconnected cold restoration with original encrypted identity, one confirmed replacement and idempotent delivery in both emulator directions. Native composer Send and automatic private scheduling/retry/cancellation/trust remain incomplete and gated. Same final local APK Signal137 checks pass at19:14:09; native date/ACK identity rejection and repeated UI journal acknowledgement are covered. These bounded emulator scenarios do not prove unknown-ACK crash recovery, full private device/trust UX, physical two-phone acceptance or the full goal. Latest normal phone APKs122/108/159MB verify; user-reported physical incompatibility remains unresolved pending device/OS/file details.
+
 Final same-APK private ChatActivity226 checks pass at18:06:02; existing receiving/private draft/offline/safety-gate behavior remains valid. Phone artifacts122/108/159MB verify successfully and include pending-display/replacement-cleanup DEX markers. These prove package construction and bounded emulator scenarios, not physical installation, actual private composer delivery or completion of the full original objective.
 
 Final pending display component suite132 checks passes at18:03:07: original native pending row cold-restores offline without native plaintext; changed origin clears display. Received/pending owner replacement with empty body clears old layout and original authenticated owner restores it. Null-owner clearing branch is not separately exercised; native composer queue/retry/cancellation/ACK/trust and physical/full-goal acceptance remain incomplete.

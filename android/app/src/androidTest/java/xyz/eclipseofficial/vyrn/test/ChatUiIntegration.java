@@ -28,7 +28,7 @@ final class ChatUiIntegration {
         int account=UserConfig.selectedAccount;
         check.verify(account==0&&UserConfig.getInstance(account).isClientActivated(),"chat_native_account0_active");
         RestRepository repository=new RestRepository(new TokenVault(instrumentation.getTargetContext(),account));
-        boolean offlineReopen=phase.equals("chat-offline-reopen")||phase.equals("chat-failed-reopen")||phase.equals("chat-private-offline-view")||phase.equals("chat-private-deleted-offline-view");
+        boolean offlineReopen=phase.equals("chat-offline-reopen")||phase.equals("chat-failed-reopen")||phase.equals("chat-private-offline-view")||phase.equals("chat-private-deleted-offline-view")||phase.equals("chat-private-pending-reopen");
         String user=offlineReopen?repository.vault.load().getString("user_id"):repository.me().id;
         if(phase.equals("chat-key-readiness")){
             java.util.concurrent.CompletableFuture<org.telegram.tgnet.TLObject> dialogs=new java.util.concurrent.CompletableFuture<>();
@@ -155,13 +155,26 @@ final class ChatUiIntegration {
             repository.request("DELETE","/v1/messages/"+message,null,true);xyz.eclipseofficial.vyrn.domain.Models.Message deleted=repository.message(message);check.verify(deleted.deleted&&deleted.ordinal==before.ordinal&&deleted.revision>before.revision,"private_delete_fixture_same_identity_tombstone");
             write(instrumentation,new JSONObject().put("message_id",message).put("ordinal",deleted.ordinal));return;
         }
-        if(phase.equals("chat-private-fixture-send")){
+        if(phase.equals("chat-private-fixture-send")||phase.equals("chat-private-pending-prepare")||phase.equals("chat-private-pending-reopen")){
             String conversation=fixture.optString("conversation");if(conversation.isEmpty())conversation=((JSONObject)repository.request("POST","/v1/conversations",new JSONObject().put("kind","private").put("members",new org.json.JSONArray().put(peer)),true)).getString("id");
-            try(xyz.eclipseofficial.vyrn.data.SignalDeviceKeys keys=xyz.eclipseofficial.vyrn.data.SignalDeviceKeys.openLocal(instrumentation.getTargetContext(),repository)){
-                xyz.eclipseofficial.vyrn.data.SignalMessages messages=new xyz.eclipseofficial.vyrn.data.SignalMessages(keys);String client=java.util.UUID.randomUUID().toString();messages.prepare(peer,conversation,client,text);String message=messages.send(client);
-                xyz.eclipseofficial.vyrn.domain.Models.Message value=repository.message(message);check.verify(value.encrypted&&!value.deleted&&value.conversation.equals(conversation)&&value.sender.equals(user),"private_encrypted_fixture_committed");
-                write(instrumentation,new JSONObject().put("conversation",conversation).put("message_id",message).put("ordinal",value.ordinal));
-            }return;
+            long dialog;try(IdMap ids=new IdMap(instrumentation.getTargetContext(),account)){dialog=ids.local("user",peer);}
+            xyz.eclipseofficial.vyrn.compat.VyrnBridge bridge=xyz.eclipseofficial.vyrn.compat.VyrnBridge.forAccount(account);JSONObject binding;
+            if(fixture.has("client_id")){try(xyz.eclipseofficial.vyrn.data.SignalDeviceKeys keys=xyz.eclipseofficial.vyrn.data.SignalDeviceKeys.openLocal(instrumentation.getTargetContext(),repository)){binding=new xyz.eclipseofficial.vyrn.data.SignalMessages(keys).nativeBinding(account,fixture.getString("client_id"));}check.verify(binding.getInt("local_id")==fixture.getInt("local_id")&&binding.getLong("random_id")==fixture.getLong("random_id")&&binding.getInt("date")==fixture.getInt("date")&&binding.getLong("dialog_id")==dialog&&binding.getString("peer").equals(peer)&&binding.getString("conversation").equals(conversation),"private_native_cold_original_encrypted_identity_restored");}
+            else binding=bridge.preparePrivateText(dialog,conversation,text).get(45,java.util.concurrent.TimeUnit.SECONDS);
+            int local=binding.getInt("local_id");
+            if(phase.equals("chat-private-pending-reopen")){boolean disconnected=false;try{repository.me();}catch(java.io.IOException expected){disconnected=true;}check.verify(disconnected,"private_pending_cold_transport_actually_disconnected");org.telegram.tgnet.TLRPC.User cached=org.telegram.messenger.MessagesStorage.getInstance(account).getUserSync(dialog);check.verify(cached!=null,"private_pending_cold_native_peer_persisted");instrumentation.runOnMainSync(()->MessagesController.getInstance(account).putUser(cached,true));}
+            check.verify(local<0&&binding.isNull("message_id")&&!binding.toString().contains(text),"private_native_adapter_prepared_encrypted_identity_without_plaintext");
+            await(()->!AuthUiIntegration.handlePrompts(instrumentation,activity,check),check,"private_pending_native_startup_prompts_handled");
+            instrumentation.runOnMainSync(()->{Bundle args=new Bundle();args.putLong("user_id",dialog);LaunchActivity.getLastFragment().presentFragment(new ChatActivity(args));});
+            await(()->{boolean[] visible={false};instrumentation.runOnMainSync(()->visible[0]=privateCell(activity.getWindow().getDecorView(),local,text)!=null);return visible[0];},check,"private_native_actual_pending_chat_bubble_from_encrypted_journal");
+            instrumentation.runOnMainSync(()->check.verify(xyz.eclipseofficial.vyrn.compat.VyrnBridge.PRIVATE_PENDING_PLACEHOLDER.equals(privateCell(activity.getWindow().getDecorView(),local,text).getMessageObject().messageOwner.message),"private_native_pending_visible_bubble_keeps_owner_placeholder"));
+            if(!phase.equals("chat-private-fixture-send")){write(instrumentation,binding);return;}
+            xyz.eclipseofficial.vyrn.domain.Models.Message value=bridge.deliverPrivateText(binding.getString("client_id")).get(45,java.util.concurrent.TimeUnit.SECONDS);
+            check.verify(value.encrypted&&!value.deleted&&value.conversation.equals(conversation)&&value.sender.equals(user),"private_encrypted_fixture_committed");
+            await(()->{boolean[] confirmed={false};instrumentation.runOnMainSync(()->{ChatActivity chat=(ChatActivity)LaunchActivity.getLastFragment();confirmed[0]=privateCell(activity.getWindow().getDecorView(),value.ordinal,text)!=null&&chat.messages.stream().noneMatch(message->message.getId()==local)&&chat.messages.stream().filter(message->message.getId()==value.ordinal).count()==1;});return confirmed[0];},check,"private_native_pending_reconciled_to_one_actual_confirmed_bubble");
+            check.verify(bridge.deliverPrivateText(binding.getString("client_id")).get(30,java.util.concurrent.TimeUnit.SECONDS).id.equals(value.id),"private_native_repeated_delivery_preserves_server_identity");
+            try(xyz.eclipseofficial.vyrn.data.SignalDeviceKeys keys=xyz.eclipseofficial.vyrn.data.SignalDeviceKeys.openLocal(instrumentation.getTargetContext(),repository)){xyz.eclipseofficial.vyrn.data.SignalMessages messages=new xyz.eclipseofficial.vyrn.data.SignalMessages(keys);check.verify(messages.nativePending(account).length()==0&&messages.nativeBinding(account,binding.getString("client_id")).getBoolean("ui_done"),"private_native_ui_acknowledgement_removes_only_resolved_journal_work");}
+            write(instrumentation,new JSONObject().put("conversation",conversation).put("message_id",value.id).put("ordinal",value.ordinal));return;
         }
         boolean offline=phase.equals("chat-private-offline-view")||phase.equals("chat-private-deleted-offline-view"),deleted=phase.equals("chat-private-deleted-view")||phase.equals("chat-private-deleted-offline-view");long local;try(IdMap ids=new IdMap(instrumentation.getTargetContext(),account)){local=ids.local("user",peer);}
         if(offline){boolean disconnected=false;try{repository.me();}catch(java.io.IOException expected){disconnected=true;}check.verify(disconnected,"private_cold_reopen_transport_actually_disconnected");

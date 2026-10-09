@@ -1,5 +1,9 @@
 # Decisions
 
+## Reconcile private native rows through the existing encrypted journal — 2026-10-09
+
+Use the existing Signal outgoing record for the original account/session, client/random ID, negative native ID, peer dialog, conversation and creation date. Preparation creates a placeholder-only native row after encrypted preparation succeeds. Delivery reuses the persisted ciphertext or recorded server ACK, replaces the original negative identity, and acknowledges journal UI work only after native storage and UI reconciliation. Native history must restore random IDs for negative private rows as it already does for pending group rows; otherwise authenticated pending text cannot be restored. Keep the composer gated while automatic scheduling, retry/cancellation, unknown-ACK lifecycle and peer/device trust screens remain incomplete. Programmatic adapter tests do not establish native composer or physical-phone acceptance.
+
 ## Render pending text from the existing encrypted outgoing journal — 2026-10-09
 
 Persist only a dedicated placeholder and normal native routing/random/send metadata in native message rows. Resolve volatile pending text from the existing Keystore-encrypted Signal outgoing record, requiring its exact original session/account/peer/native/random/client binding and no server ACK. Recheck native object/authenticated owner and inverse UUID mappings; crypto reads stay off the UI thread. Clear on changed provenance or acknowledged/missing record. Keep native composer sending gated until it can create/recover/reconcile/cancel these rows through the encrypted journal.

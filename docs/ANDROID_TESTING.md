@@ -1,5 +1,15 @@
 # Local Android integration
 
+## Private app adapter and native pending process restart — 2026-10-09
+
+Same final local APK scripts/test-two-client-messaging.ps1 -PrivateKeys -Offline passes261 checks (registration30 + rounds231) at19:18:43 local. Actual group composer send/edit/delete cancellation/confirmation, receiving changes, cold deleted absence and offline queue/automatic reconnect/confirmed cold reopen remain valid after the shared history change.
+
+Run scripts/test-two-client-messaging.ps1 -PrivateChat on the final local test APK. Final report19:11:36 passes276 checks (registration30 + rounds246), SHA256503f8ad5d632f8716472b0843853ba26f7d2bc020a46475e4ee9d0904ce4a676. Both sender directions prepare a private encrypted journal/native placeholder row through the app adapter, open actual ChatActivity, force-stop, remove the local HTTPS reverse mapping, reopen offline and verify original client/local/random/date and visible pending text. Restore transport, deliver through the adapter, require one confirmed bubble and no old negative row, repeat delivery with the same server ID, and verify encrypted UI work marked done. Existing confirmed/offline/draft/native send-gate checks remain. Host report states REST conversation setup and programmatic adapter entry; native composer Send and automatic private retry/cancellation/trust remain gated.
+
+Run scripts/test-signal.ps1 -Network: final137 checks pass at19:14:09 on the same APK (106 +25 +6; three distinct PIDs15850/15984/16107). Date tampering, premature ACK and wrong account/local/dialog/random/server-ID ACK are rejected. Exact repeated ACK removes journal work without changing original date/server ID or advancing the ratchet. Received/pending volatile native display and disconnected original-row component checks remain covered.
+
+Native history restores random IDs for negative private user rows, retaining existing pending group and encrypted-dialog behavior. New pending-reopen phase uses the existing bounded offline activity startup. Saved online pending-startup trace proved startActivitySync waiting while main draws; pending delivery uses the same visible-activity startup rather than unbounded global-idle waiting. The actual bubble assertions remain unchanged; every chat phase has the existing50s diagnostic trace. Physical ARM installation is separate; no phone is connected. Latest normal universal APK158670010 bytes, Android8+, ARM32/64, Debug/public TLS/no local CA.
+
 ## Encrypted pending row component — 2026-10-09
 
 Final suite132 checks at18:03:07 local, APK6d2ee49dcd55c80c992b05003796f8a2ab99b436a665c52ded425f66552e94a9. Added received/pending native-owner replacement with empty body and original-owner restoration. Old volatile text must clear even though native applyNewText ignores empty strings. Pending replacement is exercised again from the cold native row offline. Null-owner clearing branch is not separately exercised. Native composer delivery remains gated.

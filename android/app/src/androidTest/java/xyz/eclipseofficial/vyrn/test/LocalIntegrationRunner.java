@@ -59,8 +59,9 @@ public final class LocalIntegrationRunner extends Instrumentation {
         context=getTargetContext();
         Bundle result=new Bundle();
         Thread diagnostic=null;
-        boolean offlineChatReopen=phase.equals("chat-offline-reopen")||phase.equals("chat-failed-reopen")||phase.equals("chat-private-offline-view")||phase.equals("chat-private-deleted-offline-view");
-        if(offlineChatReopen){
+        boolean offlineChatReopen=phase.equals("chat-offline-reopen")||phase.equals("chat-failed-reopen")||phase.equals("chat-private-offline-view")||phase.equals("chat-private-deleted-offline-view")||phase.equals("chat-private-pending-reopen");
+        boolean boundedChatStartup=offlineChatReopen||phase.equals("chat-private-fixture-send");
+        if(phase.startsWith("chat-")){
             diagnostic=new Thread(()->{try{Thread.sleep(50000);StringBuilder trace=new StringBuilder("stage=").append(stage).append('\n');for(java.util.Map.Entry<Thread,StackTraceElement[]> entry:Thread.getAllStackTraces().entrySet()){trace.append(entry.getKey().getName().equals("main")?"main":"worker").append(' ').append(entry.getKey().getState()).append('\n');for(StackTraceElement frame:entry.getValue())trace.append(frame).append('\n');}java.nio.file.Files.write(file("vyrn-test-thread-state.txt").toPath(),trace.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8));}catch(Exception ignored){}},"vyrn-test-diagnostic");diagnostic.setDaemon(true);diagnostic.start();
         }
         try {
@@ -73,7 +74,7 @@ public final class LocalIntegrationRunner extends Instrumentation {
             stage="foreground_activity";
             Intent launch=new Intent(Intent.ACTION_MAIN).setClassName(context,"org.telegram.ui.LaunchActivity").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
             Activity foreground;
-            if(offlineChatReopen){
+            if(boundedChatStartup){
                 context.startActivity(launch);
                 long deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(30);boolean[] visible={false};
                 while(!visible[0]&&System.nanoTime()<deadline){
@@ -81,11 +82,11 @@ public final class LocalIntegrationRunner extends Instrumentation {
                     if(current!=null)AuthUiIntegration.handlePrompts(this,current,(condition,name)->{check(condition,name);passed.put(name);});
                     runOnMainSync(()->{org.telegram.ui.LaunchActivity active=org.telegram.ui.LaunchActivity.instance;visible[0]=active!=null&&!active.isFinishing()&&!active.isDestroyed()&&active.hasWindowFocus()&&org.telegram.ui.LaunchActivity.getLastFragment()!=null;});if(!visible[0])Thread.sleep(100);
                 }
-                check(visible[0],"offline_foreground_activity_visible");foreground=org.telegram.ui.LaunchActivity.instance;
+                check(visible[0],offlineChatReopen?"offline_foreground_activity_visible":"private_pending_foreground_activity_visible");foreground=org.telegram.ui.LaunchActivity.instance;
             }else{foreground=startActivitySync(launch);}
             check(foreground!=null,"foreground_activity");
             stage="foreground_idle";
-            if(!offlineChatReopen)waitForIdleSync();
+            if(!boundedChatStartup)waitForIdleSync();
             if(phase.startsWith("chat-")){
                 stage="chat_ui";
                 ChatUiIntegration.run(this,foreground,read("vyrn-test-fixture.json"),phase,(condition,name)->{check(condition,name);passed.put(name);});

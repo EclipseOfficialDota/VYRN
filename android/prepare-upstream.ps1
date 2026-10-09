@@ -585,10 +585,10 @@ Edit 'TMessagesProj/src/main/java/org/telegram/messenger/MessageCustomParamsHelp
 Edit 'TMessagesProj/src/main/java/org/telegram/messenger/MessagesStorage.java' {
  param($t)
  $t=(& git -c "safe.directory=$($upstream.Replace('\','/'))" -C $upstream show "${pin}:TMessagesProj/src/main/java/org/telegram/messenger/MessagesStorage.java") -join "`n"
- # Group retries derive their backend idempotency key from the persisted native random ID.
+ # Native pending group/private rows recover their original random/client identity from the same joined record.
  $retryIdentity='if (DialogObject.isEncryptedDialog(dialogId) && !cursor.isNull(5)) {'
  if(!$t.Contains($retryIdentity)){throw 'Pinned history random ID restore marker missing'}
- $t=$t.Replace($retryIdentity,'if ((DialogObject.isEncryptedDialog(dialogId) || message.id < 0 && message.peer_id != null && message.peer_id.chat_id != 0) && !cursor.isNull(5)) {')
+ $t=$t.Replace($retryIdentity,'if ((DialogObject.isEncryptedDialog(dialogId) || message.id < 0 && message.peer_id != null && (message.peer_id.chat_id != 0 || DialogObject.isUserDialog(message.peer_id.user_id))) && !cursor.isNull(5)) {')
  foreach($marker in @('public void openDatabase(int openTries) {','            databaseCreated = true;','private void cleanupInternal(boolean deleteFiles) {')){if(!$t.Contains($marker)){throw 'Pinned native deletion snapshot lifecycle marker missing'}}
  $t=$t.Replace('public void openDatabase(int openTries) {',"public void openDatabase(int openTries) {`n        vyrnDeletedMessages = null;")
  $t=$t.Replace('            databaseCreated = true;',"            xyz.eclipseofficial.vyrn.compat.VyrnBridge.initializeDeletedCache(database);`n            vyrnReloadDeletedMessages();`n            databaseCreated = true;")
