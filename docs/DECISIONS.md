@@ -1,5 +1,9 @@
 # Decisions
 
+## Resolve an offline private intent without a conversation ID — 2026-10-10
+
+Allow a null conversation only in an unprepared encrypted native intent. Preserve the original peer/client/native tuple/date and reject caller attempts to rebind that intent. On reconnect, use the existing backend's unique private-pair creation endpoint, validate the exact owner/peer membership, then persist the returned conversation in the original encrypted record before claiming keys. A failed local write leaves resolution repeatable through server pair idempotency. Cancellation resolves the same pair and fences the original client without encrypting or posting a message. Known-conversation preparation remains validated. This is a prerequisite for first-dialog composer sends; it does not enable the native composer or establish physical-phone acceptance.
+
 ## Persist offline intent before private encryption — 2026-10-10
 
 Use the existing encrypted private-outgoing record for both locally staged text and prepared ciphertext. A staged native intent has a null body, original client/local/dialog/random/session tuple and date, and an atomic scheduled flag. It does not query directories, consume prekeys or advance ratchets. Repeated intent/context/native identity must match exactly; reject changed peer/text before later claims.

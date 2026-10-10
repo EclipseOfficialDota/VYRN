@@ -70,13 +70,13 @@ public final class SignalMessages {
         return new JSONArray().put(account).put(localId).put(dialogId).put(randomId).put(keys.sessionId());
     }
     private static void requireIntent(JSONObject value,String peer,String conversation,String text) throws Exception {
-        if(value!=null&&(!peer.equals(value.getString("peer"))||!conversation.equals(value.getString("conversation"))||!text.equals(value.getString("text"))))throw new SecurityException("signal_client_conflict");
+        if(value!=null&&(!peer.equals(value.getString("peer"))||!Objects.equals(conversation,value.isNull("conversation")?null:value.getString("conversation"))||!text.equals(value.getString("text"))))throw new SecurityException("signal_client_conflict");
     }
     /** Persist a new offline intent in the existing encrypted journal; preparation is deferred to the worker. */
     public JSONObject stageNative(String peer,String conversation,String client,String text,int account,int localId,long dialogId,long randomId) throws Exception {synchronized(keys.guard()){
-        keys.requireSession();id(peer);id(conversation);id(client);text(text);if(peer.equals(keys.user))throw new IllegalArgumentException("signal_private_peer_required");JSONArray identity=nativeIdentity(client,account,localId,dialogId,randomId);keys.acknowledged();
+        keys.requireSession();id(peer);if(conversation!=null)id(conversation);id(client);text(text);if(peer.equals(keys.user))throw new IllegalArgumentException("signal_private_peer_required");JSONArray identity=nativeIdentity(client,account,localId,dialogId,randomId);keys.acknowledged();
         return store.transaction(()->{if(store.loadValue("private-send-fence",client)!=null)throw new SecurityException("signal_message_deleted");JSONObject value=load("private-outgoing",client);
-            if(value==null)value=new JSONObject().put("peer",peer).put("conversation",conversation).put("text",text).put("body",JSONObject.NULL).put("message_id",JSONObject.NULL);
+            if(value==null)value=new JSONObject().put("peer",peer).put("conversation",conversation==null?JSONObject.NULL:conversation).put("text",text).put("body",JSONObject.NULL).put("message_id",JSONObject.NULL);
             else requireIntent(value,peer,conversation,text);
             if(value.has("native_ui")&&!identity.toString().equals(value.getJSONArray("native_ui").toString()))throw new SecurityException("signal_native_identity_changed");value.put("native_ui",identity);if(!value.has("native_date"))value.put("native_date",(int)(System.currentTimeMillis()/1000));if(!value.optBoolean("native_ui_done"))value.put("native_scheduled",true);save("private-outgoing",client,value);return nativeBinding(account,client);
         });
@@ -96,7 +96,7 @@ public final class SignalMessages {
         keys.requireSession();id(client);if(account<0||account>3)throw new SecurityException("signal_native_identity_changed");
         JSONObject value=load("private-outgoing",client);if(value==null||!value.has("native_ui"))throw new SecurityException("signal_native_identity_missing");JSONArray identity=value.getJSONArray("native_ui");
         if(identity.length()!=5||identity.getInt(0)!=account||!keys.sessionId().equals(identity.getString(4)))throw new SecurityException("signal_native_identity_changed");
-        return new JSONObject().put("client_id",client).put("peer",value.getString("peer")).put("conversation",value.getString("conversation")).put("local_id",identity.getInt(1)).put("dialog_id",identity.getLong(2)).put("random_id",identity.getLong(3)).put("device",keys.device).put("ordinal",nativeOrdinal(client,value)).put("message_id",value.get("message_id")).put("date",value.optInt("native_date")).put("ui_done",value.optBoolean("native_ui_done")).put("scheduled",value.optBoolean("native_scheduled")).put("attempts",value.optInt("native_attempts")).put("next_at",value.optLong("native_next_at")).put("error",value.optInt("native_error")).put("failed",value.optBoolean("native_failed")).put("cancel_requested",value.optBoolean("native_cancel_requested")).put("cancelled",value.optBoolean("native_cancelled"));
+        return new JSONObject().put("client_id",client).put("peer",value.getString("peer")).put("conversation",value.get("conversation")).put("local_id",identity.getInt(1)).put("dialog_id",identity.getLong(2)).put("random_id",identity.getLong(3)).put("device",keys.device).put("ordinal",nativeOrdinal(client,value)).put("message_id",value.get("message_id")).put("date",value.optInt("native_date")).put("ui_done",value.optBoolean("native_ui_done")).put("scheduled",value.optBoolean("native_scheduled")).put("attempts",value.optInt("native_attempts")).put("next_at",value.optLong("native_next_at")).put("error",value.optInt("native_error")).put("failed",value.optBoolean("native_failed")).put("cancel_requested",value.optBoolean("native_cancel_requested")).put("cancelled",value.optBoolean("native_cancelled"));
     }}
     /** Cancellation intent must not wait for the HTTP-held TokenVault lock. Never opens or creates an identity. */
     private int nativeOrdinal(String client,JSONObject value) throws Exception {
@@ -117,6 +117,7 @@ public final class SignalMessages {
     /** The server arbitrates against the original client ID; a committed message is retained, never deleted. */
     public boolean resolveNativeCancellation(int account,String client) throws Exception {synchronized(keys.guard()){
         keys.requireSession();JSONObject binding=nativeBinding(account,client);if(binding.getBoolean("cancelled"))return true;if(!binding.getBoolean("cancel_requested")||binding.getBoolean("ui_done"))throw new SecurityException("signal_cancel_not_requested");
+        if(binding.isNull("conversation")){resolveNativeConversation(client,load("private-outgoing",client));binding=nativeBinding(account,client);}
         JSONObject response=(JSONObject)keys.request("PUT","/v1/conversations/"+binding.getString("conversation")+"/sends/"+client+"/cancel",null);
         if("committed".equals(response.optString("status"))){String message=id(response.getString("message_id"));JSONObject packet=(JSONObject)keys.request("GET","/v1/messages/"+message,null);
             if(!client.equals(packet.getString("client_id"))||!keys.user.equals(packet.getString("sender_id"))||!binding.getString("conversation").equals(packet.getString("conversation_id"))||!packet.getBoolean("encrypted"))throw new SecurityException("signal_cancel_ack_changed");
@@ -210,13 +211,26 @@ public final class SignalMessages {
     }
 
     /** Retry only the exact persisted body, never advance a ratchet for an HTTP retry. */
+    private void requireNativeIntent(String client,JSONObject value) throws Exception {
+        JSONArray identity=value.getJSONArray("native_ui");if(!nativeIdentity(client,identity.getInt(0),identity.getInt(1),identity.getLong(2),identity.getLong(3)).toString().equals(identity.toString())||value.getInt("native_date")<=0||!value.isNull("message_id"))throw new SecurityException("signal_native_identity_changed");
+    }
+    private void requirePrivateConversation(String peer,String conversation) throws Exception {
+        JSONObject details=(JSONObject)keys.request("GET","/v1/conversations/"+conversation,null);JSONArray members=details.getJSONArray("members");boolean own=false,other=false;for(int i=0;i<members.length();i++){String member=id(members.getJSONObject(i).getString("id"));own|=keys.user.equals(member);other|=peer.equals(member);}if(!conversation.equals(details.getString("id"))||!"private".equals(details.getString("kind"))||members.length()!=2||!own||!other)throw new SecurityException("signal_private_conversation_changed");
+    }
+    /** The server's unique private pair makes interrupted create/resolve safe to repeat. No keys are claimed here. */
+    private String resolveNativeConversation(String client,JSONObject original) throws Exception {
+        if(!original.isNull("conversation"))return id(original.getString("conversation"));
+        requireNativeIntent(client,original);if(!original.isNull("body"))throw new SecurityException("signal_native_identity_changed");String peer=id(original.getString("peer"));if(peer.equals(keys.user))throw new SecurityException("signal_private_peer_required");
+        JSONObject response=(JSONObject)keys.request("POST","/v1/conversations",new JSONObject().put("kind","private").put("members",new JSONArray().put(peer)));String conversation=id(response.getString("id"));requirePrivateConversation(peer,conversation);
+        return store.transaction(()->{JSONObject value=load("private-outgoing",client);if(value==null||store.loadValue("private-send-fence",client)!=null)throw new SecurityException("signal_message_deleted");requireNativeIntent(client,value);requireIntent(value,peer,null,original.getString("text"));if(!value.isNull("body")||!original.getJSONArray("native_ui").toString().equals(value.getJSONArray("native_ui").toString())||original.getInt("native_date")!=value.getInt("native_date"))throw new SecurityException("signal_native_identity_changed");value.put("conversation",conversation);save("private-outgoing",client,value);return conversation;});
+    }
     public String send(String client) throws Exception {synchronized(keys.guard()){
         keys.requireSession();id(client);if(store.loadValue("private-send-fence",client)!=null)throw new SecurityException("signal_message_deleted");
         JSONObject queued=load("private-outgoing",client);if(queued==null)throw new IllegalStateException("signal_outgoing_missing");
         if(queued.optBoolean("native_cancel_requested"))throw new SecurityException("signal_cancel_requested");
         if(queued.isNull("body")){
-            JSONArray identity=queued.getJSONArray("native_ui");if(!nativeIdentity(client,identity.getInt(0),identity.getInt(1),identity.getLong(2),identity.getLong(3)).toString().equals(identity.toString())||queued.getInt("native_date")<=0||!queued.isNull("message_id"))throw new SecurityException("signal_native_identity_changed");
-            String peer=id(queued.getString("peer")),conversation=id(queued.getString("conversation"));JSONObject details=(JSONObject)keys.request("GET","/v1/conversations/"+conversation,null);JSONArray members=details.getJSONArray("members");boolean own=false,other=false;for(int i=0;i<members.length();i++){String member=id(members.getJSONObject(i).getString("id"));own|=keys.user.equals(member);other|=peer.equals(member);}if(!conversation.equals(details.getString("id"))||!"private".equals(details.getString("kind"))||members.length()!=2||!own||!other)throw new SecurityException("signal_private_conversation_changed");
+            requireNativeIntent(client,queued);JSONArray identity=queued.getJSONArray("native_ui");
+            String peer=id(queued.getString("peer")),conversation=resolveNativeConversation(client,queued);queued=load("private-outgoing",client);if(queued.optBoolean("native_cancel_requested"))throw new SecurityException("signal_cancel_requested");requirePrivateConversation(peer,conversation);
             prepare(peer,conversation,client,queued.getString("text"),keys.targets(peer),identity);queued=load("private-outgoing",client);
         }
         String body=queued.getString("body"),conversation=queued.getString("conversation");

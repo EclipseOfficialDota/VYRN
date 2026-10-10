@@ -1,5 +1,15 @@
 # Verification report
 
+## Resolve a staged private intent without a conversation ID — 2026-10-10
+
+Same-APK -PrivateAutomatic79417 exit0 passes318 checks at08:50:05 (registration30 + rounds288). Actual existing prepared-path offline worker failures, automatic cold recovery in both directions and native received/draft/history/send-gate regression pass. This does not exercise null-conversation staging from the actual composer. All current builds/suites/cleanup are terminal.
+
+Local build69190 exit0 passes2m4s; APK SHA256 ea9e117be87d5b90e3c8cac3772effda2246e05f042e4554a87ff2a28362f0c9. Signal99491 exit0, report08:44:02, passes219 checks:160 network/JNI,42 disconnected cold and17 online restart in three distinct processes. New checks establish null-conversation encrypted staging, exact repeat identity, rejected caller rebinding, real offline resolution failure without ratchet/body changes, cold restoration, unique existing-pair resolution, authenticated delivery/unchanged native tuple/date, exact ciphertext retries and cancellation without encryption/non-resurrection.
+
+The fixture's server private pair already exists. Previously nonexistent-pair creation, resolution-persistence failure/crash windows, actual native composer/worker staging and two physical phones are not established by this result. Earlier prepared-path tests remain distinct from the new null-conversation path. Full objective stays active.
+
+Normal phone build1831 exit0 passes2m24s; all3 APK verifiers pass. ARM64/ARMv7/universal122460993/108174299/158686410 bytes, Debug/public TLS/no local CA/minAPI26. Physical installation and release signing are not verified.
+
 ## Fresh private offline staging — 2026-10-10
 
 Same final a915ae... APK -PrivateAutomatic suite passes318 checks at08:30:55 (registration30 + rounds288), exec46982 exit0. Actual offline app-worker failures and automatic cold-reconnect confirmation on both clients preserve prepared ciphertext/ratchet and one server/native identity. Native received/pending/draft/offline/send-gate regressions remain passing. This proves compatibility of the existing prepared path; the new staging API still needs native compose/adapter integration. All current builds/suites/cleanup are terminal.

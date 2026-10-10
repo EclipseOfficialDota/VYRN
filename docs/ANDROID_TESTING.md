@@ -1,5 +1,13 @@
 # Local Android integration
 
+## Offline private intent without a server conversation ID — 2026-10-10
+
+Same-APK -PrivateAutomatic regression passes318 checks at08:50:05, exec79417 exit0 (registration30 + rounds288). This retains the older prepared-path worker/offline/cold/native receive/draft/gate evidence, separately from the new null-conversation component checks.
+
+Signal network suite219 checks pass at08:44:02 on APKea9e117be87d5b90e3c8cac3772effda2246e05f042e4554a87ff2a28362f0c9. The three actual processes pass160 initial network/JNI,42 disconnected cold and17 online restart checks. The disconnected phase stages a new encrypted intent with a null conversation/body, repeats the exact identity, rejects caller-supplied conversation rebinding and verifies actual failed offline resolution leaves identity/text/body/ratchet unchanged. It also persists cancellation against a null-conversation intent.
+
+After force-stop/reconnect, the original intent resolves through the existing unique private-pair endpoint, decrypts at the recipient and retains its local/random/date identity. Duplicate send retains server ID/ciphertext/ratchet. Cancellation resolves the same pair, fences/scrubs the original client without encryption and cannot be revived. This fixture deliberately reuses an existing server pair while the outgoing intent has no conversation ID; creation of a previously nonexistent pair, resolution-write-failure/crash windows and actual native composer/worker staging remain acceptance work. It is not a two-physical-phone or full private-composer claim.
+
 ## Fresh offline private intent — 2026-10-10
 
 Signal network suite209 checks pass08:23:51 on APKa915ae78da9b5f74c2e4b1da7da7800f03dab261d58d4571bb2c9020a5ec26b4:160 network/JNI,37 disconnected cold,12 online restart. Unlike the earlier prepared-before-disconnect fixture, the disconnected phase creates a genuinely new encrypted local intent with null body and unchanged ratchet. Assert exact repeat/native-row/text/peer conflicts, metadata-only recovery, encrypted store reopen and original cancellation before any preparation/directory call. Online cold phase retains the tuple/date/schedule, prepares through current membership/device validation, delivers/decrypts, retries without ciphertext/ratchet changes, fences cancelled work and rejects a mismatched peer/conversation without encryption.
