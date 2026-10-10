@@ -66,8 +66,10 @@ public final class SignalMessages {
     }}
 
     private JSONArray nativeIdentity(String client,int account,int localId,long dialogId,long randomId){
-        if(account<0||account>3||localId>=0||dialogId<=0||dialogId>Integer.MAX_VALUE||randomId==0||!client.equals(UUID.nameUUIDFromBytes((keys.user+":"+randomId).getBytes(StandardCharsets.UTF_8)).toString()))throw new IllegalArgumentException("invalid_signal_native_identity");
-        return new JSONArray().put(account).put(localId).put(dialogId).put(randomId).put(keys.sessionId());
+        return nativeIdentity(keys.user,keys.sessionId(),client,account,localId,dialogId,randomId);
+    }
+    private static JSONArray nativeIdentity(String user,String session,String client,int account,int localId,long dialogId,long randomId){
+        if(account<0||account>3||localId>=0||dialogId<=0||dialogId>Integer.MAX_VALUE||randomId==0||!client.equals(UUID.nameUUIDFromBytes((user+":"+randomId).getBytes(StandardCharsets.UTF_8)).toString()))throw new IllegalArgumentException("invalid_signal_native_identity");return new JSONArray().put(account).put(localId).put(dialogId).put(randomId).put(session);
     }
     private static void requireIntent(JSONObject value,String peer,String conversation,String text) throws Exception {
         if(value!=null&&(!peer.equals(value.getString("peer"))||!Objects.equals(conversation,value.isNull("conversation")?null:value.getString("conversation"))||!text.equals(value.getString("text"))))throw new SecurityException("signal_client_conflict");
@@ -75,12 +77,21 @@ public final class SignalMessages {
     /** Persist a new offline intent in the existing encrypted journal; preparation is deferred to the worker. */
     public JSONObject stageNative(String peer,String conversation,String client,String text,int account,int localId,long dialogId,long randomId) throws Exception {synchronized(keys.guard()){
         keys.requireSession();id(peer);if(conversation!=null)id(conversation);id(client);text(text);if(peer.equals(keys.user))throw new IllegalArgumentException("signal_private_peer_required");JSONArray identity=nativeIdentity(client,account,localId,dialogId,randomId);keys.acknowledged();
-        return store.transaction(()->{if(store.loadValue("private-send-fence",client)!=null)throw new SecurityException("signal_message_deleted");JSONObject value=load("private-outgoing",client);
-            if(value==null)value=new JSONObject().put("peer",peer).put("conversation",conversation==null?JSONObject.NULL:conversation).put("text",text).put("body",JSONObject.NULL).put("message_id",JSONObject.NULL);
-            else requireIntent(value,peer,conversation,text);
-            if(value.has("native_ui")&&!identity.toString().equals(value.getJSONArray("native_ui").toString()))throw new SecurityException("signal_native_identity_changed");value.put("native_ui",identity);if(!value.has("native_date"))value.put("native_date",(int)(System.currentTimeMillis()/1000));if(!value.optBoolean("native_ui_done"))value.put("native_scheduled",true);save("private-outgoing",client,value);return nativeBinding(account,client);
-        });
+        return store.transaction(()->{stageRecord(store,peer,conversation,client,text,identity);return nativeBinding(account,client);});
     }}
+    private static JSONObject stageRecord(SignalStore journal,String peer,String conversation,String client,String text,JSONArray identity) throws Exception {
+        if(journal.loadValue("private-send-fence",client)!=null)throw new SecurityException("signal_message_deleted");byte[] bytes=journal.loadValue("private-outgoing",client);JSONObject value=bytes==null?null:parse(bytes);
+        if(value==null)value=new JSONObject().put("peer",peer).put("conversation",conversation==null?JSONObject.NULL:conversation).put("text",text).put("body",JSONObject.NULL).put("message_id",JSONObject.NULL);else requireIntent(value,peer,conversation,text);
+        if(value.has("native_ui")&&!identity.toString().equals(value.getJSONArray("native_ui").toString()))throw new SecurityException("signal_native_identity_changed");value.put("native_ui",identity);if(!value.has("native_date"))value.put("native_date",(int)(System.currentTimeMillis()/1000));if(!value.optBoolean("native_ui_done"))value.put("native_scheduled",true);journal.saveValue("private-outgoing",client,value.toString().getBytes(StandardCharsets.UTF_8));return value;
+    }
+    /** Local composer persistence cannot queue behind the vault lock held by HTTP. Never creates an identity. */
+    public static JSONObject stageNative(android.content.Context context,RestRepository repository,String user,String session,String device,String peer,String client,String text,int account,int local,long dialog,long random) throws Exception {
+        id(user);id(session);id(device);id(peer);id(client);text(text);if(user.equals(peer))throw new SecurityException("signal_private_peer_required");JSONArray identity=nativeIdentity(user,session,client,account,local,dialog,random);
+        try(SignalStore journal=SignalStore.openExisting(context,user,device)){return journal.transaction(()->{
+            if(!device.equals(repository.vault.cachedSignalDevice(user,session)))throw new SecurityException("signal_session_changed");byte[] proof=journal.loadValue("keys","authenticated-device"),ack=journal.loadValue("keys","acknowledged");if(proof==null||ack==null)throw new SecurityException("signal_publication_required");JSONObject authenticated=parse(proof),published=parse(ack);if(!user.equals(authenticated.getString("user"))||!device.equals(authenticated.getString("device")))throw new SecurityException("signal_device_changed");id(published.getString("signal_address_id"));if(published.getInt("version")<1)throw new SecurityException("invalid_signal_version");
+            JSONObject value=stageRecord(journal,peer,null,client,text,identity);if(!value.isNull("message_id")||!device.equals(repository.vault.cachedSignalDevice(user,session)))throw new SecurityException("signal_session_changed");return nativeMetadata(value,client,device,0);
+        });}
+    }
 
     /** Recovery returns metadata only; private text remains in the encrypted outgoing record. */
     public JSONArray nativePending(int account) throws Exception {synchronized(keys.guard()){
@@ -96,8 +107,11 @@ public final class SignalMessages {
         keys.requireSession();id(client);if(account<0||account>3)throw new SecurityException("signal_native_identity_changed");
         JSONObject value=load("private-outgoing",client);if(value==null||!value.has("native_ui"))throw new SecurityException("signal_native_identity_missing");JSONArray identity=value.getJSONArray("native_ui");
         if(identity.length()!=5||identity.getInt(0)!=account||!keys.sessionId().equals(identity.getString(4)))throw new SecurityException("signal_native_identity_changed");
-        return new JSONObject().put("client_id",client).put("peer",value.getString("peer")).put("conversation",value.get("conversation")).put("local_id",identity.getInt(1)).put("dialog_id",identity.getLong(2)).put("random_id",identity.getLong(3)).put("device",keys.device).put("ordinal",nativeOrdinal(client,value)).put("message_id",value.get("message_id")).put("date",value.optInt("native_date")).put("ui_done",value.optBoolean("native_ui_done")).put("scheduled",value.optBoolean("native_scheduled")).put("attempts",value.optInt("native_attempts")).put("next_at",value.optLong("native_next_at")).put("error",value.optInt("native_error")).put("failed",value.optBoolean("native_failed")).put("cancel_requested",value.optBoolean("native_cancel_requested")).put("cancelled",value.optBoolean("native_cancelled"));
+        return nativeMetadata(value,client,keys.device,nativeOrdinal(client,value));
     }}
+    private static JSONObject nativeMetadata(JSONObject value,String client,String device,int ordinal) throws Exception {
+        JSONArray identity=value.getJSONArray("native_ui");return new JSONObject().put("client_id",client).put("peer",value.getString("peer")).put("conversation",value.get("conversation")).put("local_id",identity.getInt(1)).put("dialog_id",identity.getLong(2)).put("random_id",identity.getLong(3)).put("device",device).put("ordinal",ordinal).put("message_id",value.get("message_id")).put("date",value.optInt("native_date")).put("ui_done",value.optBoolean("native_ui_done")).put("scheduled",value.optBoolean("native_scheduled")).put("attempts",value.optInt("native_attempts")).put("next_at",value.optLong("native_next_at")).put("error",value.optInt("native_error")).put("failed",value.optBoolean("native_failed")).put("cancel_requested",value.optBoolean("native_cancel_requested")).put("cancelled",value.optBoolean("native_cancelled"));
+    }
     /** Cancellation intent must not wait for the HTTP-held TokenVault lock. Never opens or creates an identity. */
     private int nativeOrdinal(String client,JSONObject value) throws Exception {
         if(value.isNull("message_id"))return 0;JSONObject head=load("private-head",value.getString("message_id"));if(head==null)return 0;

@@ -502,14 +502,48 @@ Edit 'TMessagesProj/src/main/java/org/telegram/ui/Components/ChatActivityEnterVi
  $button='public void checkSendButton(boolean animated) {'
  $hint='public void updateFieldHint(boolean animated) {'
  foreach($marker in @($send,$button,$hint)){if(!$t.Contains($marker)){throw 'Pinned private composer gate marker missing'}}
- $t=$t.Replace($send,$send+"`n        if (xyz.eclipseofficial.vyrn.compat.VyrnBridge.blockPrivateSend(dialog_id)) return false;")
- $t=$t.Replace($button,$button+"`n        if (sendButton != null) { boolean unavailable = xyz.eclipseofficial.vyrn.compat.VyrnBridge.privateSendUnavailable(dialog_id); sendButton.setEnabled(!unavailable); sendButton.setContentDescription(unavailable ? xyz.eclipseofficial.vyrn.compat.VyrnBridge.privateSendUnavailableLabel() : getString(R.string.Send)); }")
- $t=$t.Replace($hint,$hint+"`n        if (messageEditText != null && xyz.eclipseofficial.vyrn.compat.VyrnBridge.privateSendUnavailable(dialog_id)) { messageEditText.setHintText(xyz.eclipseofficial.vyrn.compat.VyrnBridge.privateSendUnavailableLabel(), animated); return; }")
+ $privateComposer=@'
+    private boolean vyrnStaging;
+    private boolean vyrnPlainTextReady() {
+        return !vyrnStaging && xyz.eclipseofficial.vyrn.compat.VyrnBridge.privateTextReady(currentAccount, dialog_id) && messageEditText != null && !TextUtils.isEmpty(messageEditText.getText()) && editingMessageObject == null && editingBusinessLink == null && !richDraftActive && replyingMessageObject == null && replyingTopMessage == null && replyingQuote == null && (delegate == null || delegate.getReplyToStory() == null) && getThreadMessage() == null && audioToSend == null && videoToSendMessageObject == null && getEffectId() == 0 && getSendMessageSuggestionParams() == null && !isInScheduleMode() && (delegate == null || !delegate.hasForwardingMessages());
+    }
+    private boolean vyrnSendPrivateText(int scheduleDate, int scheduleRepeatPeriod, long payStars) {
+        if (vyrnStaging) return false;
+        if (!vyrnPlainTextReady() || scheduleDate != 0 || scheduleRepeatPeriod != 0 || payStars != 0) { xyz.eclipseofficial.vyrn.compat.VyrnBridge.blockPrivateSend(dialog_id); return false; }
+        final int account = currentAccount;
+        final long dialog = dialog_id, owner = UserConfig.getInstance(account).getClientUserId();
+        final String session = xyz.eclipseofficial.vyrn.compat.VyrnBridge.privateTextSession(account), text = messageEditText.getText().toString();
+        vyrnStaging = true;
+        checkSendButton(false);
+        xyz.eclipseofficial.vyrn.compat.VyrnBridge.forAccount(account).stagePrivateText(dialog, text).whenComplete((binding, failure) -> AndroidUtilities.runOnUIThread(() -> {
+            vyrnStaging = false;
+            if (currentAccount == account && dialog_id == dialog && xyz.eclipseofficial.vyrn.compat.VyrnBridge.privateTextOrigin(account, dialog, owner, session, binding)) {
+                if (failure == null && vyrnPlainTextReady() && text.contentEquals(messageEditText.getText())) { setFieldText(""); if (parentFragment != null) parentFragment.saveDraft(); }
+                if (failure != null) android.widget.Toast.makeText(getContext(), LocaleController.isRTL ? "پیام ذخیره نشد؛ پیش‌نویس حفظ شد. دوباره تلاش کنید." : "Message could not be saved; your draft is kept. Retry.", android.widget.Toast.LENGTH_LONG).show();
+                else android.widget.Toast.makeText(getContext(), LocaleController.isRTL ? "پیام در صف ارسال قرار گرفت." : "Message queued for sending.", android.widget.Toast.LENGTH_SHORT).show();
+            }
+            checkSendButton(false);
+        }));
+        return true;
+    }
+'@
+ $publicSend='public boolean sendMessage() {'
+ if(!$t.Contains($publicSend)){throw 'Pinned private send wrapper marker missing'}
+ $t=$t.Replace($publicSend,$publicSend+"`n        if (xyz.eclipseofficial.vyrn.compat.VyrnBridge.privateSendUnavailable(dialog_id)) return sendMessageInternal(true, 0, 0, 0, true);")
+ $longSend='private boolean onSendLongClick(View view) {'
+ if(!$t.Contains($longSend)){throw 'Pinned private send long-click marker missing'}
+ $t=$t.Replace($longSend,$longSend+"`n        if (xyz.eclipseofficial.vyrn.compat.VyrnBridge.blockPrivateSend(dialog_id)) return true;")
+ $effect='        this.effectId = effectId;'
+ if(!$t.Contains($effect)){throw 'Pinned private effect setter marker missing'}
+ $t=$t.Replace($effect,$effect+"`n        if (xyz.eclipseofficial.vyrn.compat.VyrnBridge.privateSendUnavailable(dialog_id)) checkSendButton(false);")
+ $t=$t.Replace($send,$privateComposer+"`n    "+$send+"`n        if (xyz.eclipseofficial.vyrn.compat.VyrnBridge.privateSendUnavailable(dialog_id)) return vyrnSendPrivateText(scheduleDate, scheduleRepeatPeriod, payStars);")
+ $t=$t.Replace($button,$button+"`n        if (sendButton != null) { boolean unavailable = xyz.eclipseofficial.vyrn.compat.VyrnBridge.privateSendUnavailable(dialog_id) && !vyrnPlainTextReady(); sendButton.setEnabled(!unavailable); if (xyz.eclipseofficial.vyrn.compat.VyrnBridge.privateSendUnavailable(dialog_id)) sendButton.setAlpha(1.0f); sendButton.setContentDescription(unavailable ? xyz.eclipseofficial.vyrn.compat.VyrnBridge.privateSendUnavailableLabel() : getString(R.string.Send)); }")
+ $t=$t.Replace($hint,$hint+"`n        if (messageEditText != null && xyz.eclipseofficial.vyrn.compat.VyrnBridge.privateSendUnavailable(dialog_id) && !xyz.eclipseofficial.vyrn.compat.VyrnBridge.privateTextReady(currentAccount, dialog_id)) { messageEditText.setHintText(xyz.eclipseofficial.vyrn.compat.VyrnBridge.privateSendUnavailableLabel(), animated); return; }")
  $begin=$t.IndexOf('        sendButton = new SendButton(');$end=$t.IndexOf('        sendButton.setVisibility(INVISIBLE);',$begin)
  if($begin -lt 0 -or $end -lt 0){throw 'Pinned native send button marker missing'}
  $section=$t.Substring($begin,$end-$begin)
  if(!$section.Contains('super.setAlpha(alpha);')){throw 'Pinned send button alpha marker missing'}
- $section=$section.Replace('super.setAlpha(alpha);','super.setAlpha(xyz.eclipseofficial.vyrn.compat.VyrnBridge.privateSendUnavailable(dialog_id) ? alpha * 0.4f : alpha);')
+ $section=$section.Replace('super.setAlpha(alpha);','super.setAlpha(xyz.eclipseofficial.vyrn.compat.VyrnBridge.privateSendUnavailable(dialog_id) && !vyrnPlainTextReady() ? alpha * 0.4f : alpha);')
  $t=$t.Substring(0,$begin)+$section+$t.Substring($end)
  $marker='        editingMessageObject = messageObject;'
  if(!$t.Contains($marker)){throw 'Pinned composer edit marker missing'}
@@ -550,6 +584,18 @@ Edit 'TMessagesProj/src/main/java/org/telegram/ui/ChatActivity.java' {
  $marker='            int updateMask = (Integer) args[0];'
  if(!$t.Contains($marker)){throw 'Pinned private text UI refresh marker missing'}
  $t=$t.Replace($marker,$marker+"`n            if ((updateMask & xyz.eclipseofficial.vyrn.compat.VyrnBridge.PRIVATE_TEXT_UPDATE) != 0) updateVisibleRows();")
+ $historyFailure='        } else if (id == NotificationCenter.loadingMessagesFailed) {'
+ if(!$t.Contains($historyFailure)){throw 'Pinned private history failure marker missing'}
+ $t=$t.Replace($historyFailure,$historyFailure+@'
+
+            if ((Integer) args[0] == classGuid && DialogObject.isUserDialog(dialog_id) && firstLoading) {
+                loading = false;
+                firstLoading = false;
+                showProgressView(false);
+                checkDispatchHideSkeletons(true);
+                AndroidUtilities.runOnUIThread(() -> getNotificationCenter().runDelayedNotifications());
+            }
+'@)
  $click='            public void onItemClick(final int id) {'
  $menu='            headerItem.setContentDescription(LocaleController.getString(R.string.AccDescrMoreOptions));'
  if(!$t.Contains($click) -or !$t.Contains($menu)){throw 'Pinned private verification menu markers missing'}

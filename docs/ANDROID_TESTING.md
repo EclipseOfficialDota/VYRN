@@ -1,5 +1,16 @@
 # Local Android integration
 
+Same-APK security regression Signal61980 exits0 with221 checks (160 network/JNI,44 disconnected cold,17 online restart) at09:56:11 on1fc2ff226ad2e505684a6ce8817d7412ef24a65b9965bdd8aee2bf89583c5946. Normal27784 build exits0 in2m37s; all3 signature/package/API/ABI/manifest verifiers pass. ARM64/ARMv7/universal Debug APKs122477389/108190695/158702806 bytes; hashes b34491d5e3377fb9b5e9d84def0c7f0a46b8aebc6304898989299bddfae31ba3 /5599056447e8a755e7e0a67780089a45448c6227114308f823be5262d5dbf360 /c7583dbe417bb426808c3a1edcc1a0b0ef8cff6f730b4f94059effac6c0bf1b1. Android8.0 minimum, normal public TLS/no local CA; physical installation unproved. No source behavior changes after builds; full original goal remains active.
+
+
+## Actual private composer offline Send — 2026-10-10
+
+`scripts/test-two-client-messaging.ps1 -PrivateComposer` passes315 recorded checks at09:53:27 on local APK1fc2ff226ad2e505684a6ce8817d7412ef24a65b9965bdd8aee2bf89583c5946 (exec47333 exit0). Both clients register through native UI and retain their original acknowledged devices across cold restart. Peer profile setup does not create the first private pair. Remove transport before clicking the actual native Send control: an injected encrypted-store failure preserves the draft and permits retry; durable success rejects a second click, preserves newly typed text in the first direction and clears the unchanged draft in the second. Pending text/body/ratchet checks, cold offline bubble/draft/native database confidentiality, and cold automatic recovery with one original server/native message pass in both directions. Both receivers and their offline cold caches pass the existing private UI/privacy/draft checks.
+
+First private history failure now releases the native initial-loading state and delayed notifications instead of indefinitely hiding the staged bubble. Send enabled/alpha refreshes when busy/readiness/effect state changes. Unsupported shared plaintext/effect/forward/screenshot/long-press paths remain blocked. A legacy schedule/silent hint is still visible and needs removal for unsupported contexts.
+
+This proves two emulator clients using programmatic native `performClick`, not physical touch or phones. New staged Cancel/Retry/account/navigation/unknown-ACK races, draft ABA/crash-consumption, full device/trust lifecycle, background notifications, media and release/external backup remain acceptance work. Same-APK Signal security regression and normal phone packages are recorded separately after terminal validation.
+
 ## Offline private intent without a server conversation ID — 2026-10-10
 
 Same-APK -PrivateAutomatic regression passes318 checks at08:50:05, exec79417 exit0 (registration30 + rounds288). This retains the older prepared-path worker/offline/cold/native receive/draft/gate evidence, separately from the new null-conversation component checks.

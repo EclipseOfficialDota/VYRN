@@ -19,10 +19,13 @@ public final class TokenVault {
     private static final ConcurrentHashMap<String,Object> LOCKS=new ConcurrentHashMap<>();
     private static final ConcurrentHashMap<String,String> USERS=new ConcurrentHashMap<>();
     private static final ConcurrentHashMap<String,String> SESSIONS=new ConcurrentHashMap<>();
+    private static final ConcurrentHashMap<String,String[]> SIGNAL_DEVICES=new ConcurrentHashMap<>();
     private final SharedPreferences preferences;
     private final String alias;
     public Object guard(){return LOCKS.computeIfAbsent(alias,ignored->new Object());}
     public String cachedSession(){return SESSIONS.get(alias);}
+    public String cachedSignalDevice(String user,String session){String[] value=SIGNAL_DEVICES.get(alias);return value!=null&&isUser(user)&&session!=null&&session.equals(cachedSession())&&user.equals(value[0])&&session.equals(value[1])?value[2]:null;}
+    private void remember(JSONObject tokens){USERS.put(alias,tokens.optString("user_id"));SESSIONS.put(alias,tokens.optString("session_id"));if(tokens.has("signal_device_id")&&!tokens.optString("session_id").isEmpty()&&tokens.optString("session_id").equals(tokens.optString("signal_device_session")))SIGNAL_DEVICES.put(alias,new String[]{tokens.optString("user_id"),tokens.optString("session_id"),tokens.optString("signal_device_id")});else SIGNAL_DEVICES.remove(alias);}
     public boolean hasPendingRecovery(){return preferences.getBoolean("recovery_pending",false);}
     /** A nonblocking identity snapshot for UI/cache callbacks; authentication still uses load under guard. */
     public boolean isUser(String user){return user!=null && !user.isEmpty() && user.equals(USERS.get(alias));}
@@ -51,8 +54,7 @@ public final class TokenVault {
         Cipher cipher=Cipher.getInstance("AES/GCM/NoPadding");cipher.init(Cipher.ENCRYPT_MODE,key());
         byte[] encrypted=cipher.doFinal(stored.toString().getBytes(StandardCharsets.UTF_8));
         if(!preferences.edit().putString("iv",Base64.encodeToString(cipher.getIV(),Base64.NO_WRAP)).putString("tokens",Base64.encodeToString(encrypted,Base64.NO_WRAP)).putBoolean("recovery_pending",stored.optBoolean("recovery_pending")).commit())throw new IllegalStateException("session_storage_failed");
-        USERS.put(alias,stored.optString("user_id"));
-        SESSIONS.put(alias,stored.optString("session_id"));
+        remember(stored);
     }}
     public void acknowledgeRecovery(String user,String session,String code) throws Exception {synchronized(guard()){
         JSONObject tokens=load();
@@ -60,10 +62,10 @@ public final class TokenVault {
         tokens.remove("recovery_code");tokens.put("recovery_pending",false);save(tokens);
     }}
     public JSONObject load() throws Exception { synchronized(guard()) {
-        String value=preferences.getString("tokens",null);if(value==null){USERS.remove(alias);SESSIONS.remove(alias);return new JSONObject();}
+        String value=preferences.getString("tokens",null);if(value==null){USERS.remove(alias);SESSIONS.remove(alias);SIGNAL_DEVICES.remove(alias);return new JSONObject();}
         Cipher cipher=Cipher.getInstance("AES/GCM/NoPadding");cipher.init(Cipher.DECRYPT_MODE,key(),new GCMParameterSpec(128,Base64.decode(preferences.getString("iv",""),Base64.NO_WRAP)));
-        JSONObject tokens=new JSONObject(new String(cipher.doFinal(Base64.decode(value,Base64.NO_WRAP)),StandardCharsets.UTF_8));USERS.put(alias,tokens.optString("user_id"));SESSIONS.put(alias,tokens.optString("session_id"));return tokens;
+        JSONObject tokens=new JSONObject(new String(cipher.doFinal(Base64.decode(value,Base64.NO_WRAP)),StandardCharsets.UTF_8));remember(tokens);return tokens;
     }}
     public String device(){synchronized(guard()){String id=preferences.getString("device",null);if(id==null){id=UUID.randomUUID().toString();if(!preferences.edit().putString("device",id).commit())throw new IllegalStateException("device_storage_failed");}return id;}}
-    public void clear(){synchronized(guard()){if(!preferences.edit().remove("tokens").remove("iv").remove("recovery_pending").commit())throw new IllegalStateException("session_storage_failed");USERS.remove(alias);SESSIONS.remove(alias);}}
+    public void clear(){synchronized(guard()){if(!preferences.edit().remove("tokens").remove("iv").remove("recovery_pending").commit())throw new IllegalStateException("session_storage_failed");USERS.remove(alias);SESSIONS.remove(alias);SIGNAL_DEVICES.remove(alias);}}
 }

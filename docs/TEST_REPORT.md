@@ -1,5 +1,14 @@
 # Verification report
 
+Same-APK security regression Signal61980 exits0 with221 checks (160 network/JNI,44 disconnected cold,17 online restart) at09:56:11 on1fc2ff226ad2e505684a6ce8817d7412ef24a65b9965bdd8aee2bf89583c5946. Normal27784 build exits0 in2m37s; all3 signature/package/API/ABI/manifest verifiers pass. ARM64/ARMv7/universal Debug APKs122477389/108190695/158702806 bytes; hashes b34491d5e3377fb9b5e9d84def0c7f0a46b8aebc6304898989299bddfae31ba3 /5599056447e8a755e7e0a67780089a45448c6227114308f823be5262d5dbf360 /c7583dbe417bb426808c3a1edcc1a0b0ef8cff6f730b4f94059effac6c0bf1b1. Android8.0 minimum, normal public TLS/no local CA; physical installation unproved. No source behavior changes after builds; full original goal remains active.
+
+
+## Actual native private Send and cold offline recovery — 2026-10-10
+
+PrivateComposer47333 exits0; report `artifacts/android-two-client-private-composer.json` records315 checks at09:53:27 on APK1fc2ff226ad2e505684a6ce8817d7412ef24a65b9965bdd8aee2bf89583c5946. Native Send while transport is disconnected now persists a genuinely unprepared/null-conversation encrypted intent, preserves drafts on forced storage failure, rejects duplicate clicks, and retains new typing. Cold offline reopening displays one original pending bubble without native database plaintext. Cold reconnect lets the app worker create/find the original private pair and confirm one encrypted message; original tuple/date, exact repeated delivery/ciphertext/ratchet and receiving/cold caches pass in both directions. Initial-history failure no longer indefinitely postpones pending-message notifications.
+
+Scope is two emulators/native control invocation. Physical phones/touch, staged Cancel/Retry and all account/device/unknown-ACK crash races, background/media/release/external backup are not proved. Unsupported schedule/silent tooltip remains a known UI issue. Existing older reports describe their historical APKs; do not attribute them to this build.
+
 ## Resolve a staged private intent without a conversation ID — 2026-10-10
 
 Same-APK -PrivateAutomatic79417 exit0 passes318 checks at08:50:05 (registration30 + rounds288). Actual existing prepared-path offline worker failures, automatic cold recovery in both directions and native received/draft/history/send-gate regression pass. This does not exercise null-conversation staging from the actual composer. All current builds/suites/cleanup are terminal.

@@ -42,6 +42,7 @@ import xyz.eclipseofficial.vyrn.domain.Models;
 public final class VyrnBridge {
     private static final ExecutorService IO=Executors.newFixedThreadPool(2);
     private static final ExecutorService SEND=Executors.newSingleThreadExecutor();
+    private static final ExecutorService LOCAL=Executors.newSingleThreadExecutor();
     private static final Map<Integer,VyrnBridge> INSTANCES=new HashMap<>();
     private static final java.util.Set<Integer> LOGGING_OUT=ConcurrentHashMap.newKeySet();
     public static boolean isLoggingOut(int account){return LOGGING_OUT.contains(account);}
@@ -249,6 +250,15 @@ public final class VyrnBridge {
     public static void execute(Runnable task){IO.execute(task);}
     /** The encrypted native outbox is not connected yet; reject before native plaintext persistence. */
     public static boolean privateSendUnavailable(long dialog){return org.telegram.messenger.DialogObject.isUserDialog(dialog)||org.telegram.messenger.DialogObject.isEncryptedDialog(dialog);}
+    public static boolean privateTextReady(int account,long dialog){
+        if(dialog<=0||dialog>Integer.MAX_VALUE||isLoggingOut(account))return false;VyrnBridge bridge=forAccount(account);long owner=UserConfig.getInstance(account).getClientUserId();String session=bridge.repository.vault.cachedSession();if(owner==0||dialog==owner||session==null)return false;
+        try{String user=bridge.ids.remote("user",owner),peer=bridge.ids.remote("user",dialog);bridge.requirePrivateOrigin(user,session,owner,peer,dialog);return bridge.repository.vault.cachedSignalDevice(user,session)!=null;}catch(Exception unavailable){return false;}
+    }
+    public static String privateTextSession(int account){return forAccount(account).repository.vault.cachedSession();}
+    public static boolean privateTextOrigin(int account,long dialog,long owner,String session,JSONObject binding){
+        if(UserConfig.getInstance(account).getClientUserId()!=owner||session==null||!session.equals(privateTextSession(account))||!privateTextReady(account,dialog))return false;
+        if(binding==null)return true;VyrnBridge bridge=forAccount(account);try{return binding.getLong("dialog_id")==dialog&&binding.getString("peer").equals(bridge.ids.remote("user",dialog))&&binding.getString("device").equals(bridge.repository.vault.cachedSignalDevice(bridge.ids.remote("user",owner),session));}catch(Exception changed){return false;}
+    }
     public static String privateSendUnavailableLabel(){return org.telegram.messenger.LocaleController.isRTL?"ارسال خصوصی هنوز آماده نیست؛ پیش‌نویس حفظ می‌شود.":"Private sending is not ready; your draft is kept.";}
     public static boolean blockPrivateSend(long dialog){
         if(!privateSendUnavailable(dialog))return false;
@@ -275,7 +285,15 @@ public final class VyrnBridge {
         String message=(fa?"دستگاه شما: ":"Your device: ")+device.getString("local_device")+"\n"+(fa?"دستگاه مخاطب: ":"Peer device: ")+target+"\n\n"+code+"\n\n"+(fa?"این کد را از راه دیگری با همان دستگاه مخاطب مقایسه کنید. تأیید فقط برای این دو دستگاه است.":"Compare this code with the same peer device using another channel. Verification applies only to this device pair.");
         fragment.showDialog(new org.telegram.ui.ActionBar.AlertDialog.Builder(fragment.getParentActivity()).setTitle(privateVerificationLabel()).setMessage(message).setNegativeButton(org.telegram.messenger.LocaleController.getString(org.telegram.messenger.R.string.Cancel),null).setPositiveButton(verified?(fa?"لغو تأیید":"Remove verification"):(fa?"کدها یکسان‌اند":"Codes match"),(selected,which)->execute(()->{try{requirePrivateOrigin(user,session,owner,peer,dialog);try(SignalDeviceKeys keys=SignalDeviceKeys.openLocal(ApplicationLoader.applicationContext,repository)){new SignalMessages(keys).verifyCurrentPeer(peer,target,number,!verified);}AndroidUtilities.runOnUIThread(()->{try{requirePrivateOrigin(user,session,owner,peer,dialog);if(fragment.isLastFragment()&&fragment.getParentActivity()!=null)android.widget.Toast.makeText(fragment.getParentActivity(),fa?"وضعیت تأیید ذخیره شد.":"Verification status saved.",android.widget.Toast.LENGTH_SHORT).show();}catch(Exception changed){}});}catch(Exception unavailable){AndroidUtilities.runOnUIThread(()->privateVerificationFailure(fragment,null,user,session,owner,dialog,peer));}})).create());
     }
-    /** Adapter integration; composer remains gated until retry/cancellation/trust flows are ready. */
+    /** Called on UI: reserve once, then persist locally without waiting for HTTP or the send executor. */
+    public java.util.concurrent.CompletableFuture<JSONObject> stagePrivateText(long dialog,String text){
+        try{
+            if(android.os.Looper.myLooper()!=android.os.Looper.getMainLooper()||!privateTextReady(account,dialog))throw new SecurityException("private_origin_unavailable");long owner=UserConfig.getInstance(account).getClientUserId();String session=repository.vault.cachedSession(),user=ids.remote("user",owner),peer=ids.remote("user",dialog),device=repository.vault.cachedSignalDevice(user,session);requirePrivateOrigin(user,session,owner,peer,dialog);
+            Map<Long,java.util.Set<Integer>> fences=MessagesStorage.getInstance(account).getVyrnDeletedMessages();if(fences==null)throw new SecurityException("private_native_storage_unavailable");java.util.Set<Integer> deleted=fences.get(dialog);int reserved;do{reserved=UserConfig.getInstance(account).getNewMessageId();}while(deleted!=null&&deleted.contains(reserved));UserConfig.getInstance(account).saveConfig(false);final int local=reserved;long random=SendMessagesHelper.getInstance(account).getNextRandomId();String client=UUID.nameUUIDFromBytes((user+":"+random).getBytes(StandardCharsets.UTF_8)).toString();
+            return java.util.concurrent.CompletableFuture.supplyAsync(()->{try{requirePrivateOrigin(user,session,owner,peer,dialog);if(isLoggingOut(account))throw new SecurityException("private_origin_changed");JSONObject binding=SignalMessages.stageNative(ApplicationLoader.applicationContext,repository,user,session,device,peer,client,text,account,local,dialog,random);privateLocalDevice=new String[]{user,session,device};recoverPrivateSends();return binding;}catch(Exception unavailable){throw new java.util.concurrent.CompletionException(unavailable);}},LOCAL);
+        }catch(Exception unavailable){java.util.concurrent.CompletableFuture<JSONObject> failed=new java.util.concurrent.CompletableFuture<>();failed.completeExceptionally(unavailable);return failed;}
+    }
+    /** Existing programmatic prepared path retained for reconciliation and fault fixtures. */
     public java.util.concurrent.CompletableFuture<JSONObject> preparePrivateText(long dialog,String conversation,String text){
         final long owner=UserConfig.getInstance(account).getClientUserId();final String session=repository.vault.cachedSession();
         return java.util.concurrent.CompletableFuture.supplyAsync(()->{try{

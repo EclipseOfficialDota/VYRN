@@ -1,5 +1,11 @@
 # Decisions
 
+## Persist native private text before network work — 2026-10-10
+
+Connect the plain private text composer to the existing encrypted outgoing journal. Reserve its original negative ID/random on UI, persist on a dedicated local disk executor using only existing acknowledged device/store and cached original authenticated session, then trigger the existing serial recovery worker. The local commit must not wait behind the HTTP-held vault lock. The worker remains the only native pending/confirmed writer and resolves null conversation through the unique authenticated private-pair endpoint before encryption. No second outbox, plaintext native row or implicit key publication is introduced.
+
+Per-composer busy state prevents duplicate clicks. Clear/save the original draft only after durable persistence and while original account/owner/session/dialog/peer/device and unchanged plain text context still match; preserve new typing and all failed drafts. Unsupported rich/edit/reply/schedule/paid/effect/forward paths stay gated. A matching first private history error releases loading/progress and asynchronously flushes postponed notifications without synthesizing empty history or advancing pagination. Two-client PrivateComposer315 passes on1fc2ff... APK; wider draft mutation/crash and device/account lifecycle acceptance remains required. Remove the legacy schedule/silent tooltip during the remaining unsupported-control audit.
+
 ## Resolve an offline private intent without a conversation ID — 2026-10-10
 
 Allow a null conversation only in an unprepared encrypted native intent. Preserve the original peer/client/native tuple/date and reject caller attempts to rebind that intent. On reconnect, use the existing backend's unique private-pair creation endpoint, validate the exact owner/peer membership, then persist the returned conversation in the original encrypted record before claiming keys. A failed local write leaves resolution repeatable through server pair idempotency. Cancellation resolves the same pair and fences the original client without encrypting or posting a message. Known-conversation preparation remains validated. This is a prerequisite for first-dialog composer sends; it does not enable the native composer or establish physical-phone acceptance.
