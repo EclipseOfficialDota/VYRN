@@ -549,7 +549,12 @@ Edit 'TMessagesProj/src/main/java/org/telegram/ui/ChatActivity.java' {
  $t=(& git -c "safe.directory=$($upstream.Replace('\','/'))" -C $upstream show "${pin}:TMessagesProj/src/main/java/org/telegram/ui/ChatActivity.java") -join "`n"
  $marker='            int updateMask = (Integer) args[0];'
  if(!$t.Contains($marker)){throw 'Pinned private text UI refresh marker missing'}
- $t.Replace($marker,$marker+"`n            if ((updateMask & xyz.eclipseofficial.vyrn.compat.VyrnBridge.PRIVATE_TEXT_UPDATE) != 0) updateVisibleRows();")
+ $t=$t.Replace($marker,$marker+"`n            if ((updateMask & xyz.eclipseofficial.vyrn.compat.VyrnBridge.PRIVATE_TEXT_UPDATE) != 0) updateVisibleRows();")
+ $click='            public void onItemClick(final int id) {'
+ $menu='            headerItem.setContentDescription(LocaleController.getString(R.string.AccDescrMoreOptions));'
+ if(!$t.Contains($click) -or !$t.Contains($menu)){throw 'Pinned private verification menu markers missing'}
+ $t=$t.Replace($click,$click+"`n                if (id == 91001) { xyz.eclipseofficial.vyrn.compat.VyrnBridge.showPrivateVerification(ChatActivity.this, dialog_id); return; }")
+ $t.Replace($menu,$menu+"`n            if (dialog_id > 0 && dialog_id != getUserConfig().getClientUserId() && chatMode == MODE_DEFAULT) headerItem.lazilyAddSubItem(91001, R.drawable.msg_secret, xyz.eclipseofficial.vyrn.compat.VyrnBridge.privateVerificationLabel());")
 }
 Edit 'TMessagesProj/src/main/java/org/telegram/messenger/NotificationCenter.java' {
  param($t)

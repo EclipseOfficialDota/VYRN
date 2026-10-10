@@ -19,6 +19,14 @@ public final class SignalMessages {
     private final SignalStore store;
     public SignalMessages(SignalDeviceKeys keys){this.keys=keys;store=keys.store;}
 
+    /** Current signed ready-device list, pinned atomically without consuming prekeys or creating sessions. */
+    public JSONArray verificationDevices(String peer) throws Exception {synchronized(keys.guard()){
+        keys.requireSession();List<SignalDeviceKeys.ClaimedKey> devices=keys.verificationDevices(peer);return store.transaction(()->{JSONArray result=new JSONArray();for(SignalDeviceKeys.ClaimedKey device:devices){bind(device);store.saveIdentity(device.address,device.bundle.getIdentityKey());result.put(verification(peer,device.device));}return result;});
+    }}
+    public void verifyCurrentPeer(String peer,String device,String expected,boolean verified) throws Exception {synchronized(keys.guard()){
+        keys.requireSession();JSONArray current=verificationDevices(peer);boolean active=false;for(int i=0;i<current.length();i++)active|=device.equals(current.getJSONObject(i).getString("device"));if(!active)throw new SecurityException("signal_device_not_ready");verifyPeer(peer,device,expected,verified);
+    }}
+
     /** Offline device-pair safety number from pinned identities; unknown devices are never marked verified. */
     public JSONObject verification(String peer,String device) throws Exception {synchronized(keys.guard()){
         keys.requireSession();id(peer);id(device);if(peer.equals(keys.user))throw new SecurityException("signal_private_peer_required");JSONObject pinned=load("private-peer",peer+"_"+device);if(pinned==null)throw new SecurityException("signal_sender_key_required");

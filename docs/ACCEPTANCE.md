@@ -1,5 +1,11 @@
 # Acceptance matrix
 
+Final2026-10-10 verification UI evidence:336 checks pass07:45:20 onddb8de43553dca74fc845dc7c3c15c54178dfd6adce45cebd05214bdf3f601a6. Both final native number-dialog screenshots are inspected; same number/full UUIDs/instructions/actions fit. Initial capture-timing issue below is superseded. This does not close complete device-change/revocation, private composer, physical-phone or whole-app acceptance.
+
+Same final APK Signal190 component checks pass07:48:27, including signed-roster identity/address/version rollback rejection and exact-number confirmation under current-roster validation. This strengthens the bounded verification component evidence; the full original scope remains active.
+
+The first2026-10-10 run passed336 two-emulator checks at07:39:54 onb4d5e7e8f71bff2396c99d48ef919466aa145d03ad25ee9d81183d5e3b07ba2b. Actual menu/list/number/confirm/remove actions and encrypted local status are established; signed-roster conflict/version-rollback guards have Signal190 component coverage on742634b... . Final UI evidence above supersedes that initial run and its capture-timing issue. Private composer Send, complete key/device-change lifecycle, physical phones, background/media/release/external backup and the full original goal remain unfinished.
+
 Updated 2026-10-09. A route existing or a build compiling does **not** establish end-to-end completion.
 
 Device-pair verification primitive: Signal188 checks pass23:42:35 on APKb957f2506c2a56a8d34f2d3d1abf052445f9a42fd88a871c4246d548e383c68d. Actual libsignal/JNI creates symmetric60-digit numbers; explicit local verification survives encrypted store reopen, unknown devices do not inherit status, and changed pinned address/identity cannot be repaired with a stale number. Fresh signed target snapshots now check pinned identities before claims. This is component evidence; the native verification screen, current-roster/device-change acceptance and composer remain unfinished. Full original objective remains active.

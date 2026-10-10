@@ -1,5 +1,15 @@
 # Local Android integration
 
+## Native device verification scenario — 2026-10-10
+
+Final harness rebuild passes38s. Final -PrivateVerification suite passes336 checks at07:45:20 on APKddb8de43553dca74fc845dc7c3c15c54178dfd6adce45cebd05214bdf3f601a6. Both final PNGs were pulled and visually inspected: same number on both devices, full UUIDs wrap, comparison instruction and both actions fit without clipping. The earlier first-frame raster issue is superseded by the final captures; the remaining lifecycle/physical/composer limits below still apply.
+
+Same final APK `scripts/test-signal.ps1 -Network` passes190 checks at07:48:27 (156 network/JNI,28 disconnected cold,6 online restart). An initial registrationHTTP400 was resolved for the retry by renewing only the local test invitation with the existing admin/MFA maintenance helper; credentials stayed in ignored dev.env.
+
+Run `scripts/test-two-client-messaging.ps1 -PrivateVerification` with the dedicated two-emulator local TLS setup. This independent scenario includes native registration/key publication, programmatic private-message preparation/delivery, actual chat More options → exact device UUID/status row →60-digit number → Codes match → Remove verification on both clients. Check the visible native dialog contains the current number/full peer-device UUID and inspect encrypted status after each actual click. Existing private-history/draft/offline and disabled-composer checks remain in the scenario. Complete device changes, revoked-device confirmation, navigation/session changes while dialogs are open, physical phones and composer Send remain outside its proof.
+
+The initial partial-label click failed because the shared accessibility helper matches exact text; the fixture now includes device UUID/status. Its first screenshot preceded dialog composition; the final harness waits for main-thread/accessibility idle before capture. The PNG stays in the test app's private files and is transferred as binary to ignored `.local` for inspection. The first completed336-check run at07:39:54 usedb4d5e7e8f71bff2396c99d48ef919466aa145d03ad25ee9d81183d5e3b07ba2b; the final evidence above usesddb8de... .
+
 ## Device-pair verification component checks — 2026-10-09
 
 Signal network suite188 checks passes23:42:35 onb957f2506c2a56a8d34f2d3d1abf052445f9a42fd88a871c4246d548e383c68d. The codec fixture establishes real peer sessions before comparing both device-pair60-digit numbers. Confirm only a currently displayed number; check local-only/idempotent status and encrypted store reopen, then reject a wrong number/unknown device. Temporarily alter each original pinned address/identity and remove only the fixture's session; fresh target-roster processing must reject it without creating a session and an old number must not repair it. Finally restore exact original encrypted record/session and check explicit unverify leaves identities/ratchet/number unchanged. These are component checks; the native verification screen and active-roster/device-change acceptance remain unfinished.

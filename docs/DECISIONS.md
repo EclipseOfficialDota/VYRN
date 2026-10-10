@@ -1,5 +1,11 @@
 # Decisions
 
+## Native private-device verification — 2026-10-10
+
+Expose device verification through the existing private ChatActivity More options menu and native AlertDialog controls. Fetch and validate the complete ready-device signed roster under the original user/session, pin identities atomically in the existing encrypted store, and display the exact device-pair60-digit number with full device UUIDs. Listing devices does not claim prekeys or establish ratchet sessions. Unknown devices begin unverified; lower key versions and changed pinned identities/addresses are rejected.
+
+Codes match and Remove verification refresh the signed active-device roster before applying status to the exact displayed number. Navigation, dismissed loading dialogs and changed account/session must not surface another user's result. Comparison is an explicit user action through an external trusted channel; the app does not infer human identity from a key signature. These controls do not enable the composer or establish complete key-change/revocation/physical-device acceptance.
+
 ## Device-pair safety numbers and earlier pin checks — 2026-10-09
 
 Use the installed official libsignal NumericFingerprintGenerator(5200), version2, with canonical(user UUID,device UUID) identifiers and the two pinned identity keys. Verification is local to this exact device pair, not account-wide or evidence of a currently active remote device. Explicit confirmation/unverification must match the current60-digit number, address ownership and libsignal identity pin under the original session/store transaction; never replace identity material to make a number match. Unknown devices start unverified. Store status only in the existing encrypted private-peer record.

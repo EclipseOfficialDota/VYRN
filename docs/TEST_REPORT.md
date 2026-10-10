@@ -1,5 +1,15 @@
 # Verification report
 
+## Native device verification — 2026-10-10
+
+Final38s harness build and -PrivateVerification suite pass336 checks at07:45:20 onddb8de43553dca74fc845dc7c3c15c54178dfd6adce45cebd05214bdf3f601a6, exec79880 exit0. Final screenshots from both clients were visually inspected: identical60-digit number, full local/peer UUIDs, comparison instruction and Cancel/Codes match fit. This supersedes the initial raster timing issue; native UI confirmation/removal is verified within this two-emulator fixture. Same final APK Signal190 regression passes07:48:27, exec34173 exit0:156 network/JNI +28 disconnected cold +6 online restart. First attempt failed during fixture registration withHTTP400 before crypto tests; localhost test invitation was renewed through the existing admin/MFA helper, then the full retry passed. No production invite or database quota reset.
+
+The first two-emulator -PrivateVerification run passed336 checks (registration30 + rounds306) at07:39:54 on APKb4d5e7e8f71bff2396c99d48ef919466aa145d03ad25ee9d81183d5e3b07ba2b. Real More options/device-list/number/confirmation/removal controls are used; the current60-digit number/full peer-device UUID are checked in the native dialog, encrypted verification status becomes true then false. Private sending is still programmatic and composer gated. Final evidence and visual inspection above supersede this initial run. This establishes bounded UI interaction, not all key/device-change or physical-phone acceptance.
+
+Signal190 checks passed00:00:15 on742634b316c189d10c73b1a401df74aa1524e6e81b62a271f6178415a4a59f3e:156 network/JNI +28 disconnected cold +6 online restart. Signed peer-roster validation rejects pinned-address/identity conflicts and key-version rollback; old-number confirmation cannot repair those bindings. Production sources are unchanged by the later exact-row/screenshot test fixes.
+
+Normal phone build log reports success2m23s and all3 APK verifiers pass. ARM64/ARMv7/universal122461009/108174315/158686426 bytes; SHA2561190051c946824f51d3add726f5f4bef31fd58329912e73d2346444d4356388b /49e93995e18814e5a4c31562434a729edc0898f10972c3eb791ed508344b2823 /b875319b2a96cbab44b6aba2facbc8766477f51f81d593e7b027337eecf6ddec. Debug signatures/public TLS/no local CA; installation on physical phones not tested. Production/signing/TURN/external-backup gates unchanged.
+
 ## Device-pair safety number and identity pin checks — 2026-10-09
 
 Sameb957f... APK -PrivateAutomatic regression318 (registration30 + rounds288) passes23:46:57, exec52163 exit0. Actual offline app-worker failure, cold reconnect automatic original-journal delivery, one native/server message, receiving/private draft/offline/send-gate assertions pass in both directions. Preparation/scheduling remain programmatic; this does not prove native composer or verification-screen interaction.
