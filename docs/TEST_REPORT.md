@@ -1,5 +1,15 @@
 # Verification report
 
+## Fresh private offline staging — 2026-10-10
+
+Same final a915ae... APK -PrivateAutomatic suite passes318 checks at08:30:55 (registration30 + rounds288), exec46982 exit0. Actual offline app-worker failures and automatic cold-reconnect confirmation on both clients preserve prepared ciphertext/ratchet and one server/native identity. Native received/pending/draft/offline/send-gate regressions remain passing. This proves compatibility of the existing prepared path; the new staging API still needs native compose/adapter integration. All current builds/suites/cleanup are terminal.
+
+Local build1m36s and Signal209 checks pass08:23:51 on APKa915ae78da9b5f74c2e4b1da7da7800f03dab261d58d4571bb2c9020a5ec26b4, exec43130 exit0 (160 network/JNI,37 disconnected cold,12 online restart). New staging occurs after real transport disconnection; text is stored only through the existing encrypted journal, with no body/own cache or ratchet advancement. Store/process reopen preserves the original tuple/date. Reconnect validates membership, encrypts and delivers once; repeated send retains ciphertext/ratchet. Cancelled unprepared work is fenced/scrubbed and cannot reappear; an incorrect conversation peer fails before claims/encryption.
+
+Normal phone build2m9s and all3 APK verifiers pass. ARM64/ARMv7/universal122461009/108174315/158686426 bytes; SHA256f53e815f78d8ba2b84462e05140b1fc0cc2cdf6d89d4d16c32fbacc8be5cd73a /f47a3f4c53d2b88d663108a1401139762c30fa1c0df537870f9649797f4563af /fddb98be5fc53c273c8358007182b3cb51c9b14c65dd712f2351a9d7c6ad322f. Debug/public TLS/no local CA; physical installation unproved. Native composer and adapter staging are not connected by this component checkpoint; first-dialog creation, complete device/identity lifecycle, physical/background/media/release/external backup remain in scope.
+
+Read-only normal universal DEX check confirms the new signal_private_conversation_changed preparation guard is present. APK verification does not establish device installation or release acceptance.
+
 ## Native verification Cancel acceptance — 2026-10-10
 
 Final -PrivateVerification14273 exit0 passes408 checks at08:06:19 on APKd1aba0443853fc06183bfa8b01faa643f949ccaa33555f17efc0499b6bb7ee48 (registration30 + rounds378). Actual Cancel closes the number dialog and leaves its exact number/unverified status unchanged; each of four chat views then reopens, confirms and removes verification through real native controls. Existing receiving/draft/offline/disabled-composer assertions still pass. Shared accessibility helper now polls a fresh exact-label actionable node until one accepted click; bounded await caches its last successful result so actions are not dispatched twice. First run failed at a transient opening menu sheet; the final full retry establishes the helper fix.

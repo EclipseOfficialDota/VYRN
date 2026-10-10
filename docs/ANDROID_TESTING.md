@@ -1,5 +1,13 @@
 # Local Android integration
 
+## Fresh offline private intent — 2026-10-10
+
+Signal network suite209 checks pass08:23:51 on APKa915ae78da9b5f74c2e4b1da7da7800f03dab261d58d4571bb2c9020a5ec26b4:160 network/JNI,37 disconnected cold,12 online restart. Unlike the earlier prepared-before-disconnect fixture, the disconnected phase creates a genuinely new encrypted local intent with null body and unchanged ratchet. Assert exact repeat/native-row/text/peer conflicts, metadata-only recovery, encrypted store reopen and original cancellation before any preparation/directory call. Online cold phase retains the tuple/date/schedule, prepares through current membership/device validation, delivers/decrypts, retries without ciphertext/ratchet changes, fences cancelled work and rejects a mismatched peer/conversation without encryption.
+
+Same-APK -PrivateAutomatic regression passes318 checks at08:30:55 (registration30 + rounds288), exec46982 exit0. Both actual offline app workers and cold-reconnect native deliveries preserve original prepared ciphertext/server/native identity, receiving/draft/history/send-gate checks. This is regression coverage for the existing prepared path; it does not exercise new staged text through the native composer/adapter.
+
+New staging coverage is through the existing journal/send API, not actual composer Send or the new adapter/worker staging entry. A known private conversation and previously acknowledged original device exist before going offline. First-dialog creation, actual cold native staged-bubble reconciliation and the full original scope remain unfinished.
+
 ## Verification dialog Cancel and revoked devices — 2026-10-10
 
 Signal194 checks pass07:54:07 on APK85525888c876685f1a30d5a50d6835282704706e47083f588e2baa57fd0a12b8 (160 network/JNI,28 disconnected cold,6 online restart). Reuse the fixture's second recipient device after normal encrypted delivery: preserve its displayed number/session bytes, log out that real backend session, fetch the signed current roster and require only the surviving device. Reject confirmation of the old number with signal_device_not_ready; stored unverified status/number/ratchet remain unchanged and encrypted reopen retains rejection. This is a real server/device-key lifecycle component check; stale native dialog confirmation across revocation and physical devices still need acceptance.

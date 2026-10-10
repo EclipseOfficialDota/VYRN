@@ -1,5 +1,11 @@
 # Decisions
 
+## Persist offline intent before private encryption — 2026-10-10
+
+Use the existing encrypted private-outgoing record for both locally staged text and prepared ciphertext. A staged native intent has a null body, original client/local/dialog/random/session tuple and date, and an atomic scheduled flag. It does not query directories, consume prekeys or advance ratchets. Repeated intent/context/native identity must match exactly; reject changed peer/text before later claims.
+
+The existing send worker path prepares an unprepared intent only after checking the current server conversation is private with exactly the original owner/peer, then acquiring the complete signed ready-device targets. Body/own cache/ratchets commit together while retaining native date, schedule and cancellation/retry lease metadata. Once prepared, retries use the same ciphertext. Cancellation before preparation enters the existing server arbitration/fence/cleanup flow, never a second plaintext outbox. The native compose adapter still must persist this intent before any network work and connect actual Send/draft handling; current API expects a known conversation UUID, so first-dialog creation remains a separate acceptance item.
+
 ## Native private-device verification — 2026-10-10
 
 Expose device verification through the existing private ChatActivity More options menu and native AlertDialog controls. Fetch and validate the complete ready-device signed roster under the original user/session, pin identities atomically in the existing encrypted store, and display the exact device-pair60-digit number with full device UUIDs. Listing devices does not claim prekeys or establish ratchet sessions. Unknown devices begin unverified; lower key versions and changed pinned identities/addresses are rejected.
