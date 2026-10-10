@@ -1,7 +1,7 @@
 # Native foreground send/edit/delete and optional offline queue/recovery. Physical-phone acceptance remains separate.
-param([switch]$Edit,[switch]$Delete,[switch]$Offline,[switch]$ManualRetry,[switch]$LostAck,[switch]$MutationRestart,[switch]$PrivateKeys,[switch]$PrivateChat,[switch]$PrivateDelete,[switch]$PrivateAutomatic,[switch]$PrivateManualRetry,[switch]$PrivateCancel,[switch]$PrivateVerification,[switch]$PrivateComposer,[switch]$PrivateComposerCancel,[switch]$PrivateComposerRetry,[switch]$PrivateComposerLostAck)
-if(@($PrivateComposerCancel,$PrivateComposerRetry,$PrivateComposerLostAck | Where-Object {$_}).Count -gt 1){throw 'Staged cancellation, retry and lost acknowledgement must run separately'}
-if($PrivateComposerCancel -or $PrivateComposerRetry -or $PrivateComposerLostAck){$PrivateComposer=$true}
+param([switch]$Edit,[switch]$Delete,[switch]$Offline,[switch]$ManualRetry,[switch]$LostAck,[switch]$MutationRestart,[switch]$PrivateKeys,[switch]$PrivateChat,[switch]$PrivateDelete,[switch]$PrivateAutomatic,[switch]$PrivateManualRetry,[switch]$PrivateCancel,[switch]$PrivateVerification,[switch]$PrivateComposer,[switch]$PrivateComposerCancel,[switch]$PrivateComposerRetry,[switch]$PrivateComposerLostAck,[switch]$PrivateComposerDelete)
+if(@($PrivateComposerCancel,$PrivateComposerRetry,$PrivateComposerLostAck,$PrivateComposerDelete | Where-Object {$_}).Count -gt 1){throw 'Staged cancellation, retry and lost acknowledgement must run separately'}
+if($PrivateComposerCancel -or $PrivateComposerRetry -or $PrivateComposerLostAck -or $PrivateComposerDelete){$PrivateComposer=$true}
 if($PrivateComposer){$PrivateChat=$true;if($Edit -or $Delete -or $Offline -or $ManualRetry -or $LostAck -or $MutationRestart -or $PrivateDelete -or $PrivateAutomatic -or $PrivateManualRetry -or $PrivateCancel -or $PrivateVerification){throw 'Private composer must run as its own scenario'}}
 if($PrivateVerification){$PrivateChat=$true;if($PrivateCancel -or $PrivateManualRetry -or $PrivateAutomatic -or $LostAck -or $PrivateDelete -or $MutationRestart){throw 'Private verification must run as its own scenario'}}
 if($PrivateCancel){$PrivateChat=$true;if($PrivateManualRetry -or $PrivateAutomatic -or $LostAck -or $PrivateDelete -or $MutationRestart){throw 'Private cancellation must run as its own scenario'}}
@@ -153,6 +153,7 @@ try{
     }
     if($PrivateChat){
         if($PrivateComposer){
+            $delivered=@()
             foreach($direction in @(@{sender='emulator-5560';recipient='emulator-5562'},@{sender='emulator-5562';recipient='emulator-5560'})){
                 $text='چت خصوصی بومی '+[guid]::NewGuid().ToString('N')
                 $fixture=@{peer_user=$users[$direction.recipient];peer_address=$publications[$direction.recipient].key_address;text=$text;first_pair=($direction.sender -eq 'emulator-5560');preserve_new_draft=($direction.sender -eq 'emulator-5560')}
@@ -183,6 +184,7 @@ try{
                 $recoverPhase=if($PrivateComposerRetry){'chat-private-composer-retry'}else{'chat-private-composer-recover'}
                 $rounds+=Finish-Phase (Start-Phase $direction.sender $recoverPhase) -TimeoutMs 120000;$sent=Read-State $direction.sender
                 if(!$sent.conversation -or !$sent.message_id -or !$sent.ordinal){throw 'Private composer automatic confirmation evidence missing'}
+                $delivered+=@{sender=$direction.sender;recipient=$direction.recipient;text=$text;conversation=$sent.conversation;message_id=$sent.message_id;ordinal=$sent.ordinal;client_id=$pending.client_id}
                 foreach($serial in @('emulator-5560','emulator-5562')){
                     $peer=if($serial -eq 'emulator-5560'){$users['emulator-5562']}else{$users['emulator-5560']}
                     Write-Fixture $serial @{peer_user=$peer;text=$text;conversation=$sent.conversation;message_id=$sent.message_id;ordinal=$sent.ordinal}
@@ -193,6 +195,21 @@ try{
                 }
             }
             $registration=Get-Content (Join-Path $root 'artifacts/android-two-client-registration.json') -Raw | ConvertFrom-Json
+            if($PrivateComposerDelete){
+                $deleted=$delivered[0];$live=$delivered[1]
+                foreach($serial in @($deleted.recipient,$deleted.sender)){
+                    $peer=if($serial -eq 'emulator-5560'){$users['emulator-5562']}else{$users['emulator-5560']}
+                    Write-Fixture $serial @{peer_user=$peer;text=$deleted.text;conversation=$deleted.conversation;message_id=$deleted.message_id;ordinal=$deleted.ordinal;client_id=$deleted.client_id;sender_user=$users[$deleted.sender];live_text=$live.text;live_ordinal=$live.ordinal;native_deleted=$true}
+                    $phase=if($serial -eq $deleted.recipient){'chat-private-native-delete'}else{'chat-private-deleted-view'}
+                    $rounds+=Finish-Phase (Start-Phase $serial $phase) -TimeoutMs 120000
+                    $privateReverseRemoved=$true;$removed=Invoke-TestAdb -Arguments @('-s',$serial,'reverse','--remove','tcp:18443');if($removed.code -ne 0){throw 'Private deletion offline mapping removal failed'}
+                    $rounds+=Finish-Phase (Start-Phase $serial 'chat-private-deleted-offline-view') -TimeoutMs 120000
+                    $restored=Invoke-TestAdb -Arguments @('-s',$serial,'reverse','tcp:18443','tcp:18443');if($restored.code -ne 0){throw 'Private deletion mapping restoration failed'};$privateReverseRemoved=$false
+                }
+                @{date=[DateTimeOffset]::Now.ToString('o');result='passed';apk_sha256=(Get-FileHash (Join-Path $root 'artifacts/VyrnApp-dev-x86_64-debug-local-tls.apk')).Hash.ToLowerInvariant();devices=$registration.devices;rounds=$rounds;physical_devices='not tested';scope='Both native offline Send/cold confirmation/recipient scenarios; recipient uses actual native Delete, cancels confirmation with message preserved, then confirms explicit deletion for both people. Original server tombstone, encrypted cache and sender journal retired, both native durable fences and late object/SQL/dialog replay rejection, both cold offline reopens with known live message retained. Unsupported private edit capability disabled. Physical phones, private encrypted editing, offline deletion failure, multi-select gestures and full lifecycle remain untested.'} | ConvertTo-Json -Depth 9 | Set-Content (Join-Path $root 'artifacts/android-two-client-private-composer-delete.json') -Encoding utf8
+                Write-Output 'PASS: actual native shared private deletion, cancellation, recipient cache cleanup and both cold offline reopens.'
+                return
+            }
             if($PrivateComposerLostAck){
                 @{date=[DateTimeOffset]::Now.ToString('o');result='passed';apk_sha256=(Get-FileHash (Join-Path $root 'artifacts/VyrnApp-dev-x86_64-debug-local-tls.apk')).Hash.ToLowerInvariant();devices=$registration.devices;rounds=$rounds;physical_devices='not tested';scope='Both emulator directions: actual native disconnected Send and cold unprepared intent; original app worker resolves first/existing private pair and encrypts, exact-client successful server response held locally, app force-stopped within ten seconds before twenty-second read timeout; original encrypted journal/native identity and pre-interruption ciphertext/ratchet proof, cold recovery to exact already committed server ID with unchanged ciphertext/ratchet, one server/native message and both recipient cold cache checks. No prepared-message fixture substitution. Physical phones and full device/background/media lifecycle remain untested.'} | ConvertTo-Json -Depth 9 | Set-Content (Join-Path $root 'artifacts/android-two-client-private-composer-lost-ack.json') -Encoding utf8
                 Write-Output 'PASS: actual native staged private send survives lost acknowledgement with exact original server identity on both clients.'

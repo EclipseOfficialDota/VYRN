@@ -38,6 +38,12 @@ public final class IdMap extends SQLiteOpenHelper {
             return c.moveToFirst()?new org.json.JSONObject().put("message",c.getString(0)).put("conversation",c.getString(1)).put("sender",c.getString(2)).put("revision",c.getInt(3)).put("ordinal",ordinal).put("date",c.getInt(4)).put("edited",c.getInt(5)):null;
         }
     }
+    /** Identity metadata remains available for authenticated deletion cleanup, never for display. */
+    public synchronized org.json.JSONObject privateDeletionContext(long ordinal) throws org.json.JSONException {
+        try(Cursor c=getReadableDatabase().rawQuery("SELECT m.uuid,o.conversation FROM message_ids m JOIN observed_messages o ON o.uuid=m.uuid WHERE m.id=? AND o.encrypted=1",new String[]{Long.toString(ordinal)})){
+            return c.moveToFirst()?new org.json.JSONObject().put("message",c.getString(0)).put("conversation",c.getString(1)):null;
+        }
+    }
     public synchronized int editRevision(String sender,String conversation,long localId,String originalText){
         String uuid=remote("message",localId);
         try(Cursor c=getReadableDatabase().rawQuery("SELECT revision,body_hash FROM observed_messages WHERE uuid=? AND sender=? AND conversation=?",new String[]{uuid,sender,conversation})){

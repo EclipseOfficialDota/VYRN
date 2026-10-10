@@ -170,6 +170,70 @@ func TestIntegrationAtomicGroupDeletion(t *testing.T) {
 	f.request("DELETE", "/v1/conversations/"+private+"/messages", owner.Access, map[string]any{"ids": []string{foreign}}, 404)
 }
 
+func TestIntegrationAtomicPrivateDeletion(t *testing.T) {
+	f := setup(t)
+	owner := f.register("private-delete-owner@example.com")
+	peer := f.register("private-delete-peer@example.com")
+	outsider := f.register("private-delete-outsider@example.com")
+	addresses := map[string]string{
+		owner.User:    publishFixtureKeys(f, owner, 91),
+		peer.User:     publishFixtureKeys(f, peer, 92),
+		outsider.User: publishFixtureKeys(f, outsider, 93),
+	}
+	conversation := f.conversation(owner, "private", peer.User)
+	path := "/v1/conversations/" + conversation + "/messages"
+	send := func(actor, recipient account, conversation string) string {
+		payload, _ := json.Marshal(envelopeFixture(actor, addresses[actor.User], map[account]string{recipient: addresses[recipient.User]}))
+		var message struct {
+			ID string `json:"id"`
+		}
+		if json.Unmarshal(f.request("POST", "/v1/conversations/"+conversation+"/messages", actor.Access, messageInput{ClientID: uuid.NewString(), Payload: payload, Encrypted: true}, 201), &message) != nil {
+			t.Fatal("message response")
+		}
+		return message.ID
+	}
+	first, second := send(owner, peer, conversation), send(peer, owner, conversation)
+	foreign := send(owner, outsider, f.conversation(owner, "private", outsider.User))
+	batch := map[string]any{"ids": []string{first, second}}
+	f.request("DELETE", path, outsider.Access, batch, 404)
+	f.request("DELETE", path, peer.Access, map[string]any{"ids": []string{first, foreign}}, 404)
+	for _, id := range []string{first, second, foreign} {
+		var deleted bool
+		if err := f.db.QueryRow(context.Background(), `SELECT deleted_at IS NOT NULL FROM messages WHERE id=$1`, id).Scan(&deleted); err != nil || deleted {
+			t.Fatal("rejected private batch changed a row", err)
+		}
+	}
+	// Either private participant can delete the selected messages for both people.
+	f.request("DELETE", path, peer.Access, batch, 204)
+	for _, id := range []string{first, second} {
+		var deleted bool
+		var revision int
+		var payload string
+		if err := f.db.QueryRow(context.Background(), `SELECT deleted_at IS NOT NULL,revision,payload::text FROM messages WHERE id=$1`, id).Scan(&deleted, &revision, &payload); err != nil || !deleted || revision != 2 || payload != "{}" {
+			t.Fatal("private tombstone mismatch", err)
+		}
+	}
+	var before, after int
+	if err := f.db.QueryRow(context.Background(), `SELECT count(*) FROM events WHERE kind='message.deleted'`).Scan(&before); err != nil {
+		t.Fatal(err)
+	}
+	f.request("DELETE", path, owner.Access, batch, 204)
+	if err := f.db.QueryRow(context.Background(), `SELECT count(*) FROM events WHERE kind='message.deleted'`).Scan(&after); err != nil || after != before || before != 4 {
+		t.Fatal("private retry duplicated or omitted recipient events", err)
+	}
+	third := send(owner, peer, conversation)
+	f.request("DELETE", "/v1/messages/"+third, peer.Access, nil, 204)
+	fourth := send(owner, peer, conversation)
+	if _, err := f.db.Exec(context.Background(), `DELETE FROM members WHERE conversation_id=$1 AND user_id=$2`, conversation, peer.User); err != nil {
+		t.Fatal(err)
+	}
+	f.request("DELETE", path, peer.Access, map[string]any{"ids": []string{fourth}}, 404)
+	var deleted bool
+	if err := f.db.QueryRow(context.Background(), `SELECT deleted_at IS NOT NULL FROM messages WHERE id=$1`, fourth).Scan(&deleted); err != nil || deleted {
+		t.Fatal("removed private member deleted a message", err)
+	}
+}
+
 func TestLiveHistoryFiltersBeforePagination(t *testing.T) {
 	f := setup(t)
 	owner := f.register("live-owner@example.com")

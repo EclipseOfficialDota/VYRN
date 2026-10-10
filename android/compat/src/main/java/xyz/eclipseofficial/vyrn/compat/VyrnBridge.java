@@ -579,17 +579,24 @@ public final class VyrnBridge {
         }catch(Exception error){failure[0]=error;}finally{done.countDown();}});
         if(!done.await(20,TimeUnit.SECONDS))throw new IllegalStateException("deletion_cache_timeout");
         if(failure[0]!=null)throw failure[0];
+        if(dialog>0&&!org.telegram.messenger.DialogObject.isEncryptedDialog(dialog)){
+            try(SignalDeviceKeys keys=SignalDeviceKeys.openLocal(ApplicationLoader.applicationContext,repository)){
+                if(!user.equals(keys.user))throw new SecurityException("account_changed");SignalMessages encrypted=new SignalMessages(keys);String peer=ids.remote("user",dialog);
+                for(int id:selected){JSONObject context=ids.privateDeletionContext(id);if(context!=null)encrypted.acknowledgeDeletion(peer,context.getString("conversation"),context.getString("message"));}
+            }
+        }
     }
     /** Preserve selected native rows until the entire server deletion has been authorized and committed. */
     public static java.util.concurrent.CompletableFuture<Boolean> deleteMessages(int account,long dialog,ArrayList<Integer> messages,boolean forAll,int mode,int topic,boolean unsupported){
         java.util.concurrent.CompletableFuture<Boolean> result=new java.util.concurrent.CompletableFuture<>();
         ArrayList<Integer> selected=messages==null?new ArrayList<>():new ArrayList<>(new java.util.LinkedHashSet<>(messages));long self=UserConfig.getInstance(account).getClientUserId();
         execute(()->{String user=null;Throwable failure=null;try{
-            if(!forAll||mode!=0||topic!=0||unsupported||dialog>=0||self==0||selected.isEmpty()||selected.size()>100||selected.stream().anyMatch(id->id==null||id<=0))throw new UnsupportedOperationException();
+            if(!forAll||mode!=0||topic!=0||unsupported||dialog==0||dialog==self||org.telegram.messenger.DialogObject.isEncryptedDialog(dialog)||self==0||selected.isEmpty()||selected.size()>100||selected.stream().anyMatch(id->id==null||id<=0))throw new UnsupportedOperationException();
             VyrnBridge bridge=forAccount(account);user=bridge.ids.remote("user",self);ArrayList<String> ids=new ArrayList<>();for(int id:selected)ids.add(bridge.ids.remote("message",id));
+            String conversation; synchronized(bridge){if(dialog<0)conversation=bridge.ids.remote("conversation",-dialog);else{TLRPC.TL_inputPeerUser peer=new TLRPC.TL_inputPeerUser();peer.user_id=dialog;conversation=bridge.conversation(peer);}}
             synchronized(bridge.repository.vault.guard()){
                 if(!bridge.repository.vault.isUser(user)||UserConfig.getInstance(account).getClientUserId()!=self)throw new SecurityException("account_changed");
-                bridge.repository.deleteGroupMessages(user,bridge.ids.remote("conversation",-dialog),ids);
+                bridge.repository.deleteConversationMessages(user,conversation,ids);
             }
             bridge.fenceDeleted(user,dialog,selected);
         }catch(Throwable error){failure=error;}

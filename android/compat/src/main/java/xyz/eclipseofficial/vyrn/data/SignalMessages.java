@@ -326,6 +326,11 @@ public final class SignalMessages {
             return new JSONObject().put("text",string(inner,"text")).put("expires_at",head.get("expires_at"));
         });
     }}
+    /** Adapter only: forget cached plaintext after an authenticated shared deletion is confirmed. */
+    public void acknowledgeDeletion(String peer,String conversation,String message) throws Exception {synchronized(keys.guard()){
+        keys.requireSession();id(peer);id(conversation);id(message);if(peer.equals(keys.user))throw new SecurityException("signal_private_peer_required");
+        store.transaction(()->{JSONObject head=load("private-head",message);if(head==null)return null;if(!message.equals(head.getString("message_id"))||!conversation.equals(head.getString("conversation"))||!peer.equals(head.getString("owner"))&&!keys.user.equals(head.getString("owner")))throw new SecurityException("signal_message_context_changed");retire(head);return null;});
+    }}
     /** Call on startup and from the lifecycle worker; cache reads also enforce learned deadlines. */
     // ponytail: decrypt all retained heads; add a deadline index if large-history measurements require it.
     public int pruneExpired() throws Exception {synchronized(keys.guard()){keys.requireSession();return store.transaction(()->{int removed=0;for(String message:store.valueNames("private-head")){JSONObject head=load("private-head",message);if(!head.optBoolean("deleted") && expired(head)){retire(head);removed++;}}return removed;});}}

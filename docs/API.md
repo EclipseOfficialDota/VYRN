@@ -38,7 +38,7 @@ All production endpoints require HTTPS. JSON uses UTF-8. Authentication is `Auth
 | DELETE `/v1/conversations/{id}/members/{user}` | remove member/leave group |
 | GET `/v1/conversations/{id}/messages` | limit 1–100, before message UUID, optional plaintext group search q; live_only=true excludes deleted/expired messages before pagination; default preserves tombstones |
 | POST `/v1/conversations/{id}/messages` | client_id, payload, encrypted, optional media_id/reply_to/forwarded_from |
-| DELETE `/v1/conversations/{id}/messages` | atomic group deletion of1–100 distinct message UUIDs in JSON ids; member deletes own messages, owner/admin may delete other senders; returns204 after commit |
+| DELETE `/v1/conversations/{id}/messages` | atomic group/private deletion of1–100 distinct message UUIDs in JSON ids; group member deletes own messages, owner/admin may delete other senders; either private participant may delete for both; returns204 after commit |
 | GET `/v1/messages/{id}` | current authorized message state, including deletion/expiry tombstones |
 | PATCH `/v1/messages/{id}` | payload, encrypted, expected revision; stale edit returns 409 |
 | DELETE `/v1/messages/{id}` | replace message with a tombstone |
@@ -84,7 +84,7 @@ Actual block/unblock changes emit `block.updated` with `user_id` and `blocked` i
 
 ## Group batch deletion
 
-Group batch deletion accepts `{"ids":["message-uuid", "another-uuid"]}`. Every ID must belong to the authorized group; a missing or cross-group ID returns404 and an unauthorized sender returns403 without changing any selected message. Existing deletion/expiry tombstones are accepted as no-ops after authorization. Successful retries neither increase revisions nor emit duplicate deletion events. The conversation lock serializes membership changes; message locks use UUID order. Payload clearing, media-reference removal, revision increments and recipient events commit together. Android currently supports delete-for-everyone for normal group messages; delete-for-me, private/scheduled/channel deletion and durable offline deletion intent remain unfinished and are rejected before local cache removal.
+Group/private batch deletion accepts `{"ids":["message-uuid", "another-uuid"]}`. Every ID must belong to the authorized conversation; a missing or cross-conversation ID returns404 and an unauthorized sender returns403 without changing any selected message. Existing deletion/expiry tombstones are accepted as no-ops after authorization. Successful retries neither increase revisions nor emit duplicate deletion events. The conversation lock serializes membership changes; message locks use UUID order. Payload clearing, media-reference removal, revision increments and recipient events commit together. Android supports delete-for-everyone for normal group and private messages with explicit confirmation. Private received messages can also be deleted for both participants. Delete-for-me, scheduled/channel deletion and durable offline deletion intent remain unfinished and are rejected before local cache removal. Native private encrypted editing remains inactive pending integration.
 
 ## Administrator API
 

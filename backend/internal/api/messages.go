@@ -281,7 +281,7 @@ func (s *Server) editMessage(w http.ResponseWriter, r *http.Request) {
 		fail(w, 400, "invalid_message")
 		return
 	}
-	s.mutateMessage(w, r, "message.edited", func(tx pgx.Tx, id, conversation, sender, role string, enc bool) bool {
+	s.mutateMessage(w, r, "message.edited", func(tx pgx.Tx, id, conversation, sender, role, kind string, enc bool) bool {
 		if sender != current(r).UserID || enc != in.Encrypted {
 			fail(w, 403, "forbidden")
 			return false
@@ -304,7 +304,7 @@ func (s *Server) editMessage(w http.ResponseWriter, r *http.Request) {
 		return true
 	})
 }
-func (s *Server) deleteGroupMessages(w http.ResponseWriter, r *http.Request) {
+func (s *Server) deleteConversationMessages(w http.ResponseWriter, r *http.Request) {
 	conversation := r.PathValue("id")
 	var in struct {
 		IDs []string `json:"ids"`
@@ -334,8 +334,8 @@ func (s *Server) deleteGroupMessages(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer tx.Rollback(ctx)
-	var locked string
-	err = tx.QueryRow(ctx, `SELECT id::text FROM conversations WHERE id=$1 AND kind='group' FOR UPDATE`, conversation).Scan(&locked)
+	var locked, kind string
+	err = tx.QueryRow(ctx, `SELECT id::text,kind FROM conversations WHERE id=$1 AND kind IN ('group','private') FOR UPDATE`, conversation).Scan(&locked, &kind)
 	if err == pgx.ErrNoRows {
 		fail(w, 404, "not_found")
 		return
@@ -372,7 +372,7 @@ func (s *Server) deleteGroupMessages(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		count++
-		forbidden = forbidden || sender != current(r).UserID && role == "member"
+		forbidden = forbidden || kind != "private" && sender != current(r).UserID && role == "member"
 		if !deleted {
 			live = append(live, id)
 		}
@@ -416,8 +416,8 @@ func (s *Server) deleteGroupMessages(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) deleteMessage(w http.ResponseWriter, r *http.Request) {
-	s.mutateMessage(w, r, "message.deleted", func(tx pgx.Tx, id, conversation, sender, role string, enc bool) bool {
-		if sender != current(r).UserID && role == "member" {
+	s.mutateMessage(w, r, "message.deleted", func(tx pgx.Tx, id, conversation, sender, role, kind string, enc bool) bool {
+		if kind != "private" && sender != current(r).UserID && role == "member" {
 			fail(w, 403, "forbidden")
 			return false
 		}
@@ -429,7 +429,7 @@ func (s *Server) deleteMessage(w http.ResponseWriter, r *http.Request) {
 		return true
 	})
 }
-func (s *Server) mutateMessage(w http.ResponseWriter, r *http.Request, event string, fn func(pgx.Tx, string, string, string, string, bool) bool) {
+func (s *Server) mutateMessage(w http.ResponseWriter, r *http.Request, event string, fn func(pgx.Tx, string, string, string, string, string, bool) bool) {
 	id := r.PathValue("id")
 	if !validID(id) {
 		fail(w, 404, "not_found")
@@ -442,9 +442,9 @@ func (s *Server) mutateMessage(w http.ResponseWriter, r *http.Request, event str
 		return
 	}
 	defer tx.Rollback(ctx)
-	var conversation, sender, role string
+	var conversation, sender, role, kind string
 	var enc bool
-	err = tx.QueryRow(ctx, `SELECT msg.conversation_id::text,msg.sender_id::text,m.role,msg.encrypted FROM messages msg JOIN members m ON m.conversation_id=msg.conversation_id WHERE msg.id=$1 AND m.user_id=$2 AND msg.deleted_at IS NULL AND (msg.expires_at IS NULL OR msg.expires_at>now()) FOR UPDATE OF msg`, id, current(r).UserID).Scan(&conversation, &sender, &role, &enc)
+	err = tx.QueryRow(ctx, `SELECT msg.conversation_id::text,msg.sender_id::text,m.role,c.kind,msg.encrypted FROM messages msg JOIN conversations c ON c.id=msg.conversation_id JOIN members m ON m.conversation_id=msg.conversation_id WHERE msg.id=$1 AND m.user_id=$2 AND msg.deleted_at IS NULL AND (msg.expires_at IS NULL OR msg.expires_at>now()) FOR UPDATE OF msg`, id, current(r).UserID).Scan(&conversation, &sender, &role, &kind, &enc)
 	if err == pgx.ErrNoRows {
 		fail(w, 404, "not_found")
 		return
@@ -453,7 +453,7 @@ func (s *Server) mutateMessage(w http.ResponseWriter, r *http.Request, event str
 		s.internal(w)
 		return
 	}
-	if !fn(tx, id, conversation, sender, role, enc) {
+	if !fn(tx, id, conversation, sender, role, kind, enc) {
 		return
 	}
 	users, err := recipients(ctx, tx, conversation)
@@ -480,7 +480,7 @@ func (s *Server) reaction(w http.ResponseWriter, r *http.Request, add bool) {
 		fail(w, 400, "invalid_reaction")
 		return
 	}
-	s.mutateMessage(w, r, "message.reaction", func(tx pgx.Tx, id, conversation, sender, role string, enc bool) bool {
+	s.mutateMessage(w, r, "message.reaction", func(tx pgx.Tx, id, conversation, sender, role, kind string, enc bool) bool {
 		sql := `DELETE FROM reactions WHERE message_id=$1 AND user_id=$2 AND emoji=$3`
 		if add {
 			var count int
@@ -508,7 +508,7 @@ func (s *Server) receipt(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &in) {
 		return
 	}
-	s.mutateMessage(w, r, "message.receipt", func(tx pgx.Tx, id, conversation, sender, role string, enc bool) bool {
+	s.mutateMessage(w, r, "message.receipt", func(tx pgx.Tx, id, conversation, sender, role, kind string, enc bool) bool {
 		_, err := tx.Exec(r.Context(), `INSERT INTO receipts(message_id,user_id,read_at) VALUES($1,$2,CASE WHEN $3 THEN now() END) ON CONFLICT(message_id,user_id) DO UPDATE SET read_at=COALESCE(receipts.read_at,excluded.read_at)`, id, current(r).UserID, in.Read)
 		if err != nil {
 			s.internal(w)
@@ -524,7 +524,7 @@ func (s *Server) pin(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &in) {
 		return
 	}
-	s.mutateMessage(w, r, "message.pinned", func(tx pgx.Tx, id, conversation, sender, role string, enc bool) bool {
+	s.mutateMessage(w, r, "message.pinned", func(tx pgx.Tx, id, conversation, sender, role, kind string, enc bool) bool {
 		if role == "member" && !enc {
 			fail(w, 403, "forbidden")
 			return false

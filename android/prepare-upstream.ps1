@@ -509,10 +509,12 @@ Edit 'TMessagesProj/src/main/java/org/telegram/ui/Components/AlertsCreator.java'
  $options='} else if (!scheduled && !isSavedMessages && !ChatObject.isChannel(chat) && encryptedChat == null) {'
  if(!$section.Contains($state) -or !$section.Contains($options)){throw 'Pinned group deletion options missing'}
  $section=$section.Replace($state,@'
+        final boolean vyrnSharedPrivateDelete = user != null && user.id != UserConfig.getInstance(currentAccount).getClientUserId() && encryptedChat == null && !scheduled && !isSavedMessages && mode == 0 && topicId == 0;
         final boolean vyrnSharedGroupDelete = chat != null && !ChatObject.isChannel(chat) && encryptedChat == null && !scheduled && !isSavedMessages && mode == 0 && topicId == 0;
-        final boolean[] deleteForAll = new boolean[]{vyrnSharedGroupDelete};
-'@).Replace($options,'} else if (!vyrnSharedGroupDelete && !scheduled && !isSavedMessages && !ChatObject.isChannel(chat) && encryptedChat == null) {')
+        final boolean[] deleteForAll = new boolean[]{vyrnSharedGroupDelete || vyrnSharedPrivateDelete};
+'@).Replace($options,'} else if (!vyrnSharedGroupDelete && !vyrnSharedPrivateDelete && !scheduled && !isSavedMessages && !ChatObject.isChannel(chat) && encryptedChat == null) {')
  $section+="        if (vyrnSharedGroupDelete) builder.setMessage(LocaleController.isRTL ? `"این پیام‌ها برای همهٔ اعضای گروه حذف می‌شوند. ادامه می‌دهید؟`" : `"These messages will be deleted for everyone in the group. Continue?`");`n`n"
+ $section+="        if (vyrnSharedPrivateDelete) builder.setMessage(LocaleController.isRTL ? `"این پیام‌ها برای هر دو نفر حذف می‌شوند. ادامه می‌دهید؟`" : `"These messages will be deleted for both people. Continue?`");`n`n"
  $t.Substring(0,$start)+$section+$t.Substring($end)
 }
 Edit 'TMessagesProj/src/main/java/org/telegram/ui/Components/ChatActivityEnterView.java' {
@@ -609,6 +611,10 @@ Edit 'TMessagesProj/src/main/java/org/telegram/messenger/MessageObject.java' {
  $t=(& git -c "safe.directory=$($upstream.Replace('\','/'))" -C $upstream show "${pin}:TMessagesProj/src/main/java/org/telegram/messenger/MessageObject.java") -join "`n"
  $marker="        if (checkMediaExists) {`n            checkMediaExistance();`n        }"
  if(!$t.Contains($marker)){throw 'Pinned private text constructor marker missing'}
+ foreach($edit in @('public static boolean canEditMessage(int currentAccount, TLRPC.Message message, TLRPC.Chat chat, boolean scheduled) {','public static boolean canEditMessageAnytime(int currentAccount, TLRPC.Message message, TLRPC.Chat chat) {')){
+  if(!$t.Contains($edit)){throw 'Pinned private edit capability marker missing'}
+  $t=$t.Replace($edit,$edit+"`n        if (message != null && message.peer_id != null && message.peer_id.user_id != 0) return false; // Private encrypted edits are not connected yet.")
+ }
  $t.Replace($marker,$marker+"`n        xyz.eclipseofficial.vyrn.compat.VyrnBridge.hydratePrivateText(this);")
 }
 Edit 'TMessagesProj/src/main/java/org/telegram/messenger/MediaDataController.java' {

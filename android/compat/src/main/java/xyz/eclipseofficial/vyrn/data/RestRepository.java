@@ -66,7 +66,7 @@ public final class RestRepository implements Models.Repository {
     public void inviteMember(String id,String user) throws Exception {request("POST","/v1/conversations/"+id+"/members",new JSONObject().put("user_id",user).put("preserve_existing",true),true);}
     public void setMemberRole(String id,String user,boolean admin) throws Exception {request("POST","/v1/conversations/"+id+"/members",new JSONObject().put("user_id",user).put("role",admin?"admin":"member"),true);}
     public void removeMember(String id,String user) throws Exception {request("DELETE","/v1/conversations/"+id+"/members/"+user,null,true);}
-    public void deleteGroupMessages(String user,String group,List<String> messages) throws Exception {requestForUser(user,"DELETE","/v1/conversations/"+group+"/messages",new JSONObject().put("ids",new JSONArray(messages)),true);}
+    public void deleteConversationMessages(String user,String group,List<String> messages) throws Exception {requestForUser(user,"DELETE","/v1/conversations/"+group+"/messages",new JSONObject().put("ids",new JSONArray(messages)),true);}
     public void setHistoryTTL(String id,int seconds) throws Exception {request("PATCH","/v1/conversations/"+id,new JSONObject().put("disappearing_seconds",seconds),true);}
     public Models.ConversationDetails conversationDetails(String id) throws Exception {
         JSONObject data=(JSONObject)request("GET","/v1/conversations/"+id,null,true);JSONArray raw=data.getJSONArray("members");List<Models.Member> members=new ArrayList<>();
