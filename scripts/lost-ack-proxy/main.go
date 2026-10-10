@@ -26,8 +26,9 @@ type heldSend struct {
 	Started int64  `json:"request_started_ms"`
 }
 type requestStart struct{}
+type requestClient struct{}
 
-func faultProxy(target *url.URL, transport http.RoundTripper, group, operation, messageID, state string) http.Handler {
+func faultProxy(target *url.URL, transport http.RoundTripper, group, operation, messageID, clientID, state string) http.Handler {
 	proxy := httputil.NewSingleHostReverseProxy(target)
 	proxy.Transport = transport
 	var held atomic.Bool
@@ -39,7 +40,11 @@ func faultProxy(target *url.URL, transport http.RoundTripper, group, operation, 
 		method = http.MethodDelete
 	}
 	proxy.ModifyResponse = func(response *http.Response) error {
-		if response.Request.Method != method || response.Request.URL.Path != path || response.StatusCode < 200 || response.StatusCode >= 300 || !held.CompareAndSwap(false, true) {
+		matches := response.Request.URL.Path == path
+		if clientID != "" {
+			matches = response.Request.Context().Value(requestClient{}) == clientID
+		}
+		if response.Request.Method != method || !matches || response.StatusCode < 200 || response.StatusCode >= 300 || !held.CompareAndSwap(false, true) {
 			return nil
 		}
 		body, err := io.ReadAll(io.LimitReader(response.Body, 1<<20))
@@ -67,6 +72,21 @@ func faultProxy(target *url.URL, transport http.RoundTripper, group, operation, 
 		}
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if clientID != "" && r.Method == http.MethodPost && regexp.MustCompile(`^/v1/conversations/[0-9a-f-]+/messages$`).MatchString(r.URL.Path) {
+			body, err := io.ReadAll(io.LimitReader(r.Body, (1<<20)+1))
+			if err != nil || len(body) > 1<<20 {
+				http.Error(w, "local fault request exceeds limit", http.StatusBadRequest)
+				return
+			}
+			r.Body.Close()
+			r.Body = io.NopCloser(bytes.NewReader(body))
+			var message struct {
+				Client string `json:"client_id"`
+			}
+			if json.Unmarshal(body, &message) == nil {
+				r = r.WithContext(context.WithValue(r.Context(), requestClient{}, message.Client))
+			}
+		}
 		proxy.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), requestStart{}, time.Now().UnixMilli())))
 	})
 }
@@ -75,9 +95,11 @@ func main() {
 	group := flag.String("group", "", "disposable local group UUID")
 	operation := flag.String("operation", "send", "send, edit or delete")
 	message := flag.String("message", "", "existing mutation message UUID")
+	client := flag.String("client", "", "exact staged send client UUID when conversation is unresolved")
 	state := flag.String("state", "", "private local evidence file")
 	flag.Parse()
-	if !regexp.MustCompile(`^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$`).MatchString(*group) || *state == "" {
+	validID := regexp.MustCompile(`^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$`)
+	if (!validID.MatchString(*group) && !(*group == "" && *operation == "send" && validID.MatchString(*client))) || (*client != "" && (*operation != "send" || !validID.MatchString(*client))) || *state == "" {
 		log.Fatal("local group and evidence path required")
 	}
 	if *operation != "send" && *operation != "edit" && *operation != "delete" {
@@ -97,6 +119,6 @@ func main() {
 	transport := http.DefaultTransport.(*http.Transport).Clone()
 	transport.TLSClientConfig = &tls.Config{RootCAs: roots, MinVersion: tls.VersionTLS12}
 	target, _ := url.Parse("https://localhost:18443")
-	server := &http.Server{Addr: "127.0.0.1:18444", Handler: faultProxy(target, transport, *group, *operation, *message, *state), ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 90 * time.Second}
+	server := &http.Server{Addr: "127.0.0.1:18444", Handler: faultProxy(target, transport, *group, *operation, *message, *client, *state), ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 90 * time.Second}
 	log.Fatal(server.ListenAndServeTLS(".local/devtls-server.crt", ".local/devtls-server.key"))
 }

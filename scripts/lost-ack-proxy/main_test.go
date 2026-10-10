@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -15,11 +16,13 @@ import (
 func TestCommittedResponseHeldOnce(t *testing.T) {
 	for _, scenario := range []struct {
 		operation, method, path, body, message, expected string
+		client                                           string
 		status                                           int
 	}{
-		{"send", http.MethodPost, "/v1/conversations/group/messages", `{"id":"committed-message"}`, "", "committed-message", http.StatusCreated},
-		{"edit", http.MethodPatch, "/v1/messages/message", "", "message", "message", http.StatusNoContent},
-		{"delete", http.MethodDelete, "/v1/conversations/group/messages", "", "message", "message", http.StatusNoContent},
+		{"send", http.MethodPost, "/v1/conversations/group/messages", `{"id":"committed-message"}`, "", "committed-message", "", http.StatusCreated},
+		{"send", http.MethodPost, "/v1/conversations/00000000-0000-0000-0000-000000000001/messages", `{"id":"staged-message"}`, "", "staged-message", "original-client", http.StatusCreated},
+		{"edit", http.MethodPatch, "/v1/messages/message", "", "message", "message", "", http.StatusNoContent},
+		{"delete", http.MethodDelete, "/v1/conversations/group/messages", "", "message", "message", "", http.StatusNoContent},
 	} {
 		t.Run(scenario.operation, func(t *testing.T) {
 			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -29,7 +32,7 @@ func TestCommittedResponseHeldOnce(t *testing.T) {
 			defer upstream.Close()
 			target, _ := url.Parse(upstream.URL)
 			state := filepath.Join(t.TempDir(), "held.json")
-			proxy := faultProxy(target, http.DefaultTransport, "group", scenario.operation, scenario.message, state)
+			proxy := faultProxy(target, http.DefaultTransport, "group", scenario.operation, scenario.message, scenario.client, state)
 			other := httptest.NewRecorder()
 			proxy.ServeHTTP(other, httptest.NewRequest(http.MethodPost, "/v1/conversations/other/messages", nil))
 			if other.Code != scenario.status {
@@ -38,9 +41,19 @@ func TestCommittedResponseHeldOnce(t *testing.T) {
 			if _, err := os.Stat(state); !os.IsNotExist(err) {
 				t.Fatal("unrelated send armed the fault")
 			}
+			if scenario.client != "" {
+				other := httptest.NewRecorder()
+				proxy.ServeHTTP(other, httptest.NewRequest(http.MethodPost, scenario.path, strings.NewReader(`{"client_id":"another-client"}`)))
+				if other.Code != scenario.status {
+					t.Fatal("unrelated client response changed")
+				}
+				if _, err := os.Stat(state); !os.IsNotExist(err) {
+					t.Fatal("unrelated client armed the fault")
+				}
+			}
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
-			request := httptest.NewRequest(scenario.method, scenario.path, nil).WithContext(ctx)
+			request := httptest.NewRequest(scenario.method, scenario.path, strings.NewReader(`{"client_id":"`+scenario.client+`"}`)).WithContext(ctx)
 			recorder := httptest.NewRecorder()
 			done := make(chan struct{})
 			go func() { proxy.ServeHTTP(recorder, request); close(done) }()

@@ -1,7 +1,7 @@
 # Native foreground send/edit/delete and optional offline queue/recovery. Physical-phone acceptance remains separate.
-param([switch]$Edit,[switch]$Delete,[switch]$Offline,[switch]$ManualRetry,[switch]$LostAck,[switch]$MutationRestart,[switch]$PrivateKeys,[switch]$PrivateChat,[switch]$PrivateDelete,[switch]$PrivateAutomatic,[switch]$PrivateManualRetry,[switch]$PrivateCancel,[switch]$PrivateVerification,[switch]$PrivateComposer,[switch]$PrivateComposerCancel,[switch]$PrivateComposerRetry)
-if($PrivateComposerCancel -and $PrivateComposerRetry){throw 'Staged cancellation and retry must run separately'}
-if($PrivateComposerCancel -or $PrivateComposerRetry){$PrivateComposer=$true}
+param([switch]$Edit,[switch]$Delete,[switch]$Offline,[switch]$ManualRetry,[switch]$LostAck,[switch]$MutationRestart,[switch]$PrivateKeys,[switch]$PrivateChat,[switch]$PrivateDelete,[switch]$PrivateAutomatic,[switch]$PrivateManualRetry,[switch]$PrivateCancel,[switch]$PrivateVerification,[switch]$PrivateComposer,[switch]$PrivateComposerCancel,[switch]$PrivateComposerRetry,[switch]$PrivateComposerLostAck)
+if(@($PrivateComposerCancel,$PrivateComposerRetry,$PrivateComposerLostAck | Where-Object {$_}).Count -gt 1){throw 'Staged cancellation, retry and lost acknowledgement must run separately'}
+if($PrivateComposerCancel -or $PrivateComposerRetry -or $PrivateComposerLostAck){$PrivateComposer=$true}
 if($PrivateComposer){$PrivateChat=$true;if($Edit -or $Delete -or $Offline -or $ManualRetry -or $LostAck -or $MutationRestart -or $PrivateDelete -or $PrivateAutomatic -or $PrivateManualRetry -or $PrivateCancel -or $PrivateVerification){throw 'Private composer must run as its own scenario'}}
 if($PrivateVerification){$PrivateChat=$true;if($PrivateCancel -or $PrivateManualRetry -or $PrivateAutomatic -or $LostAck -or $PrivateDelete -or $MutationRestart){throw 'Private verification must run as its own scenario'}}
 if($PrivateCancel){$PrivateChat=$true;if($PrivateManualRetry -or $PrivateAutomatic -or $LostAck -or $PrivateDelete -or $MutationRestart){throw 'Private cancellation must run as its own scenario'}}
@@ -19,7 +19,7 @@ if(($readiness | ConvertFrom-Json).status -ne 'ready'){throw 'Local VYRN backend
 $adb=Join-Path $root '.tools/android-sdk/platform-tools/adb.exe'
 $package='xyz.eclipseofficial.vyrn.dev'
 . (Join-Path $PSScriptRoot 'android-test-tools.ps1')
-if($LostAck){& go build -o (Join-Path $root '.local/lost-ack-proxy.exe') (Join-Path $PSScriptRoot 'lost-ack-proxy/main.go');if($LASTEXITCODE){throw 'Local lost-ack proxy build failed'}}
+if($LostAck -or $PrivateComposerLostAck){& go build -o (Join-Path $root '.local/lost-ack-proxy.exe') (Join-Path $PSScriptRoot 'lost-ack-proxy/main.go');if($LASTEXITCODE){throw 'Local lost-ack proxy build failed'}}
 & (Join-Path $PSScriptRoot 'test-two-client-registration.ps1')
 $rounds=@()
 function Write-Fixture([string]$Serial,[hashtable]$Fixture){
@@ -95,19 +95,19 @@ function Begin-OfflineSend([string]$Phase){
     if($ack.code -ne 0){throw 'Offline acknowledgement transfer failed'}
     return $run
 }
-function Interrupt-HeldRequest([string]$Phase,[string]$Group,[string]$Operation='send',[string]$Message=''){
+function Interrupt-HeldRequest([string]$Phase,[string]$Group,[string]$Operation='send',[string]$Message='',[string]$Serial='emulator-5562',[string]$Client=''){
     $faultState=Join-Path $root ('.local/lost-ack-'+[guid]::NewGuid().ToString('N')+'.json')
-    $arguments=@('-group',$Group,'-operation',$Operation,'-state',('"'+$faultState+'"'));if($Message){$arguments+=@('-message',$Message)}
+    $arguments=@('-operation',$Operation,'-state',('"'+$faultState+'"'));if($Group){$arguments+=@('-group',$Group)};if($Client){$arguments+=@('-client',$Client)};if($Message){$arguments+=@('-message',$Message)}
     $script:faultProxy=Start-Process -FilePath (Join-Path $root '.local/lost-ack-proxy.exe') -ArgumentList $arguments -WorkingDirectory $root -WindowStyle Hidden -RedirectStandardInput (Join-Path $root '.local/devtls-native-input.txt') -RedirectStandardOutput (Join-Path $root '.local/lost-ack-proxy.log') -RedirectStandardError (Join-Path $root '.local/lost-ack-proxy-error.log') -PassThru
     $deadline=[DateTimeOffset]::UtcNow.AddSeconds(15);$ready=$false
     while(!$faultProxy.HasExited -and [DateTimeOffset]::UtcNow -lt $deadline){$socket=[Net.Sockets.TcpClient]::new();try{$connect=$socket.ConnectAsync('127.0.0.1',18444);if($connect.Wait(200) -and $socket.Connected){$ready=$true;break}}catch{}finally{$socket.Dispose()};Start-Sleep -Milliseconds 100}
     if(!$ready){throw 'Lost-ack proxy not ready'}
     if(!(Get-NetTCPConnection -State Listen -LocalPort 18444 | Where-Object {$_.OwningProcess -eq $faultProxy.Id -and $_.LocalAddress -eq '127.0.0.1'})){throw 'Lost-ack listener ownership mismatch'}
-    $mapped=Invoke-TestAdb -Arguments @('-s','emulator-5562','reverse','tcp:18443','tcp:18444');if($mapped.code -ne 0){throw 'Lost-ack device mapping failed'};$script:faultReverse=$true
-    $script:networkRun=Start-Phase 'emulator-5562' $Phase
+    $mapped=Invoke-TestAdb -Arguments @('-s',$Serial,'reverse','tcp:18443','tcp:18444');if($mapped.code -ne 0){throw 'Lost-ack device mapping failed'};$script:faultReverse=$true;$script:faultSerial=$Serial
+    $script:networkRun=Start-Phase $Serial $Phase
     $deadline=[DateTimeOffset]::UtcNow.AddSeconds(60);$held=$null;$pending=$null
     while(!$networkRun.process.HasExited -and [DateTimeOffset]::UtcNow -lt $deadline){
-        $pending=Read-State 'emulator-5562'
+        $pending=Read-State $Serial
         if(Test-Path -LiteralPath $faultState){try{$held=[IO.File]::ReadAllText($faultState) | ConvertFrom-Json}catch{}}
         if($held.server_id -and $pending.pending -and $pending.interrupted_checks){break}
         Start-Sleep -Milliseconds 100
@@ -117,13 +117,13 @@ function Interrupt-HeldRequest([string]$Phase,[string]$Group,[string]$Operation=
     if($Operation -ne 'send' -and ($held.server_id -ne $Message -or $pending.message_id -ne $Message)){throw 'Mutation response identity mismatch'}
     $interruptMs=[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()-$held.request_started_ms
     if($held.request_started_ms -le 0 -or $interruptMs -lt 0 -or $interruptMs -gt 10000){throw 'Interruption missed the in-flight deadline before the 20s read timeout'}
-    $stopped=Invoke-TestAdb -Arguments @('-s','emulator-5562','shell','am','force-stop',$package);if($stopped.code -ne 0){throw 'In-flight app interruption failed'}
+    $stopped=Invoke-TestAdb -Arguments @('-s',$Serial,'shell','am','force-stop',$package);if($stopped.code -ne 0){throw 'In-flight app interruption failed'}
     $interruptMs=[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()-$held.request_started_ms;if($interruptMs -gt 10000){throw 'Force-stop completed after the in-flight deadline'}
     if(!$networkRun.process.WaitForExit(10000)){$networkRun.process.Kill();throw 'Interrupted instrumentation did not terminate'}
     $recordPhase=if($Operation -eq 'send'){$Phase}else{$Phase+'-interrupted'}
-    [IO.File]::WriteAllText((Join-Path $root ".local/$recordPhase-emulator-5562.log"),$networkRun.stdout.GetAwaiter().GetResult()+$networkRun.stderr.GetAwaiter().GetResult())
-    $round=@{serial='emulator-5562';phase=$recordPhase;operation=$Operation;checks=@($pending.interrupted_checks)+@('server_success_response_held_before_ack','app_force_stopped_before_response');interruption_ms=$interruptMs;result='interrupted_as_requested'}
-    $mapped=Invoke-TestAdb -Arguments @('-s','emulator-5562','reverse','tcp:18443','tcp:18443');if($mapped.code -ne 0){throw 'Normal test mapping restore failed'};$script:faultReverse=$false
+    [IO.File]::WriteAllText((Join-Path $root ".local/$recordPhase-$Serial.log"),$networkRun.stdout.GetAwaiter().GetResult()+$networkRun.stderr.GetAwaiter().GetResult())
+    $round=@{serial=$Serial;phase=$recordPhase;operation=$Operation;checks=@($pending.interrupted_checks)+@('server_success_response_held_before_ack','app_force_stopped_before_response');interruption_ms=$interruptMs;result='interrupted_as_requested'}
+    $mapped=Invoke-TestAdb -Arguments @('-s',$Serial,'reverse','tcp:18443','tcp:18443');if($mapped.code -ne 0){throw 'Normal test mapping restore failed'};$script:faultReverse=$false
     Stop-Process -Id $faultProxy.Id;if(!$faultProxy.WaitForExit(10000)){throw 'Owned fault proxy did not stop'}
     return @{round=$round;pending=$pending;held=$held}
 }
@@ -157,14 +157,14 @@ try{
                 $text='چت خصوصی بومی '+[guid]::NewGuid().ToString('N')
                 $fixture=@{peer_user=$users[$direction.recipient];peer_address=$publications[$direction.recipient].key_address;text=$text;first_pair=($direction.sender -eq 'emulator-5560');preserve_new_draft=($direction.sender -eq 'emulator-5560')}
                 $fixture.staged_cancel=[bool]$PrivateComposerCancel
-                $fixture.staged_retry=[bool]$PrivateComposerRetry
+                $fixture.staged_retry=[bool]$PrivateComposerRetry;$fixture.owner_user=$users[$direction.sender]
                 Write-Fixture $direction.sender $fixture;$rounds+=Finish-Phase (Start-Phase $direction.sender 'chat-private-composer-ready')
                 $privateReverseRemoved=$true
                 $removed=Invoke-TestAdb -Arguments @('-s',$direction.sender,'reverse','--remove','tcp:18443');if($removed.code -ne 0){throw 'Private composer offline mapping removal failed'}
                 $offlineTimeout=if($PrivateComposerRetry){300000}else{120000}
                 $rounds+=Finish-Phase (Start-Phase $direction.sender 'chat-private-composer-offline') -TimeoutMs $offlineTimeout;$pending=Read-State $direction.sender
                 if(!$pending.client_id -or $pending.local_id -ge 0 -or !$pending.random_id -or !$pending.date -or $pending.conversation){throw 'Original offline composer identity missing or already resolved'}
-                $fixture.client_id=$pending.client_id;$fixture.local_id=$pending.local_id;$fixture.random_id=$pending.random_id;$fixture.date=$pending.date
+                $fixture.client_id=$pending.client_id;$fixture.local_id=$pending.local_id;$fixture.random_id=$pending.random_id;$fixture.date=$pending.date;$fixture.original_device=$pending.device
                 Write-Fixture $direction.sender $fixture
                 $rounds+=Finish-Phase (Start-Phase $direction.sender 'chat-private-composer-reopen') -TimeoutMs 120000;Capture-PrivateChat $direction.sender 'chat-private-composer-reopen'
                 $restored=Invoke-TestAdb -Arguments @('-s',$direction.sender,'reverse','tcp:18443','tcp:18443');if($restored.code -ne 0){throw 'Private composer mapping restoration failed'};$privateReverseRemoved=$false
@@ -172,6 +172,13 @@ try{
                     $rounds+=Finish-Phase (Start-Phase $direction.sender 'chat-private-cancel-recover') -TimeoutMs 120000
                     $rounds+=Finish-Phase (Start-Phase $direction.sender 'chat-private-cancel-recover') -TimeoutMs 120000
                     continue
+                }
+                if($PrivateComposerLostAck){
+                    $interrupted=Interrupt-HeldRequest -Phase 'chat-private-composer-held' -Group '' -Serial $direction.sender -Client $fixture.client_id
+                    $rounds+=$interrupted.round
+                    if($interrupted.pending.client_id -ne $fixture.client_id -or !$interrupted.pending.conversation -or !$interrupted.pending.ciphertext_sha256 -or !$interrupted.pending.ratchet_sha256){throw 'Staged original held send proof missing'}
+                    $fixture.server_id=$interrupted.held.server_id;$fixture.conversation=$interrupted.pending.conversation;$fixture.ciphertext_sha256=$interrupted.pending.ciphertext_sha256;$fixture.ratchet_sha256=$interrupted.pending.ratchet_sha256
+                    Write-Fixture $direction.sender $fixture
                 }
                 $recoverPhase=if($PrivateComposerRetry){'chat-private-composer-retry'}else{'chat-private-composer-recover'}
                 $rounds+=Finish-Phase (Start-Phase $direction.sender $recoverPhase) -TimeoutMs 120000;$sent=Read-State $direction.sender
@@ -186,6 +193,11 @@ try{
                 }
             }
             $registration=Get-Content (Join-Path $root 'artifacts/android-two-client-registration.json') -Raw | ConvertFrom-Json
+            if($PrivateComposerLostAck){
+                @{date=[DateTimeOffset]::Now.ToString('o');result='passed';apk_sha256=(Get-FileHash (Join-Path $root 'artifacts/VyrnApp-dev-x86_64-debug-local-tls.apk')).Hash.ToLowerInvariant();devices=$registration.devices;rounds=$rounds;physical_devices='not tested';scope='Both emulator directions: actual native disconnected Send and cold unprepared intent; original app worker resolves first/existing private pair and encrypts, exact-client successful server response held locally, app force-stopped within ten seconds before twenty-second read timeout; original encrypted journal/native identity and pre-interruption ciphertext/ratchet proof, cold recovery to exact already committed server ID with unchanged ciphertext/ratchet, one server/native message and both recipient cold cache checks. No prepared-message fixture substitution. Physical phones and full device/background/media lifecycle remain untested.'} | ConvertTo-Json -Depth 9 | Set-Content (Join-Path $root 'artifacts/android-two-client-private-composer-lost-ack.json') -Encoding utf8
+                Write-Output 'PASS: actual native staged private send survives lost acknowledgement with exact original server identity on both clients.'
+                return
+            }
             if($PrivateComposerRetry){
                 @{date=[DateTimeOffset]::Now.ToString('o');result='passed';apk_sha256=(Get-FileHash (Join-Path $root 'artifacts/VyrnApp-dev-x86_64-debug-local-tls.apk')).Hash.ToLowerInvariant();devices=$registration.devices;rounds=$rounds;physical_devices='not tested';scope='Both emulator directions: actual native offline Send, original unprepared encrypted intent with null conversation/body, eight real worker failures with unchanged ratchet, failed native bubble and cold offline restart; online cold failed state retained until actual Retry menu control, original identity uniquely confirmed by app worker with cleared failure, both recipients and cold offline cache. No test injection of retry exhaustion or prepared-message substitution. Physical phones and full messaging lifecycle remain untested.'} | ConvertTo-Json -Depth 9 | Set-Content (Join-Path $root 'artifacts/android-two-client-private-composer-retry.json') -Encoding utf8
                 Write-Output 'PASS: native staged private Send exhausts real offline retries, then actual Retry confirms once on both emulator clients.'
@@ -369,7 +381,7 @@ try{
     }
     }finally{
         if($privateReverseRemoved){foreach($serial in @('emulator-5560','emulator-5562')){$restored=Invoke-TestAdb -Arguments @('-s',$serial,'reverse','tcp:18443','tcp:18443');if($restored.code -ne 0){throw 'Private test mapping cleanup failed'}}}
-        try{if($faultReverse){$restore=Invoke-TestAdb -Arguments @('-s','emulator-5562','reverse','tcp:18443','tcp:18443');if($restore.code -ne 0){throw 'Lost-ack mapping cleanup failed'}}}
+        try{if($faultReverse){$restore=Invoke-TestAdb -Arguments @('-s',$faultSerial,'reverse','tcp:18443','tcp:18443');if($restore.code -ne 0){throw 'Lost-ack mapping cleanup failed'}}}
         finally{try{if($faultProxy -and !$faultProxy.HasExited){Stop-Process -Id $faultProxy.Id;$null=$faultProxy.WaitForExit(10000)}}finally{Restore-TestProxy}}
     }
 }
