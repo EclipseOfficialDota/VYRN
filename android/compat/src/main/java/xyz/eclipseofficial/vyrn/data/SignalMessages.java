@@ -202,27 +202,55 @@ public final class SignalMessages {
             if(store.loadValue("private-send-fence",client)!=null)throw new SecurityException("signal_message_deleted");
             JSONObject prior=load("private-outgoing",client);
             if(prior!=null){requireIntent(prior,peer,conversation,text);if(nativeIdentity!=null){if(prior.has("native_ui")&&!nativeIdentity.toString().equals(prior.getJSONArray("native_ui").toString()))throw new SecurityException("signal_native_identity_changed");prior.put("native_ui",nativeIdentity);if(!prior.has("native_date"))prior.put("native_date",(int)(System.currentTimeMillis()/1000));}if(!prior.isNull("body")){if(nativeIdentity!=null)save("private-outgoing",client,prior);return prior.getString("body");}if(prior.optBoolean("native_cancel_requested"))throw new SecurityException("signal_cancel_requested");}
-            JSONObject local=keys.acknowledged();JSONObject sender=sender(local);TreeMap<String,SignalDeviceKeys.ClaimedKey> ordered=new TreeMap<>();Set<String> owners=new HashSet<>();boolean hasPeer=false;
-            if(targets==null || targets.isEmpty() || targets.size()>5)throw new IllegalArgumentException("invalid_signal_targets");
-            for(SignalDeviceKeys.ClaimedKey target:targets){id(target.user);id(target.device);id(target.address.getName());if(!target.user.equals(peer) && !target.user.equals(keys.user) || target.user.equals(keys.user) && target.device.equals(keys.device) || ordered.put(target.address.getName(),target)!=null || !owners.add(target.user+"_"+target.device))throw new SecurityException("invalid_signal_targets");hasPeer|=target.user.equals(peer);}
-            if(!hasPeer)throw new SecurityException("signal_recipient_missing");
-            JSONObject devices=new JSONObject();JSONArray manifest=new JSONArray();
-            for(SignalDeviceKeys.ClaimedKey target:ordered.values())manifest.put(new JSONArray().put(target.user).put(target.device).put(target.address.getName()).put(target.version));
-            String routing=hash(new JSONArray().put(senderTuple(sender)).put(manifest).toString());
-            JSONObject own=inner(peer,conversation,client,1,text,sender,routing);
-            for(SignalDeviceKeys.ClaimedKey target:ordered.values()){
-                bind(target);
-                if(!store.containsSession(target.address))new SessionBuilder(store,target.address,new SignalProtocolAddress(local.getString("signal_address_id"),1)).process(target.bundle);
-                JSONObject plaintext=new JSONObject(own.toString()).put("recipient",new JSONArray().put(target.user).put(target.device).put(target.address.getName()).put(target.version));
-                CiphertextMessage encrypted=new SessionCipher(store,new SignalProtocolAddress(local.getString("signal_address_id"),1),target.address).encrypt(plaintext.toString().getBytes(StandardCharsets.UTF_8));
-                devices.put(target.address.getName(),new JSONObject().put("user_id",target.user).put("device_id",target.device).put("version",target.version).put("type",encrypted.getType()).put("ciphertext",Base64.encodeToString(encrypted.serialize(),Base64.NO_WRAP)));
-            }
-            JSONObject envelope=new JSONObject().put("protocol","signal-v2").put("sender",sender).put("devices",devices);
+            JSONObject prepared=encrypt(peer,conversation,client,1,text,targets),envelope=prepared.getJSONObject("payload"),own=prepared.getJSONObject("inner");
             String body=new JSONObject().put("client_id",client).put("encrypted",true).put("payload",envelope).toString();
             JSONObject outgoing=prior==null?new JSONObject().put("peer",peer).put("conversation",conversation).put("text",text).put("message_id",JSONObject.NULL):new JSONObject(prior.toString());outgoing.put("body",body);if(nativeIdentity!=null){outgoing.put("native_ui",nativeIdentity);if(!outgoing.has("native_date"))outgoing.put("native_date",(int)(System.currentTimeMillis()/1000));}save("private-outgoing",client,outgoing);
             save("private-own",client,own);return body;
         });
     }
+
+    /** Caller holds the key guard and an encrypted store transaction for ratchet/body atomicity. */
+    private JSONObject encrypt(String peer,String conversation,String client,int revision,String text,List<SignalDeviceKeys.ClaimedKey> targets) throws Exception {
+        JSONObject local=keys.acknowledged();JSONObject sender=sender(local);TreeMap<String,SignalDeviceKeys.ClaimedKey> ordered=new TreeMap<>();Set<String> owners=new HashSet<>();boolean hasPeer=false;
+        if(targets==null || targets.isEmpty() || targets.size()>5)throw new IllegalArgumentException("invalid_signal_targets");
+        for(SignalDeviceKeys.ClaimedKey target:targets){id(target.user);id(target.device);id(target.address.getName());if(!target.user.equals(peer) && !target.user.equals(keys.user) || target.user.equals(keys.user) && target.device.equals(keys.device) || ordered.put(target.address.getName(),target)!=null || !owners.add(target.user+"_"+target.device))throw new SecurityException("invalid_signal_targets");hasPeer|=target.user.equals(peer);}
+        if(!hasPeer)throw new SecurityException("signal_recipient_missing");
+        JSONObject devices=new JSONObject();JSONArray manifest=new JSONArray();
+        for(SignalDeviceKeys.ClaimedKey target:ordered.values())manifest.put(new JSONArray().put(target.user).put(target.device).put(target.address.getName()).put(target.version));
+        String routing=hash(new JSONArray().put(senderTuple(sender)).put(manifest).toString());
+        JSONObject own=inner(peer,conversation,client,revision,text,sender,routing);
+        for(SignalDeviceKeys.ClaimedKey target:ordered.values()){
+            bind(target);
+            if(!store.containsSession(target.address))new SessionBuilder(store,target.address,new SignalProtocolAddress(local.getString("signal_address_id"),1)).process(target.bundle);
+            JSONObject plaintext=new JSONObject(own.toString()).put("recipient",new JSONArray().put(target.user).put(target.device).put(target.address.getName()).put(target.version));
+            CiphertextMessage encrypted=new SessionCipher(store,new SignalProtocolAddress(local.getString("signal_address_id"),1),target.address).encrypt(plaintext.toString().getBytes(StandardCharsets.UTF_8));
+            devices.put(target.address.getName(),new JSONObject().put("user_id",target.user).put("device_id",target.device).put("version",target.version).put("type",encrypted.getType()).put("ciphertext",Base64.encodeToString(encrypted.serialize(),Base64.NO_WRAP)));
+        }
+        JSONObject envelope=new JSONObject().put("protocol","signal-v2").put("sender",sender).put("devices",devices);
+        return new JSONObject().put("payload",envelope).put("inner",own);
+    }
+
+    /** Persist one exact encrypted edit per original revision; retries first reconcile server state. */
+    public JSONObject edit(String peer,String conversation,String message,int revision,String text) throws Exception {synchronized(keys.guard()){
+        keys.requireSession();id(peer);id(conversation);id(message);text(text);if(peer.equals(keys.user)||revision<1||revision==Integer.MAX_VALUE)throw new IllegalArgumentException("invalid_signal_edit");
+        String name=message+"_"+revision;JSONObject pending=load("private-edit",name);
+        if(pending!=null&&(!peer.equals(pending.getString("peer"))||!conversation.equals(pending.getString("conversation"))||!text.equals(pending.getJSONObject("inner").getString("text"))))throw new SecurityException("signal_edit_intent_changed");
+        JSONObject current=(JSONObject)keys.request("GET","/v1/messages/"+message,null);
+        if(!message.equals(current.getString("id"))||!conversation.equals(current.getString("conversation_id"))||!keys.user.equals(current.getString("sender_id"))||current.get("encrypted")!=Boolean.TRUE)throw new SecurityException("signal_edit_context_changed");
+        String client=id(current.getString("client_id"));
+        if(!current.isNull("deleted_at")||!current.isNull("expires_at")&&!Instant.parse(current.getString("expires_at")).isAfter(Instant.now())){receive(peer,conversation,current);throw new SecurityException("signal_message_deleted");}
+        if(pending!=null&&current.getInt("revision")==revision+1&&canonical(current.getJSONObject("payload")).equals(canonical(pending.getJSONObject("body").getJSONObject("payload")))){receive(peer,conversation,current);return current;}
+        if(current.getInt("revision")!=revision)throw new SecurityException("signal_edit_revision_conflict");
+        requirePrivateConversation(peer,conversation);receive(peer,conversation,current);
+        if(pending==null){List<SignalDeviceKeys.ClaimedKey> targets=keys.targets(peer);pending=store.transaction(()->{
+            JSONObject head=load("private-head",message);if(head==null||head.optBoolean("deleted")||!keys.user.equals(head.getString("owner"))||!client.equals(head.getString("client"))||!conversation.equals(head.getString("conversation"))||head.getInt("revision")!=revision)throw new SecurityException("signal_edit_context_changed");
+            JSONObject encrypted=encrypt(peer,conversation,client,revision+1,text,targets);JSONObject journal=new JSONObject().put("peer",peer).put("conversation",conversation).put("message",message).put("client",client).put("inner",encrypted.getJSONObject("inner")).put("body",new JSONObject().put("encrypted",true).put("revision",revision).put("payload",encrypted.getJSONObject("payload")));save("private-edit",name,journal);return journal;
+        });}
+        keys.request("PATCH","/v1/messages/"+message,pending.getJSONObject("body"));
+        JSONObject committed=(JSONObject)keys.request("GET","/v1/messages/"+message,null);
+        if(!message.equals(committed.getString("id"))||!client.equals(committed.getString("client_id"))||committed.getInt("revision")!=revision+1||!canonical(committed.getJSONObject("payload")).equals(canonical(pending.getJSONObject("body").getJSONObject("payload"))))throw new SecurityException("signal_edit_ack_changed");
+        receive(peer,conversation,committed);return committed;
+    }}
 
     /** Retry only the exact persisted body, never advance a ratchet for an HTTP retry. */
     private void requireNativeIntent(String client,JSONObject value) throws Exception {
@@ -295,7 +323,9 @@ public final class SignalMessages {
             JSONObject local=keys.acknowledged(),decoded;
             if(owner.equals(keys.user) && device.equals(keys.device)){
                 JSONObject queued=load("private-outgoing",client);decoded=load("private-own",client);
-                if(queued==null || decoded==null || !queued.isNull("message_id") && !messageId.equals(queued.getString("message_id")) || !canonical.equals(canonical(new JSONObject(queued.getString("body")).getJSONObject("payload"))))throw new SecurityException("signal_own_message_changed");
+                JSONObject edit=revision>1?load("private-edit",messageId+"_"+(revision-1)):null;
+                if(edit!=null){decoded=edit.getJSONObject("inner");if(!client.equals(edit.getString("client"))||!conversation.equals(edit.getString("conversation"))||!canonical.equals(canonical(edit.getJSONObject("body").getJSONObject("payload"))))throw new SecurityException("signal_own_message_changed");}
+                else if(queued==null || decoded==null || !queued.isNull("message_id") && !messageId.equals(queued.getString("message_id")) || !canonical.equals(canonical(new JSONObject(queued.getString("body")).getJSONObject("payload"))))throw new SecurityException("signal_own_message_changed");
             }else{
                 JSONObject destination=devices.getJSONObject(local.getString("signal_address_id"));
                 if(!keys.user.equals(string(destination,"user_id")) || !keys.device.equals(string(destination,"device_id")) || number(destination,"version")>number(local,"version"))throw new SecurityException("signal_recipient_changed");
@@ -336,7 +366,7 @@ public final class SignalMessages {
     public int pruneExpired() throws Exception {synchronized(keys.guard()){keys.requireSession();return store.transaction(()->{int removed=0;for(String message:store.valueNames("private-head")){JSONObject head=load("private-head",message);if(!head.optBoolean("deleted") && expired(head)){retire(head);removed++;}}return removed;});}}
     private static boolean expired(JSONObject head) throws Exception {return !head.isNull("expires_at") && !Instant.parse(head.getString("expires_at")).isAfter(Instant.now());}
     private void retire(JSONObject head) throws Exception {
-        String message=head.getString("message_id"),client=head.getString("client");save("private-head",message,head.put("deleted",true));store.removeValues("private-cache",message+"_");
+        String message=head.getString("message_id"),client=head.getString("client");save("private-head",message,head.put("deleted",true));store.removeValues("private-cache",message+"_");store.removeValues("private-edit",message+"_");
         if(keys.user.equals(head.getString("owner"))){store.removeValue("private-own",client);JSONObject outgoing=load("private-outgoing",client);if(outgoing!=null&&outgoing.optBoolean("native_cancel_requested")&&outgoing.has("native_ui")&&!outgoing.optBoolean("native_ui_done")){outgoing.remove("text");outgoing.remove("body");outgoing.remove("native_attempt");outgoing.put("native_cancelled",true).put("native_failed",false).put("native_error",0).put("native_next_at",0);save("private-outgoing",client,outgoing);}else store.removeValue("private-outgoing",client);store.removeValue("private-own-message",message);store.saveValue("private-send-fence",client,new byte[]{1});}
     }
 
