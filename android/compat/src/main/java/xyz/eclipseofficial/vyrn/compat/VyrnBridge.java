@@ -248,6 +248,8 @@ public final class VyrnBridge {
     }
     public static synchronized VyrnBridge forAccount(int account){VyrnBridge bridge=INSTANCES.get(account);if(bridge==null){bridge=new VyrnBridge(account);INSTANCES.put(account,bridge);}return bridge;}
     public static void execute(Runnable task){IO.execute(task);}
+    /** No VYRN backend implements the upstream AI compose/style protocol. */
+    public static boolean aiEditorAvailable(){return false;}
     /** The encrypted native outbox is not connected yet; reject before native plaintext persistence. */
     public static boolean privateSendUnavailable(long dialog){return org.telegram.messenger.DialogObject.isUserDialog(dialog)||org.telegram.messenger.DialogObject.isEncryptedDialog(dialog);}
     public static boolean privateTextReady(int account,long dialog){

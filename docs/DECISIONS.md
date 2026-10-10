@@ -1,5 +1,11 @@
 # Decisions
 
+## Gate the unimplemented upstream AI protocol consistently — 2026-10-10
+
+One VyrnBridge.aiEditorAvailable capability stays false because VYRN has no AI compose/style backend. Reuse it in native chat/photo/attachment captions, rich editor/toolbar and common AI/style/compose sheet entries; hidden caption/composer controls create no promotional hints, visible rich controls are disabled/dimmed, and direct click/sheet show paths are guarded. Do not present an upstream service as an implemented VYRN capability or send draft text into unsupported requests. Ordinary text editing and native message sending are unchanged.
+
+Fix native RichEditor.Button.setEnabled at the shared setter by calling super before its private-state early return/animation. Merely setting clickable/alpha did not change Android enabled/accessibility state, and setting a listener can restore clickable. PrivateComposer331 proves actual chat controls and a native rich-toolbar instance, plus both-direction messaging regression; full media/rich fragment and physical acceptance is still required. Strict test-backend readiness before registration separates stopped local services from application failures.
+
 ## Consume only the exact unchanged private draft revision — 2026-10-10
 
 Increment a revision in the existing native text watcher and capture it at Send. Clear the draft after durable local staging only if that revision and the existing account/session/peer/device/text/context checks still match. String equality alone would erase new text when the user edits away and returns to the same text while staging is in flight. This adds no second draft store or journal. PrivateComposer319 proves the actual same-text edit race and cold preservation plus untouched-draft clearing in the reverse direction. Crash-consumption/account/device races still require acceptance.

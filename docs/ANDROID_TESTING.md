@@ -1,5 +1,16 @@
 # Local Android integration
 
+Same-APK Signal86269 exits0 with221 checks (160 network/JNI +44 disconnected cold +17 online restart) at20:42:27 on4a78fbea98a472ea5b08059460629c6576192fadaba7695f59642cb4884f9a44. Normal75246 build exits0 in2m15s; all3 APK verifiers pass. ARM64/ARMv7/universal122477397/108190703/158702814 bytes; hashes f89d7bc3f8f12590af5e2b152ec5cfab482059e71b61d62609a53ef3124eeec0 /f0df1cd648c1e4b22a7599800c85393919f6a263c140ba83287044c3cb990e50 /94df8b9b76a4a694f49cbdbcc6c6fb92121ff1754cefffa33e582072c137fd2c. Normal Debug/public TLS/no local CA/minAPI26; physical phone installation remains unproved. No app behavior changes after builds. Full original goal remains active.
+
+
+## Unsupported AI controls and native enabled state — 2026-10-10
+
+PrivateComposer94036 exits0 with331 checks at20:40:24 on APK4a78fbea98a472ea5b08059460629c6576192fadaba7695f59642cb4884f9a44. Both directions force the actual composer AI visibility callback: control remains hidden/disabled, no AI hint is created, forced click keeps the draft and opens no editor. An actual RichEditorToolbar instance with a fixture delegate proves both AI controls disabled/dimmed and forced clicks invoke no AI actions. Existing native Send/local-failure/same-text draft/cold pending/first-pair/automatic confirmation and recipient/privacy/cache checks pass in both directions. Screenshot confirms AI and schedule/silent hints absent from the actual reopened chat.
+
+Pinned overlays use one shared unavailable capability for chat input, photo caption, attachment top/bottom caption, rich editor/toolbar and common AI/style/compose sheet entries. RichEditor.Button.setEnabled now calls its native superclass before the existing early return/animation: previously Android isEnabled/accessibility remained enabled even when its private flag/clickable/alpha changed. Caption/attachment/full rich-fragment interaction is not exercised by this scenario; those gates are source/compilation evidence. Whole-app unsupported controls and physical phones remain acceptance work.
+
+An initial attempt failed before UI checks because local Core/TLS were stopped. Original PostgreSQL data stayed online; restored only existing Core/TLS services in actual Ubuntu-24.04 with strict scoped-CA TLS, without resetting DB or renewing a valid invite. A subsequent failing rich-toolbar enabled assertion found the actual shared-button defect. Test now reports UI assertion failures on the instrumentation worker rather than crashing the main process. Two-client script checks strict backend readiness before registration. Healthy Core/TLS service wrappers must not be killed as abandoned test workers.
+
 Final same-APK Signal94339 exits0 with221 (160 network/JNI +44 disconnected cold +17 online restart) at14:44:28 onf97cff24a546e98a9200de1029a60b8e6b265f79502f709d4b02f823ae1188a9. This complements PrivateComposer319; full physical/device/media/background/release acceptance remains incomplete.
 
 

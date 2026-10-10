@@ -1,5 +1,12 @@
 # Acceptance matrix
 
+Same-APK Signal86269 exits0 with221 checks (160 network/JNI +44 disconnected cold +17 online restart) at20:42:27 on4a78fbea98a472ea5b08059460629c6576192fadaba7695f59642cb4884f9a44. Normal75246 build exits0 in2m15s; all3 APK verifiers pass. ARM64/ARMv7/universal122477397/108190703/158702814 bytes; hashes f89d7bc3f8f12590af5e2b152ec5cfab482059e71b61d62609a53ef3124eeec0 /f0df1cd648c1e4b22a7599800c85393919f6a263c140ba83287044c3cb990e50 /94df8b9b76a4a694f49cbdbcc6c6fb92121ff1754cefffa33e582072c137fd2c. Normal Debug/public TLS/no local CA/minAPI26; physical phone installation remains unproved. No app behavior changes after builds. Full original goal remains active.
+
+
+Latest bounded private composer acceptance:331 checks at20:40:24 on4a78fbea98a472ea5b08059460629c6576192fadaba7695f59642cb4884f9a44 (exec94036 exit0). Actual chat AI control/hint hidden/disabled, forced click inert with draft retained; native rich-toolbar instance AI controls disabled/dimmed and forced click invokes no action. Shared rich-button enabled/accessibility state now follows Android's superclass. This resolves the observed chat AI advertising/control issue in this scenario. Caption/attachment/full rich UI interactions and other unsupported controls remain acceptance work; source/compilation gates alone do not prove all rendered flows.
+
+All previous native offline private Send/draft/cold/first-pair/unique-confirmation/recipient checks pass in both directions. Full original goal remains active, including staged Cancel/Retry/unknown-ACK/account/device/crash, physical install/two phones, complete auth/media/background/settings/release/external backup and inbound UDP provider gate.
+
 Final same-APK Signal94339 exits0 with221 (160 network/JNI +44 disconnected cold +17 online restart) at14:44:28 onf97cff24a546e98a9200de1029a60b8e6b265f79502f709d4b02f823ae1188a9. This complements PrivateComposer319; full physical/device/media/background/release acceptance remains incomplete.
 
 

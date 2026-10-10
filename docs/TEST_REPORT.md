@@ -1,5 +1,14 @@
 # Verification report
 
+Same-APK Signal86269 exits0 with221 checks (160 network/JNI +44 disconnected cold +17 online restart) at20:42:27 on4a78fbea98a472ea5b08059460629c6576192fadaba7695f59642cb4884f9a44. Normal75246 build exits0 in2m15s; all3 APK verifiers pass. ARM64/ARMv7/universal122477397/108190703/158702814 bytes; hashes f89d7bc3f8f12590af5e2b152ec5cfab482059e71b61d62609a53ef3124eeec0 /f0df1cd648c1e4b22a7599800c85393919f6a263c140ba83287044c3cb990e50 /94df8b9b76a4a694f49cbdbcc6c6fb92121ff1754cefffa33e582072c137fd2c. Normal Debug/public TLS/no local CA/minAPI26; physical phone installation remains unproved. No app behavior changes after builds. Full original goal remains active.
+
+
+## Disable unsupported AI entry points — 2026-10-10
+
+PrivateComposer94036 terminal exit0 passes331 at20:40:24 on4a78fbea98a472ea5b08059460629c6576192fadaba7695f59642cb4884f9a44. Actual composer AI control/hint stays hidden/disabled under forced visibility/click; draft and foreground editor state stay intact. Native RichEditorToolbar fixture controls are disabled/dimmed and direct clicks call no delegate AI actions. Both directions retain all previous native offline Send/same-text draft/pending/native privacy/cold automatic unique confirmation and recipient checks. Inspected screenshot shows no AI/schedule tooltip.
+
+Fixed a real shared native button defect: its setEnabled never called the View superclass, leaving Android enabled state true; pinned overlay now synchronizes it before private-state/animation logic. Other caption/attachment/rich-editor AI gates compile and their generated markers were inspected, but full media/rich-fragment/physical interaction remains untested. Restore of stopped local Core/TLS preserved original PostgreSQL data and valid invite; readiness preflight now reports missing test infrastructure before registration.
+
 Final same-APK Signal94339 exits0 with221 (160 network/JNI +44 disconnected cold +17 online restart) at14:44:28 onf97cff24a546e98a9200de1029a60b8e6b265f79502f709d4b02f823ae1188a9. This complements PrivateComposer319; full physical/device/media/background/release acceptance remains incomplete.
 
 

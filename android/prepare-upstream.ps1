@@ -8,6 +8,26 @@ function Write-Text([string]$Path,[string]$Text){
  if(!(Test-Path -LiteralPath $Path) -or [IO.File]::ReadAllText($Path) -cne $Text){[IO.File]::WriteAllText($Path,$Text,[Text.UTF8Encoding]::new($false))}
 }
 function Edit([string]$Relative,[scriptblock]$Transform){$p=Join-Path $upstream $Relative;$old=[IO.File]::ReadAllText($p);$new=& $Transform $old;Write-Text $p $new}
+function Disable-AiControls([string]$t){
+ $available='xyz.eclipseofficial.vyrn.compat.VyrnBridge.aiEditorAvailable()'
+ foreach($button in @('aiButton','topAiButton','aiStyleButton')){
+  $description="(?m)^([ ]*$button\.setContentDescription\([^\n]+\);)$"
+  $t=[regex]::Replace($t,$description,('$1'+"`n        $button.setEnabled($available);`n        $button.setAlpha($available ? 1.0f : 0.4f);"))
+  $click="$button.setOnClickListener(v -> {"
+  $t=$t.Replace($click,$click+"`n            if (!$available) return;")
+ }
+ $show='        final boolean show = '
+ $start=$t.IndexOf('    private void showAiButton(boolean show_) {')
+ if($start -ge 0){
+  $position=$t.IndexOf($show,$start)
+  if($position -lt 0){throw 'Pinned AI visibility marker missing'}
+  $t=$t.Substring(0,$position)+$show+"$available && "+$t.Substring($position+$show.Length)
+ }
+ $t=$t.Replace('aiButton.setOnClickListener(v -> delegate.onAi());',"aiButton.setOnClickListener(v -> { if ($available) delegate.onAi(); });")
+ $t=$t.Replace('aiStyleButton.setOnClickListener(v -> delegate.onAiStyle());',"aiStyleButton.setOnClickListener(v -> { if ($available) delegate.onAiStyle(); });")
+ $t=$t.Replace('aiStyleButton.setOnClickListener(v -> onAiStyleSelection());',"aiStyleButton.setOnClickListener(v -> { if ($available) onAiStyleSelection(); });")
+ $t
+}
 
 Edit 'settings.gradle' {
  param($t)
@@ -498,6 +518,7 @@ Edit 'TMessagesProj/src/main/java/org/telegram/ui/Components/AlertsCreator.java'
 Edit 'TMessagesProj/src/main/java/org/telegram/ui/Components/ChatActivityEnterView.java' {
  param($t)
  $t=(& git -c "safe.directory=$($upstream.Replace('\','/'))" -C $upstream show "${pin}:TMessagesProj/src/main/java/org/telegram/ui/Components/ChatActivityEnterView.java") -join "`n"
+ $t=Disable-AiControls $t
  $send='protected boolean sendMessageInternal(boolean notify, int scheduleDate, int scheduleRepeatPeriod, long payStars, boolean allowConfirm) {'
  $button='public void checkSendButton(boolean animated) {'
  $hint='public void updateFieldHint(boolean animated) {'
@@ -562,6 +583,26 @@ if (dialog_id < 0 && !DialogObject.isEncryptedDialog(dialog_id) && !editingMessa
                     SendMessagesHelper.getInstance(currentAccount).editMessage(editingMessageObject, null, null, null, null, null, null, false, editingMessageObject.hasMediaSpoilers(), null);
                 }
 '@)
+}
+foreach($aiFile in @('Components/CaptionPhotoViewer.java','Components/ChatAttachAlert.java','iv/RichEditor.java','iv/RichEditorToolbar.java','Components/AIEditorAlert.java','iv/RichAIComposeSheet.java')){
+ $relative="TMessagesProj/src/main/java/org/telegram/ui/$aiFile"
+ Edit $relative {
+  param($t)
+  $t=(& git -c "safe.directory=$($upstream.Replace('\','/'))" -C $upstream show "${pin}:$relative") -join "`n"
+  $t=Disable-AiControls $t
+  if($aiFile -eq 'iv/RichEditor.java'){
+   $enabled='        public void setEnabled(boolean enabled) {'
+   if(!$t.Contains($enabled)){throw 'Pinned rich button enabled marker missing'}
+   $t=$t.Replace($enabled,$enabled+"`n            super.setEnabled(enabled);")
+  }
+  if($aiFile -in @('Components/AIEditorAlert.java','iv/RichAIComposeSheet.java')){
+   $show='public void show() {'
+   if(!$t.Contains($show)){throw 'Pinned AI sheet entry marker missing'}
+   $t=$t.Replace($show,$show+"`n        if (!xyz.eclipseofficial.vyrn.compat.VyrnBridge.aiEditorAvailable()) return;")
+   $t=$t.Replace('tonesController.load();','if (xyz.eclipseofficial.vyrn.compat.VyrnBridge.aiEditorAvailable()) tonesController.load();')
+  }
+  $t
+ }
 }
 Edit 'TMessagesProj/src/main/java/org/telegram/messenger/MessageObject.java' {
  param($t)

@@ -11,6 +11,9 @@ if($MutationRestart){$LostAck=$true}
 if($ManualRetry -or $LostAck){$Offline=$true}
 $ErrorActionPreference='Stop'
 $root=Split-Path $PSScriptRoot -Parent
+$readiness=& curl.exe --fail --silent --show-error --ssl-revoke-best-effort --cacert (Join-Path $root '.local/dev-ca.crt') --max-time 10 https://localhost:18443/health/ready
+if($LASTEXITCODE -ne 0){throw 'Local VYRN TLS backend is unavailable; restore the existing test services before registration'}
+if(($readiness | ConvertFrom-Json).status -ne 'ready'){throw 'Local VYRN backend is not ready for two-client registration'}
 $adb=Join-Path $root '.tools/android-sdk/platform-tools/adb.exe'
 $package='xyz.eclipseofficial.vyrn.dev'
 . (Join-Path $PSScriptRoot 'android-test-tools.ps1')
@@ -172,7 +175,7 @@ try{
                 }
             }
             $registration=Get-Content (Join-Path $root 'artifacts/android-two-client-registration.json') -Raw | ConvertFrom-Json
-            @{date=[DateTimeOffset]::Now.ToString('o');result='passed';apk_sha256=(Get-FileHash (Join-Path $root 'artifacts/VyrnApp-dev-x86_64-debug-local-tls.apk')).Hash.ToLowerInvariant();devices=$registration.devices;rounds=$rounds;physical_devices='not tested';scope='Two native registrations/publications; peer profile setup only, first private pair absent before sending; actual native Send control while disconnected, duplicate-click rejection, encrypted unprepared local intent, unchanged draft cleared after durable persistence and same text restored after intervening edits preserved as a new draft, unsupported schedule/silent hints hidden, cold offline native pending/draft/database restoration; cold reconnect app-worker creates/finds private pair, encrypts/confirms one original message, exact repeated delivery, both directions and recipient/cold cache acceptance. Native effects/forward/screenshot/shared plaintext paths remain gated. Physical touch/phones, new staged Cancel/Retry/account races, notifications/media/full device lifecycle remain untested.'} | ConvertTo-Json -Depth 9 | Set-Content (Join-Path $root 'artifacts/android-two-client-private-composer.json') -Encoding utf8
+            @{date=[DateTimeOffset]::Now.ToString('o');result='passed';apk_sha256=(Get-FileHash (Join-Path $root 'artifacts/VyrnApp-dev-x86_64-debug-local-tls.apk')).Hash.ToLowerInvariant();devices=$registration.devices;rounds=$rounds;physical_devices='not tested';scope='Two native registrations/publications; peer profile setup only, first private pair absent before sending; actual native Send control while disconnected, duplicate-click rejection, encrypted unprepared local intent, unchanged draft cleared after durable persistence and same text restored after intervening edits preserved as a new draft, unsupported schedule/silent and AI editor hints hidden, native composer AI control hidden/disabled and rich toolbar AI controls disabled with forced clicks blocked, cold offline native pending/draft/database restoration; cold reconnect app-worker creates/finds private pair, encrypts/confirms one original message, exact repeated delivery, both directions and recipient/cold cache acceptance. Native effects/forward/screenshot/shared plaintext paths remain gated. Physical touch/phones, new staged Cancel/Retry/account races, notifications/media/full device lifecycle remain untested.'} | ConvertTo-Json -Depth 9 | Set-Content (Join-Path $root 'artifacts/android-two-client-private-composer.json') -Encoding utf8
             Write-Output 'PASS: actual private text Send offline, durable draft handling and cold automatic confirmation on both emulator clients.'
             return
         }
