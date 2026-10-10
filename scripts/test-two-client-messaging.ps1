@@ -1,5 +1,6 @@
 # Native foreground send/edit/delete and optional offline queue/recovery. Physical-phone acceptance remains separate.
-param([switch]$Edit,[switch]$Delete,[switch]$Offline,[switch]$ManualRetry,[switch]$LostAck,[switch]$MutationRestart,[switch]$PrivateKeys,[switch]$PrivateChat,[switch]$PrivateDelete,[switch]$PrivateAutomatic,[switch]$PrivateManualRetry,[switch]$PrivateCancel,[switch]$PrivateVerification,[switch]$PrivateComposer)
+param([switch]$Edit,[switch]$Delete,[switch]$Offline,[switch]$ManualRetry,[switch]$LostAck,[switch]$MutationRestart,[switch]$PrivateKeys,[switch]$PrivateChat,[switch]$PrivateDelete,[switch]$PrivateAutomatic,[switch]$PrivateManualRetry,[switch]$PrivateCancel,[switch]$PrivateVerification,[switch]$PrivateComposer,[switch]$PrivateComposerCancel)
+if($PrivateComposerCancel){$PrivateComposer=$true}
 if($PrivateComposer){$PrivateChat=$true;if($Edit -or $Delete -or $Offline -or $ManualRetry -or $LostAck -or $MutationRestart -or $PrivateDelete -or $PrivateAutomatic -or $PrivateManualRetry -or $PrivateCancel -or $PrivateVerification){throw 'Private composer must run as its own scenario'}}
 if($PrivateVerification){$PrivateChat=$true;if($PrivateCancel -or $PrivateManualRetry -or $PrivateAutomatic -or $LostAck -or $PrivateDelete -or $MutationRestart){throw 'Private verification must run as its own scenario'}}
 if($PrivateCancel){$PrivateChat=$true;if($PrivateManualRetry -or $PrivateAutomatic -or $LostAck -or $PrivateDelete -or $MutationRestart){throw 'Private cancellation must run as its own scenario'}}
@@ -154,6 +155,7 @@ try{
             foreach($direction in @(@{sender='emulator-5560';recipient='emulator-5562'},@{sender='emulator-5562';recipient='emulator-5560'})){
                 $text='چت خصوصی بومی '+[guid]::NewGuid().ToString('N')
                 $fixture=@{peer_user=$users[$direction.recipient];peer_address=$publications[$direction.recipient].key_address;text=$text;first_pair=($direction.sender -eq 'emulator-5560');preserve_new_draft=($direction.sender -eq 'emulator-5560')}
+                $fixture.staged_cancel=[bool]$PrivateComposerCancel
                 Write-Fixture $direction.sender $fixture;$rounds+=Finish-Phase (Start-Phase $direction.sender 'chat-private-composer-ready')
                 $privateReverseRemoved=$true
                 $removed=Invoke-TestAdb -Arguments @('-s',$direction.sender,'reverse','--remove','tcp:18443');if($removed.code -ne 0){throw 'Private composer offline mapping removal failed'}
@@ -163,6 +165,11 @@ try{
                 Write-Fixture $direction.sender $fixture
                 $rounds+=Finish-Phase (Start-Phase $direction.sender 'chat-private-composer-reopen') -TimeoutMs 120000;Capture-PrivateChat $direction.sender 'chat-private-composer-reopen'
                 $restored=Invoke-TestAdb -Arguments @('-s',$direction.sender,'reverse','tcp:18443','tcp:18443');if($restored.code -ne 0){throw 'Private composer mapping restoration failed'};$privateReverseRemoved=$false
+                if($PrivateComposerCancel){
+                    $rounds+=Finish-Phase (Start-Phase $direction.sender 'chat-private-cancel-recover') -TimeoutMs 120000
+                    $rounds+=Finish-Phase (Start-Phase $direction.sender 'chat-private-cancel-recover') -TimeoutMs 120000
+                    continue
+                }
                 $rounds+=Finish-Phase (Start-Phase $direction.sender 'chat-private-composer-recover') -TimeoutMs 120000;$sent=Read-State $direction.sender
                 if(!$sent.conversation -or !$sent.message_id -or !$sent.ordinal){throw 'Private composer automatic confirmation evidence missing'}
                 foreach($serial in @('emulator-5560','emulator-5562')){
@@ -175,6 +182,11 @@ try{
                 }
             }
             $registration=Get-Content (Join-Path $root 'artifacts/android-two-client-registration.json') -Raw | ConvertFrom-Json
+            if($PrivateComposerCancel){
+                @{date=[DateTimeOffset]::Now.ToString('o');result='passed';apk_sha256=(Get-FileHash (Join-Path $root 'artifacts/VyrnApp-dev-x86_64-debug-local-tls.apk')).Hash.ToLowerInvariant();devices=$registration.devices;rounds=$rounds;physical_devices='not tested';scope='Both emulator directions: actual native Send disconnected, unprepared encrypted intent with null conversation/body, cold offline Cancel Sending control, durable cancellation without ratchet advance; reconnect app worker resolves original private pair and server client cancellation fence, scrubs intent and native row, then a second cold reopen rejects late native object/storage replay. No physical phone or complete messaging lifecycle acceptance.'} | ConvertTo-Json -Depth 9 | Set-Content (Join-Path $root 'artifacts/android-two-client-private-composer-cancel.json') -Encoding utf8
+                Write-Output 'PASS: native staged private Send and Cancel offline with cold recovery on both emulator clients.'
+                return
+            }
             @{date=[DateTimeOffset]::Now.ToString('o');result='passed';apk_sha256=(Get-FileHash (Join-Path $root 'artifacts/VyrnApp-dev-x86_64-debug-local-tls.apk')).Hash.ToLowerInvariant();devices=$registration.devices;rounds=$rounds;physical_devices='not tested';scope='Two native registrations/publications; peer profile setup only, first private pair absent before sending; actual native Send control while disconnected, duplicate-click rejection, encrypted unprepared local intent, unchanged draft cleared after durable persistence and same text restored after intervening edits preserved as a new draft, unsupported schedule/silent and AI editor hints hidden, native composer AI control hidden/disabled and rich toolbar AI controls disabled with forced clicks blocked, cold offline native pending/draft/database restoration; cold reconnect app-worker creates/finds private pair, encrypts/confirms one original message, exact repeated delivery, both directions and recipient/cold cache acceptance. Native effects/forward/screenshot/shared plaintext paths remain gated. Physical touch/phones, new staged Cancel/Retry/account races, notifications/media/full device lifecycle remain untested.'} | ConvertTo-Json -Depth 9 | Set-Content (Join-Path $root 'artifacts/android-two-client-private-composer.json') -Encoding utf8
             Write-Output 'PASS: actual private text Send offline, durable draft handling and cold automatic confirmation on both emulator clients.'
             return
