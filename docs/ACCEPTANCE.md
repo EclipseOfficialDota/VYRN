@@ -1,5 +1,12 @@
 # Acceptance matrix
 
+Final same-APK Signal94339 exits0 with221 (160 network/JNI +44 disconnected cold +17 online restart) at14:44:28 onf97cff24a546e98a9200de1029a60b8e6b265f79502f709d4b02f823ae1188a9. This complements PrivateComposer319; full physical/device/media/background/release acceptance remains incomplete.
+
+
+Latest bounded private composer acceptance:319 checks at14:42:30 on f97cff24a546e98a9200de1029a60b8e6b265f79502f709d4b02f823ae1188a9 (exec23414 exit0). Newly edited text equal to the original is preserved after commit and cold restart; untouched draft clears in the other direction. Both schedule/silent hint Runnables remain invisible. This resolves the bounded same-text draft mutation and schedule tooltip issues described below; crash between commit/draft consumption and all staged account/device/Cancel/Retry/unknown-ACK races remain unproved. Unsupported AI editor/hint was observed and still needs gating.
+
+Normal21185 build/all3 verifiers pass,122/108/159MB Debug packages. Xiaomi Note10Pro/latest OS/122MB user report is recorded; no physical ADB phone exists yet, so actual install cause and two-physical-phone acceptance remain unresolved. External backup/release signing/TURN provider gates and the full original scope remain unchanged.
+
 Same-APK security regression Signal61980 exits0 with221 checks (160 network/JNI,44 disconnected cold,17 online restart) at09:56:11 on1fc2ff226ad2e505684a6ce8817d7412ef24a65b9965bdd8aee2bf89583c5946. Normal27784 build exits0 in2m37s; all3 signature/package/API/ABI/manifest verifiers pass. ARM64/ARMv7/universal Debug APKs122477389/108190695/158702806 bytes; hashes b34491d5e3377fb9b5e9d84def0c7f0a46b8aebc6304898989299bddfae31ba3 /5599056447e8a755e7e0a67780089a45448c6227114308f823be5262d5dbf360 /c7583dbe417bb426808c3a1edcc1a0b0ef8cff6f730b4f94059effac6c0bf1b1. Android8.0 minimum, normal public TLS/no local CA; physical installation unproved. No source behavior changes after builds; full original goal remains active.
 
 

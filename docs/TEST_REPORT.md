@@ -1,5 +1,14 @@
 # Verification report
 
+Final same-APK Signal94339 exits0 with221 (160 network/JNI +44 disconnected cold +17 online restart) at14:44:28 onf97cff24a546e98a9200de1029a60b8e6b265f79502f709d4b02f823ae1188a9. This complements PrivateComposer319; full physical/device/media/background/release acceptance remains incomplete.
+
+
+## Preserve edited same-text drafts and hide unsupported schedule hints — 2026-10-10
+
+PrivateComposer23414 terminal exit0 passes319 checks at14:42:30 on f97cff24a546e98a9200de1029a60b8e6b265f79502f709d4b02f823ae1188a9. Actual native Send is followed by text changing then returning to the same text; its revision guard preserves this new draft through durable save and cold restart. Unchanged draft still clears in the other direction. Both actual schedule/silent hint Runnables stay invisible. Both directions retain offline/cold/encrypted journal/native privacy/unique original confirmation and receiver regressions. Screenshot still shows unsupported AI editor; this is a remaining UI issue, not a passed capability.
+
+Normal21185 build exits0 in2m25s; all3 normal APK verifiers pass (ARM64/ARMv7/universal122477401/108190707/158702818 bytes). Physical phone install/behavior remains untested. Phone diagnosis script passes parser/emulator-guard/exact ADB stderr checks, reads real SDK/ABI requirements and preserves app data when explicit installation is requested. User-provided Xiaomi Note10Pro/latest OS/122MB file information does not identify the exact Android SDK or old APK hash.
+
 Same-APK security regression Signal61980 exits0 with221 checks (160 network/JNI,44 disconnected cold,17 online restart) at09:56:11 on1fc2ff226ad2e505684a6ce8817d7412ef24a65b9965bdd8aee2bf89583c5946. Normal27784 build exits0 in2m37s; all3 signature/package/API/ABI/manifest verifiers pass. ARM64/ARMv7/universal Debug APKs122477389/108190695/158702806 bytes; hashes b34491d5e3377fb9b5e9d84def0c7f0a46b8aebc6304898989299bddfae31ba3 /5599056447e8a755e7e0a67780089a45448c6227114308f823be5262d5dbf360 /c7583dbe417bb426808c3a1edcc1a0b0ef8cff6f730b4f94059effac6c0bf1b1. Android8.0 minimum, normal public TLS/no local CA; physical installation unproved. No source behavior changes after builds; full original goal remains active.
 
 

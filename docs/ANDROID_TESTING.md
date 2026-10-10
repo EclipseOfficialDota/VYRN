@@ -1,5 +1,26 @@
 # Local Android integration
 
+Final same-APK Signal94339 exits0 with221 (160 network/JNI +44 disconnected cold +17 online restart) at14:44:28 onf97cff24a546e98a9200de1029a60b8e6b265f79502f709d4b02f823ae1188a9. This complements PrivateComposer319; full physical/device/media/background/release acceptance remains incomplete.
+
+
+## Private draft edits and unsupported hints — 2026-10-10
+
+PrivateComposer23414 exits0 with319 checks at14:42:30 on APKf97cff24a546e98a9200de1029a60b8e6b265f79502f709d4b02f823ae1188a9. First direction changes the composer text and restores the original text before the local commit callback; the new same-text draft remains and survives cold reopening. Second unchanged draft still clears only after durable persistence. Both actual schedule/silent hint Runnables are invoked and remain invisible. All offline failure/duplicate-click/encrypted pending/first-pair/automatic recovery/receiver/cold privacy checks pass in both directions. Screenshot confirms schedule/silent hints gone; the separate unsupported AI editor/hint remains visible and is the next control audit item.
+
+Normal21185 build exits0 in2m25s; all3 APK verifiers pass. ARM64/ARMv7/universal122477401/108190707/158702818 bytes; hashes b006fc8965e6a05f679cd752779049b7d56e6b543a8f32718ad80ecb1c0cb81d /44ee328fd8765a593a983480d44e83a0dfd2174519c8109856c2c94352190b9a /616421e81efcaa8d7c23278a3a4effb588dee0e2e831d2b226c2ea0c78abd657. Normal Debug/public TLS/no local CA/minAPI26. User identifies Xiaomi Note10Pro/latest OS/122MB APK; exact OS/downloaded hash and Android install error remain unknown. No physical phone connected yet; SDK/ABI manifest compatibility is not install proof.
+
+## Physical phone installation diagnosis
+
+Enable USB debugging, connect the phone to this computer and authorize the computer on the phone. Select its exact physical serial from `adb devices`; never use an emulator serial for physical acceptance. From the VYRN root:
+
+```powershell
+rtk proxy .tools/android-sdk/platform-tools/adb.exe devices
+rtk proxy pwsh -NoProfile -File scripts/diagnose-phone-install.ps1 -Serial YOUR_PHONE_SERIAL
+rtk proxy pwsh -NoProfile -File scripts/diagnose-phone-install.ps1 -Serial YOUR_PHONE_SERIAL -Install
+```
+
+The first diagnosis reads model/Android/API/ABIs and compares the selected APK's real minimum API/native architectures. Default APK is the normal ARM64 Debug build; use `-Apk` to select a different existing file. `-Install` updates through `adb install -r -t`, preserves app data and records Android's exact stdout/stderr in ignored `.local/android-phone-install.json`. A failure never triggers uninstall, data clearing or security-setting changes. An install observation timeout is unconfirmed; inspect the installed package before retrying. SDK/ABI compatibility alone does not prove installation or app behavior. Parser/emulator-rejection/exact ADB stderr checks pass; physical installation remains untested until a real phone is connected.
+
 Same-APK security regression Signal61980 exits0 with221 checks (160 network/JNI,44 disconnected cold,17 online restart) at09:56:11 on1fc2ff226ad2e505684a6ce8817d7412ef24a65b9965bdd8aee2bf89583c5946. Normal27784 build exits0 in2m37s; all3 signature/package/API/ABI/manifest verifiers pass. ARM64/ARMv7/universal Debug APKs122477389/108190695/158702806 bytes; hashes b34491d5e3377fb9b5e9d84def0c7f0a46b8aebc6304898989299bddfae31ba3 /5599056447e8a755e7e0a67780089a45448c6227114308f823be5262d5dbf360 /c7583dbe417bb426808c3a1edcc1a0b0ef8cff6f730b4f94059effac6c0bf1b1. Android8.0 minimum, normal public TLS/no local CA; physical installation unproved. No source behavior changes after builds; full original goal remains active.
 
 

@@ -1,5 +1,11 @@
 # Decisions
 
+## Consume only the exact unchanged private draft revision — 2026-10-10
+
+Increment a revision in the existing native text watcher and capture it at Send. Clear the draft after durable local staging only if that revision and the existing account/session/peer/device/text/context checks still match. String equality alone would erase new text when the user edits away and returns to the same text while staging is in flight. This adds no second draft store or journal. PrivateComposer319 proves the actual same-text edit race and cold preservation plus untouched-draft clearing in the reverse direction. Crash-consumption/account/device races still require acceptance.
+
+Stop unsupported private schedule/silent hint Runnables before creating their views; both native callbacks are exercised by the UI test. The separate AI editor still needs gating. Physical install diagnosis uses one explicit real-phone serial, inspects the actual APK SDK/ABI/package, preserves exact ADB stderr and updates only with explicit -Install through -r -t. Never uninstall/clear data to work around a failed install; retain Android's failure code instead.
+
 ## Persist native private text before network work — 2026-10-10
 
 Connect the plain private text composer to the existing encrypted outgoing journal. Reserve its original negative ID/random on UI, persist on a dedicated local disk executor using only existing acknowledged device/store and cached original authenticated session, then trigger the existing serial recovery worker. The local commit must not wait behind the HTTP-held vault lock. The worker remains the only native pending/confirmed writer and resolves null conversation through the unique authenticated private-pair endpoint before encryption. No second outbox, plaintext native row or implicit key publication is introduced.

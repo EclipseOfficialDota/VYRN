@@ -504,6 +504,7 @@ Edit 'TMessagesProj/src/main/java/org/telegram/ui/Components/ChatActivityEnterVi
  foreach($marker in @($send,$button,$hint)){if(!$t.Contains($marker)){throw 'Pinned private composer gate marker missing'}}
  $privateComposer=@'
     private boolean vyrnStaging;
+    private long vyrnTextRevision;
     private boolean vyrnPlainTextReady() {
         return !vyrnStaging && xyz.eclipseofficial.vyrn.compat.VyrnBridge.privateTextReady(currentAccount, dialog_id) && messageEditText != null && !TextUtils.isEmpty(messageEditText.getText()) && editingMessageObject == null && editingBusinessLink == null && !richDraftActive && replyingMessageObject == null && replyingTopMessage == null && replyingQuote == null && (delegate == null || delegate.getReplyToStory() == null) && getThreadMessage() == null && audioToSend == null && videoToSendMessageObject == null && getEffectId() == 0 && getSendMessageSuggestionParams() == null && !isInScheduleMode() && (delegate == null || !delegate.hasForwardingMessages());
     }
@@ -513,12 +514,13 @@ Edit 'TMessagesProj/src/main/java/org/telegram/ui/Components/ChatActivityEnterVi
         final int account = currentAccount;
         final long dialog = dialog_id, owner = UserConfig.getInstance(account).getClientUserId();
         final String session = xyz.eclipseofficial.vyrn.compat.VyrnBridge.privateTextSession(account), text = messageEditText.getText().toString();
+        final long textRevision = vyrnTextRevision;
         vyrnStaging = true;
         checkSendButton(false);
         xyz.eclipseofficial.vyrn.compat.VyrnBridge.forAccount(account).stagePrivateText(dialog, text).whenComplete((binding, failure) -> AndroidUtilities.runOnUIThread(() -> {
             vyrnStaging = false;
             if (currentAccount == account && dialog_id == dialog && xyz.eclipseofficial.vyrn.compat.VyrnBridge.privateTextOrigin(account, dialog, owner, session, binding)) {
-                if (failure == null && vyrnPlainTextReady() && text.contentEquals(messageEditText.getText())) { setFieldText(""); if (parentFragment != null) parentFragment.saveDraft(); }
+                if (failure == null && textRevision == vyrnTextRevision && vyrnPlainTextReady() && text.contentEquals(messageEditText.getText())) { setFieldText(""); if (parentFragment != null) parentFragment.saveDraft(); }
                 if (failure != null) android.widget.Toast.makeText(getContext(), LocaleController.isRTL ? "پیام ذخیره نشد؛ پیش‌نویس حفظ شد. دوباره تلاش کنید." : "Message could not be saved; your draft is kept. Retry.", android.widget.Toast.LENGTH_LONG).show();
                 else android.widget.Toast.makeText(getContext(), LocaleController.isRTL ? "پیام در صف ارسال قرار گرفت." : "Message queued for sending.", android.widget.Toast.LENGTH_SHORT).show();
             }
@@ -527,6 +529,9 @@ Edit 'TMessagesProj/src/main/java/org/telegram/ui/Components/ChatActivityEnterVi
         return true;
     }
 '@
+ $textChanged='public void onTextChanged(CharSequence charSequence, int start, int before, int count) {'
+ if(!$t.Contains($textChanged)){throw 'Pinned composer text revision marker missing'}
+ $t=$t.Replace($textChanged,$textChanged+"`n                vyrnTextRevision++;")
  $publicSend='public boolean sendMessage() {'
  if(!$t.Contains($publicSend)){throw 'Pinned private send wrapper marker missing'}
  $t=$t.Replace($publicSend,$publicSend+"`n        if (xyz.eclipseofficial.vyrn.compat.VyrnBridge.privateSendUnavailable(dialog_id)) return sendMessageInternal(true, 0, 0, 0, true);")
@@ -581,6 +586,10 @@ Edit 'TMessagesProj/src/main/java/org/telegram/messenger/MediaDataController.jav
 Edit 'TMessagesProj/src/main/java/org/telegram/ui/ChatActivity.java' {
  param($t)
  $t=(& git -c "safe.directory=$($upstream.Replace('\','/'))" -C $upstream show "${pin}:TMessagesProj/src/main/java/org/telegram/ui/ChatActivity.java") -join "`n"
+ foreach($hintRunnable in @('    private final Runnable showScheduledOrNoSoundRunnable = () -> {','    private final Runnable showScheduledHintRunnable = () -> {')){
+  if(!$t.Contains($hintRunnable)){throw 'Pinned unsupported private hint marker missing'}
+  $t=$t.Replace($hintRunnable,$hintRunnable+"`n        if (xyz.eclipseofficial.vyrn.compat.VyrnBridge.privateSendUnavailable(dialog_id)) return;")
+ }
  $marker='            int updateMask = (Integer) args[0];'
  if(!$t.Contains($marker)){throw 'Pinned private text UI refresh marker missing'}
  $t=$t.Replace($marker,$marker+"`n            if ((updateMask & xyz.eclipseofficial.vyrn.compat.VyrnBridge.PRIVATE_TEXT_UPDATE) != 0) updateVisibleRows();")
