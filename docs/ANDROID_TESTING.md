@@ -1,14 +1,22 @@
 # Local Android integration
 
+## Verification dialog Cancel and revoked devices — 2026-10-10
+
+Signal194 checks pass07:54:07 on APK85525888c876685f1a30d5a50d6835282704706e47083f588e2baa57fd0a12b8 (160 network/JNI,28 disconnected cold,6 online restart). Reuse the fixture's second recipient device after normal encrypted delivery: preserve its displayed number/session bytes, log out that real backend session, fetch the signed current roster and require only the surviving device. Reject confirmation of the old number with signal_device_not_ready; stored unverified status/number/ratchet remain unchanged and encrypted reopen retains rejection. This is a real server/device-key lifecycle component check; stale native dialog confirmation across revocation and physical devices still need acceptance.
+
+Extended -PrivateVerification first clicks native Cancel on the number dialog, requires dismissal and unchanged exact number/unverified status, then reopens and confirms/removes through actual controls. Final run passes408 checks at08:06:19 on APKd1aba0443853fc06183bfa8b01faa643f949ccaa33555f17efc0499b6bb7ee48: registration30 + rounds378. The initial menu-transition failure led to a shared exact-node bounded click wait and cached predicate result, preventing double action dispatch. Earlier totals336 are corrected to364 because registration devices store numeric check counts, not check arrays. No physical-device or complete stale-dialog lifecycle claim.
+
+Same final APK Signal194 passes08:07:43 (160 network/JNI,28 disconnected cold,6 online restart). Both suites and cleanup are terminal. Production phone-app sources are unchanged by this test/helper work, so normal122/108/159MB packages remain the previous verified outputs.
+
 ## Native device verification scenario — 2026-10-10
 
-Final harness rebuild passes38s. Final -PrivateVerification suite passes336 checks at07:45:20 on APKddb8de43553dca74fc845dc7c3c15c54178dfd6adce45cebd05214bdf3f601a6. Both final PNGs were pulled and visually inspected: same number on both devices, full UUIDs wrap, comparison instruction and both actions fit without clipping. The earlier first-frame raster issue is superseded by the final captures; the remaining lifecycle/physical/composer limits below still apply.
+Final harness rebuild passes38s. Final -PrivateVerification suite passes364 checks at07:45:20 on APKddb8de43553dca74fc845dc7c3c15c54178dfd6adce45cebd05214bdf3f601a6. Both final PNGs were pulled and visually inspected: same number on both devices, full UUIDs wrap, comparison instruction and both actions fit without clipping. The earlier first-frame raster issue is superseded by the final captures; the remaining lifecycle/physical/composer limits below still apply.
 
 Same final APK `scripts/test-signal.ps1 -Network` passes190 checks at07:48:27 (156 network/JNI,28 disconnected cold,6 online restart). An initial registrationHTTP400 was resolved for the retry by renewing only the local test invitation with the existing admin/MFA maintenance helper; credentials stayed in ignored dev.env.
 
 Run `scripts/test-two-client-messaging.ps1 -PrivateVerification` with the dedicated two-emulator local TLS setup. This independent scenario includes native registration/key publication, programmatic private-message preparation/delivery, actual chat More options → exact device UUID/status row →60-digit number → Codes match → Remove verification on both clients. Check the visible native dialog contains the current number/full peer-device UUID and inspect encrypted status after each actual click. Existing private-history/draft/offline and disabled-composer checks remain in the scenario. Complete device changes, revoked-device confirmation, navigation/session changes while dialogs are open, physical phones and composer Send remain outside its proof.
 
-The initial partial-label click failed because the shared accessibility helper matches exact text; the fixture now includes device UUID/status. Its first screenshot preceded dialog composition; the final harness waits for main-thread/accessibility idle before capture. The PNG stays in the test app's private files and is transferred as binary to ignored `.local` for inspection. The first completed336-check run at07:39:54 usedb4d5e7e8f71bff2396c99d48ef919466aa145d03ad25ee9d81183d5e3b07ba2b; the final evidence above usesddb8de... .
+The initial partial-label click failed because the shared accessibility helper matches exact text; the fixture now includes device UUID/status. Its first screenshot preceded dialog composition; the final harness waits for main-thread/accessibility idle before capture. The PNG stays in the test app's private files and is transferred as binary to ignored `.local` for inspection. The first completed364-check run at07:39:54 usedb4d5e7e8f71bff2396c99d48ef919466aa145d03ad25ee9d81183d5e3b07ba2b; the final evidence above usesddb8de... .
 
 ## Device-pair verification component checks — 2026-10-09
 

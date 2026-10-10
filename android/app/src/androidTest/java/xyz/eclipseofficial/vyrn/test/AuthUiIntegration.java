@@ -40,7 +40,7 @@ final class AuthUiIntegration {
     private boolean visible(String value){boolean[] found={false};instrumentation.runOnMainSync(()->found[0]=find(root,value)!=null);return found[0];}
     private void click(String value){instrumentation.runOnMainSync(()->{View view=find(root,value);if(view==null||!view.isEnabled())throw new AssertionError("control_unavailable");view.performClick();});}
     private void fill(String value,String text){instrumentation.runOnMainSync(()->{View view=find(root,value);if(!(view instanceof EditText))throw new AssertionError("field_unavailable");((EditText)view).setText(text);});}
-    private void await(BooleanSupplier predicate,String name) throws Exception {long deadline=System.nanoTime()+java.util.concurrent.TimeUnit.SECONDS.toNanos(25);while(!predicate.getAsBoolean()&&System.nanoTime()<deadline)Thread.sleep(100);check.verify(predicate.getAsBoolean(),name);}
+    private void await(BooleanSupplier predicate,String name) throws Exception {long deadline=System.nanoTime()+java.util.concurrent.TimeUnit.SECONDS.toNanos(25);boolean ready=predicate.getAsBoolean();while(!ready&&System.nanoTime()<deadline){Thread.sleep(100);ready=predicate.getAsBoolean();}check.verify(ready,name);}
     private org.telegram.ui.ActionBar.AlertDialog dialog(){
         org.telegram.ui.ActionBar.AlertDialog[] result={null};
         instrumentation.runOnMainSync(()->result[0]=currentDialog());
@@ -194,8 +194,7 @@ final class AuthUiIntegration {
     private boolean confirmation(int message){boolean[] matches={false};instrumentation.runOnMainSync(()->{org.telegram.ui.ActionBar.AlertDialog alert=currentDialog();matches[0]=alert!=null&&org.telegram.messenger.LocaleController.getString(message).contentEquals(alert.getMessageTextView().getText());});return matches[0];}
     private void windowClick(String text) throws Exception {
         try{await(()->windowText(text),"sessions_ui_sheet_control_visible");}catch(AssertionError failure){captureLogoutFailure();throw failure;}
-        boolean accepted=nodeClick(instrumentation.getUiAutomation().getRootInActiveWindow(),text);
-        if(!accepted)captureLogoutFailure();check.verify(accepted,"sessions_ui_sheet_control_clicked");
+        try{await(()->nodeClick(instrumentation.getUiAutomation().getRootInActiveWindow(),text),"sessions_ui_sheet_control_clicked");}catch(AssertionError failure){captureLogoutFailure();throw failure;}
     }
     private boolean nodeClick(android.view.accessibility.AccessibilityNodeInfo node,String text){
         if(node==null)return false;

@@ -125,7 +125,15 @@ final class SignalNetworkIntegration {
                 byte[] secondText=bob2.store.transaction(()->decrypt(new SessionCipher(bob2.store,b2a,aa),secondCopy));
                 check.accept(Arrays.equals(firstText,text) && Arrays.equals(secondText,text) && !firstCopy.getString("ciphertext").equals(secondCopy.getString("ciphertext")),"signal_network_two_recipient_devices_decrypt_server_copies");
                 codec(context,a,b,second,alice,bob,bob2,conversation,Arrays.asList(fallback,b2key),check);
+                SignalMessages verification=new SignalMessages(alice);JSONObject displayed=verification.verification(bob2.user,bob2.device);String displayedNumber=displayed.getString("fingerprint");byte[] deviceSession=alice.store.loadSession(b2a).serialize();
+                check.accept(!displayed.getBoolean("verified"),"signal_additional_peer_device_does_not_inherit_verification");
                 second.request("POST","/v1/auth/logout",new JSONObject(),true);
+                JSONArray active=verification.verificationDevices(bob2.user);boolean removed=true;for(int i=0;i<active.length();i++)removed&=!bob2.device.equals(active.getJSONObject(i).getString("device"));
+                check.accept(removed&&active.length()==1&&bob.device.equals(active.getJSONObject(0).getString("device")),"signal_verification_signed_roster_excludes_revoked_peer_device");
+                denied=false;try{verification.verifyCurrentPeer(bob2.user,bob2.device,displayedNumber,true);}catch(SecurityException expected){denied="signal_device_not_ready".equals(expected.getMessage());}
+                JSONObject unchanged=verification.verification(bob2.user,bob2.device);
+                check.accept(denied&&!unchanged.getBoolean("verified")&&displayedNumber.equals(unchanged.getString("fingerprint"))&&Arrays.equals(deviceSession,alice.store.loadSession(b2a).serialize()),"signal_revoked_device_displayed_number_cannot_confirm_or_change_ratchet");
+                try(SignalDeviceKeys reopened=SignalDeviceKeys.openLocal(context,a)){check.accept(!new SignalMessages(reopened).verification(bob2.user,bob2.device).getBoolean("verified"),"signal_revoked_device_rejection_preserves_encrypted_status_after_reopen");}
                 denied=false;try{a.request("POST","/v1/conversations/"+conversation+"/messages",new JSONObject(multiple.toString()).put("client_id",UUID.randomUUID().toString()),true);}catch(RestRepository.ApiException expected){denied=expected.status==409;}
                 check.accept(denied,"signal_network_revoked_recipient_copy_rejected");
                 check.accept(multipleId.equals(((JSONObject)a.request("POST","/v1/conversations/"+conversation+"/messages",multiple,true)).getString("id")),"signal_network_committed_retry_after_device_revocation");
