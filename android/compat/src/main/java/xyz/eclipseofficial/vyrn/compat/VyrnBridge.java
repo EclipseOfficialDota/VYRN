@@ -929,7 +929,7 @@ public final class VyrnBridge {
             if(in.revision<=0)throw new IllegalStateException("edit_snapshot_required");
             boolean privateEdit=in.dialog>0;
             if(in.account!=account||in.id!=in.originalId||in.peer==null||!in.serverId.equals(ids.remote("message",in.id)))throw new SecurityException("edit_identity_changed");
-            if(privateEdit?(in.peer.user_id!=in.dialog||!in.conversation.equals(conversation(in.peer))):(in.peer.chat_id<=0||-in.peer.chat_id!=in.dialog||!in.conversation.equals(ids.remote("conversation",in.peer.chat_id))))throw new SecurityException("edit_identity_changed");
+            if(privateEdit?(in.peer.user_id!=in.dialog||in.peer.chat_id!=0||in.peer.channel_id!=0):(in.peer.chat_id<=0||-in.peer.chat_id!=in.dialog||!in.conversation.equals(ids.remote("conversation",in.peer.chat_id))))throw new SecurityException("edit_identity_changed");
             if((in.flags&2048)==0||(in.flags&~(2048|8|2))!=0||in.media!=null||in.reply_markup!=null||in.rich_message!=null||in.entities!=null&&!in.entities.isEmpty())throw new UnsupportedOperationException();
             if(privateEdit){
                 if(in.session==null||!in.session.equals(repository.vault.cachedSession()))throw new SecurityException("account_changed");
@@ -1010,6 +1010,19 @@ public final class VyrnBridge {
         if(request instanceof TLRPC.TL_messages_getMessageEditData){
             TLRPC.TL_messages_getMessageEditData in=(TLRPC.TL_messages_getMessageEditData)request;
             if(in.peer==null || in.peer.chat_id<=0&&in.peer.user_id<=0 || in.id<=0)throw new UnsupportedOperationException();
+            if(in.peer.user_id>0){
+                if(in.peer.chat_id!=0||in.peer.channel_id!=0)throw new SecurityException("message_not_editable");
+                String session=repository.vault.cachedSession(),user=repository.vault.load().getString("user_id");
+                long self=UserConfig.getInstance(account).getClientUserId();JSONObject context=ids.privateContext(in.id);
+                Map<Long,java.util.Set<Integer>> deleted=MessagesStorage.getInstance(account).getVyrnDeletedMessages();
+                if(session==null||self==0||self==in.peer.user_id||self!=ids.local("user",user)||context==null||!user.equals(context.getString("sender"))||deleted==null||deleted.containsKey(in.peer.user_id)&&deleted.get(in.peer.user_id).contains(in.id))throw new SecurityException("message_not_editable");
+                try(SignalDeviceKeys keys=SignalDeviceKeys.openLocal(ApplicationLoader.applicationContext,repository)){
+                    if(!user.equals(keys.user)||!session.equals(repository.vault.cachedSession())||new SignalMessages(keys).display(ids.remote("user",in.peer.user_id),context.getString("conversation"),context.getString("message"),user,context.getInt("revision"),in.id)==null)throw new SecurityException("message_not_editable");
+                }
+                deleted=MessagesStorage.getInstance(account).getVyrnDeletedMessages();
+                if(!repository.vault.isUser(user)||!session.equals(repository.vault.cachedSession())||self!=UserConfig.getInstance(account).getClientUserId()||!context.toString().equals(String.valueOf(ids.privateContext(in.id)))||deleted==null||deleted.containsKey(in.peer.user_id)&&deleted.get(in.peer.user_id).contains(in.id))throw new SecurityException("message_not_editable");
+                return new TLRPC.TL_messages_messageEditData();
+            }
             String user=repository.vault.load().getString("user_id"),group=conversation(in.peer);
             Models.Message value=repository.messageForUser(user,ids.remote("message",in.id));
             if(value.deleted || value.encrypted!=(in.peer.user_id>0) || !user.equals(value.sender) || !group.equals(value.conversation))throw new SecurityException("message_not_editable");
