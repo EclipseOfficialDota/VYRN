@@ -4,7 +4,10 @@ $root=Split-Path $PSScriptRoot -Parent
 $adb=Join-Path $root '.tools/android-sdk/platform-tools/adb.exe'
 $package='xyz.eclipseofficial.vyrn.dev'
 $avd=(& $adb -s $Serial emu avd name) -join "`n"
-if($LASTEXITCODE -ne 0 -or $avd -notmatch '(?m)^vyrn_api35\r?$'){throw 'Only the VYRN test emulator is allowed'}
+if($LASTEXITCODE -ne 0 -or $avd -notmatch '(?m)^vyrn_api(30|35)\r?$'){throw 'Only the VYRN test emulator is allowed'}
+$api=[int]$Matches[1]
+$actualApi=(& $adb -s $Serial shell getprop ro.build.version.sdk) -join ''
+if($LASTEXITCODE -ne 0 -or $actualApi.Trim() -ne [string]$api){throw 'Android API does not match the selected VYRN AVD'}
 $apk=Join-Path $root 'artifacts/VyrnApp-dev-x86_64-debug-local-tls.apk'
 $testApk=Join-Path $root 'artifacts/VyrnApp-dev-debug-androidTest.apk'
 foreach($path in @($apk,$testApk)){
@@ -66,4 +69,5 @@ foreach($phase in $phases){
 }
 $fanout='not tested'
 if($Network){$fanout='single and two-recipient-device ciphertext delivery; authenticated text codec, atomic encrypted outgoing/native-identity/cache records, exact pending volatile text, native persistence and cold offline recovery; component fixture'}
-@{date=[DateTimeOffset]::UtcNow.ToString('o');sha256=(Get-FileHash -LiteralPath $apk).Hash.ToLowerInvariant();api=35;library='org.signal:libsignal-client:0.103.0';rounds=$rounds;private_chat_ui='foreground chat not exercised by this suite; synthetic received/pending constructor hydration, actual native pending-row storage and disconnected cold pending-row restoration; actual native composer control is covered separately by -PrivateComposer';server_fanout=$fanout;network_key_exchange=$Network.IsPresent} | ConvertTo-Json -Depth 6 | Set-Content (Join-Path $root "artifacts/$report") -Encoding utf8
+if($api -ne 35){$report=$report.Replace('.json',"-api$api.json")}
+@{date=[DateTimeOffset]::UtcNow.ToString('o');sha256=(Get-FileHash -LiteralPath $apk).Hash.ToLowerInvariant();api=$api;library='org.signal:libsignal-client:0.103.0';rounds=$rounds;private_chat_ui='foreground chat not exercised by this suite; synthetic received/pending constructor hydration, actual native pending-row storage and disconnected cold pending-row restoration; actual native composer control is covered separately by -PrivateComposer';server_fanout=$fanout;network_key_exchange=$Network.IsPresent} | ConvertTo-Json -Depth 6 | Set-Content (Join-Path $root "artifacts/$report") -Encoding utf8

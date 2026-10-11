@@ -894,7 +894,7 @@ public final class LocalIntegrationRunner extends Instrumentation {
             List<Models.User> members=b.members(group);check(members.size()==2 && members.stream().anyMatch(u->u.id.equals(memberId)),"created_group_membership");
             TLRPC.TL_updateShortSentMessage ack=(TLRPC.TL_updateShortSentMessage)queueThroughUI(new JSONObject().put("group",group),UUID.randomUUID().getMostSignificantBits(),"پیام در گروه جدید").get(30,TimeUnit.SECONDS);
             List<Models.Message> messages=b.messages(group,null,100);check(messages.size()==1 && messages.get(0).ordinal==ack.id && messages.get(0).text.equals("پیام در گروه جدید"),"created_group_message_delivery");
-            JSONObject raw=(JSONObject)a.request("GET","/v1/messages/"+messages.get(0).id,null,true);check(java.time.Duration.between(java.time.Instant.parse(raw.getString("created_at")),java.time.Instant.parse(raw.getString("expires_at"))).getSeconds()==86400,"first_message_uses_creation_TTL");
+            JSONObject raw=(JSONObject)a.request("GET","/v1/messages/"+messages.get(0).id,null,true);check(java.time.Duration.between(xyz.eclipseofficial.vyrn.data.Timestamps.parse(raw.getString("created_at")),xyz.eclipseofficial.vyrn.data.Timestamps.parse(raw.getString("expires_at"))).getSeconds()==86400,"first_message_uses_creation_TTL");
             CompletableFuture<TLObject> snapshot=new CompletableFuture<>();ConnectionsManager.getInstance(2).sendRequest(new TLRPC.TL_messages_getDialogs(),(value,error)->{if(error!=null)snapshot.completeExceptionally(new AssertionError());else snapshot.complete(value);});
             TLRPC.TL_messages_dialogs dialogs=(TLRPC.TL_messages_dialogs)snapshot.get(30,TimeUnit.SECONDS);TLRPC.Dialog ttlDialog=null;for(TLRPC.Dialog dialog:dialogs.dialogs)if(dialog.id==-local)ttlDialog=dialog;
             check(ttlDialog!=null && ttlDialog.ttl_period==86400 && (ttlDialog.flags&32)!=0,"created_group_dialog_TTL");passed.put("first_message_uses_creation_TTL").put("created_group_dialog_TTL");
@@ -906,7 +906,7 @@ public final class LocalIntegrationRunner extends Instrumentation {
             changeGroupTTL(local,3600);changeGroupTTL(local,0);changeGroupTTL(local,3600);
             changed=b.conversationDetails(group);check(changed.conversation.title.equals("نام جدید گروه") && changed.conversation.disappearingSeconds==3600,"group_TTL_preserves_title");
             String expiring=a.send(group,UUID.randomUUID().toString(),"پیام با زمان جدید");JSONObject timed=(JSONObject)a.request("GET","/v1/messages/"+expiring,null,true);
-            check(java.time.Duration.between(java.time.Instant.parse(timed.getString("created_at")),java.time.Instant.parse(timed.getString("expires_at"))).getSeconds()==3600,"new_message_uses_changed_TTL");passed.put("MessagesController_group_TTL").put("group_TTL_disable").put("group_TTL_preserves_title").put("new_message_uses_changed_TTL");
+            check(java.time.Duration.between(xyz.eclipseofficial.vyrn.data.Timestamps.parse(timed.getString("created_at")),xyz.eclipseofficial.vyrn.data.Timestamps.parse(timed.getString("expires_at"))).getSeconds()==3600,"new_message_uses_changed_TTL");passed.put("MessagesController_group_TTL").put("group_TTL_disable").put("group_TTL_preserves_title").put("new_message_uses_changed_TTL");
             verifyRealtimeGroup(a,b,group,local,"نام از دستگاه دیگر",7200);
             verifyRealtimeGroup(a,b,group,local,"نام از دستگاه دیگر",0);
             verifyRealtimeGroup(a,b,group,local,"نام جدید گروه",3600);

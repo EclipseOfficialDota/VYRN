@@ -502,7 +502,7 @@ final class SignalNetworkIntegration {
         check.accept(!expiring.isNull("expires_at") && text.equals(receiving.receive(alice.user,conversation,expiring,null)) && text.equals(receiving2.receive(alice.user,conversation,expiring,senderKey)) && text.equals(sending.cachedText(expiresMessage)),"signal_codec_server_expiry_deadline_cached_all_devices");
         JSONObject extension=new JSONObject(expiring.toString()).put("expires_at",java.time.Instant.now().plusSeconds(3600).toString());
         check.accept(text.equals(receiving.receive(alice.user,conversation,extension,null)),"signal_codec_duplicate_expiry_cannot_extend_learned_deadline");
-        long deadline=java.time.Instant.parse(expiring.getString("expires_at")).toEpochMilli();
+        long deadline=xyz.eclipseofficial.vyrn.data.Timestamps.parse(expiring.getString("expires_at")).toEpochMilli();
         while(System.currentTimeMillis()<=deadline)android.os.SystemClock.sleep(Math.max(1,Math.min(100,deadline-System.currentTimeMillis()+1)));
         check.accept(receiving.cachedText(expiresMessage)==null && sending.cachedText(expiresMessage)==null && bob.store.loadValue("private-cache",expiresMessage+"_1")==null && alice.store.loadValue("private-own",expiresClient)==null && alice.store.loadValue("private-outgoing",expiresClient)==null,"signal_codec_offline_cache_read_expiry_purges_plaintext");
         check.accept(receiving2.pruneExpired()==1 && receiving2.pruneExpired()==0 && bob2.store.loadValue("private-cache",expiresMessage+"_1")==null,"signal_codec_idle_expiry_sweep_is_durable_idempotent");

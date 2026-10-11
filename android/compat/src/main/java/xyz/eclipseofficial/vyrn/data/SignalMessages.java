@@ -253,7 +253,7 @@ public final class SignalMessages {
         JSONObject current=(JSONObject)keys.request("GET","/v1/messages/"+message,null);
         if(!message.equals(current.getString("id"))||!conversation.equals(current.getString("conversation_id"))||!keys.user.equals(current.getString("sender_id"))||current.get("encrypted")!=Boolean.TRUE)throw new SecurityException("signal_edit_context_changed");
         String client=id(current.getString("client_id"));
-        if(!current.isNull("deleted_at")||!current.isNull("expires_at")&&!Instant.parse(current.getString("expires_at")).isAfter(Instant.now())){receive(peer,conversation,current);throw new SecurityException("signal_message_deleted");}
+        if(!current.isNull("deleted_at")||!current.isNull("expires_at")&&!Timestamps.parse(current.getString("expires_at")).isAfter(Instant.now())){receive(peer,conversation,current);throw new SecurityException("signal_message_deleted");}
         if(!pending.isNull("body")&&current.getInt("revision")==revision+1&&canonical(current.getJSONObject("payload")).equals(canonical(pending.getJSONObject("body").getJSONObject("payload")))){receive(peer,conversation,current);return current;}
         if(current.getInt("revision")!=revision)throw new SecurityException("signal_edit_revision_conflict");
         requirePrivateConversation(peer,conversation);receive(peer,conversation,current);
@@ -303,7 +303,7 @@ public final class SignalMessages {
     public String receive(String peer,String conversation,JSONObject message) throws Exception {synchronized(keys.guard()){
         keys.requireSession();id(peer);id(conversation);String owner=id(string(message,"sender_id")),device=id(string(message,"sender_device"));
         if(peer.equals(keys.user)||!conversation.equals(string(message,"conversation_id"))||!owner.equals(peer)&&!owner.equals(keys.user)||message.get("encrypted")!=Boolean.TRUE)throw new SecurityException("signal_message_context_changed");
-        if(!message.isNull("deleted_at")||!message.isNull("expires_at")&&!Instant.parse(string(message,"expires_at")).isAfter(Instant.now()))return receive(peer,conversation,message,null);
+        if(!message.isNull("deleted_at")||!message.isNull("expires_at")&&!Timestamps.parse(string(message,"expires_at")).isAfter(Instant.now()))return receive(peer,conversation,message,null);
         JSONObject sender=message.getJSONObject("payload").getJSONObject("sender");senderTuple(sender);
         if(!owner.equals(string(sender,"user_id"))||!device.equals(string(sender,"device_id")))throw new SecurityException("signal_sender_changed");
         SignalDeviceKeys.ClaimedKey snapshot=null;
@@ -321,8 +321,8 @@ public final class SignalMessages {
         String cacheKey=messageId+"_"+revision;
         return store.transaction(()->{
             JSONObject head=load("private-head",messageId);if(head!=null && (!conversation.equals(head.getString("conversation")) || !owner.equals(head.getString("owner")) || !client.equals(head.getString("client")) || ordinal!=head.getInt("ordinal")))throw new SecurityException("signal_message_rebound");
-            JSONObject next=head(messageId,conversation,owner,client,head==null?revision:Math.max(revision,head.getInt("revision")),ordinal);String deadline=message.isNull("expires_at")?null:Instant.parse(string(message,"expires_at")).toString();
-            if(head!=null && !head.isNull("expires_at") && (deadline==null || Instant.parse(head.getString("expires_at")).isBefore(Instant.parse(deadline))))deadline=head.getString("expires_at");
+            JSONObject next=head(messageId,conversation,owner,client,head==null?revision:Math.max(revision,head.getInt("revision")),ordinal);String deadline=message.isNull("expires_at")?null:Timestamps.parse(string(message,"expires_at")).toString();
+            if(head!=null && !head.isNull("expires_at") && (deadline==null || Timestamps.parse(head.getString("expires_at")).isBefore(Timestamps.parse(deadline))))deadline=head.getString("expires_at");
             next.put("expires_at",deadline==null?JSONObject.NULL:deadline);
             if(!message.isNull("deleted_at") || expired(next)){retire(next);return null;}
             if(head!=null && (head.optBoolean("deleted") || revision<head.getInt("revision")))throw new SecurityException("signal_message_deleted_or_stale");
@@ -379,7 +379,7 @@ public final class SignalMessages {
     /** Call on startup and from the lifecycle worker; cache reads also enforce learned deadlines. */
     // ponytail: decrypt all retained heads; add a deadline index if large-history measurements require it.
     public int pruneExpired() throws Exception {synchronized(keys.guard()){keys.requireSession();return store.transaction(()->{int removed=0;for(String message:store.valueNames("private-head")){JSONObject head=load("private-head",message);if(!head.optBoolean("deleted") && expired(head)){retire(head);removed++;}}return removed;});}}
-    private static boolean expired(JSONObject head) throws Exception {return !head.isNull("expires_at") && !Instant.parse(head.getString("expires_at")).isAfter(Instant.now());}
+    private static boolean expired(JSONObject head) throws Exception {return !head.isNull("expires_at") && !Timestamps.parse(head.getString("expires_at")).isAfter(Instant.now());}
     private void retire(JSONObject head) throws Exception {
         String message=head.getString("message_id"),client=head.getString("client");save("private-head",message,head.put("deleted",true));store.removeValues("private-cache",message+"_");store.removeValues("private-edit",message+"_");
         if(keys.user.equals(head.getString("owner"))){store.removeValue("private-own",client);JSONObject outgoing=load("private-outgoing",client);if(outgoing!=null&&outgoing.optBoolean("native_cancel_requested")&&outgoing.has("native_ui")&&!outgoing.optBoolean("native_ui_done")){outgoing.remove("text");outgoing.remove("body");outgoing.remove("native_attempt");outgoing.put("native_cancelled",true).put("native_failed",false).put("native_error",0).put("native_next_at",0);save("private-outgoing",client,outgoing);}else store.removeValue("private-outgoing",client);store.removeValue("private-own-message",message);store.saveValue("private-send-fence",client,new byte[]{1});}

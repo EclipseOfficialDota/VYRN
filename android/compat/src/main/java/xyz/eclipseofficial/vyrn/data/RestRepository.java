@@ -4,7 +4,6 @@ import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
-import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import javax.net.ssl.HttpsURLConnection;
@@ -70,9 +69,9 @@ public final class RestRepository implements Models.Repository {
     public void setHistoryTTL(String id,int seconds) throws Exception {request("PATCH","/v1/conversations/"+id,new JSONObject().put("disappearing_seconds",seconds),true);}
     public Models.ConversationDetails conversationDetails(String id) throws Exception {
         JSONObject data=(JSONObject)request("GET","/v1/conversations/"+id,null,true);JSONArray raw=data.getJSONArray("members");List<Models.Member> members=new ArrayList<>();
-        for(int i=0;i<raw.length();i++){JSONObject member=raw.getJSONObject(i);members.add(new Models.Member(user(member),member.getString("role"),(int)Instant.parse(member.getString("joined_at")).getEpochSecond()));}
+        for(int i=0;i<raw.length();i++){JSONObject member=raw.getJSONObject(i);members.add(new Models.Member(user(member),member.getString("role"),(int)Timestamps.parse(member.getString("joined_at")).getEpochSecond()));}
         Models.Conversation conversation=new Models.Conversation(data.getString("id"),data.getString("kind"),data.getString("title"),data.getString("role"),members.size(),data.getInt("disappearing_seconds"));
-        return new Models.ConversationDetails(conversation,members,(int)Instant.parse(data.getString("created_at")).getEpochSecond());
+        return new Models.ConversationDetails(conversation,members,(int)Timestamps.parse(data.getString("created_at")).getEpochSecond());
     }
     public List<Models.User> searchUsers(String query,int limit) throws Exception {
         JSONArray data=(JSONArray)request("GET","/v1/users/search?q="+java.net.URLEncoder.encode(query,"UTF-8")+"&limit="+Math.max(1,Math.min(limit,50)),null,true);
@@ -85,7 +84,7 @@ public final class RestRepository implements Models.Repository {
     private Models.User user(JSONObject data) throws Exception{return new Models.User(data.getString("id"),data.getString("display_name"),data.optString("first_name",data.getString("display_name")),data.optString("last_name",""),data.optString("about",""),data.isNull("avatar_id")?null:data.optString("avatar_id",null));}
     public Models.Avatar avatarForUser(String owner,String target) throws Exception {
         JSONObject value=(JSONObject)requestForUser(owner,"GET","/v1/users/"+target+"/avatar",null,true);
-        return new Models.Avatar(value.getString("id"),value.getString("content_type"),value.getInt("width"),value.getInt("height"),value.getInt("size"),Math.toIntExact(Instant.parse(value.getString("date")).getEpochSecond()));
+        return new Models.Avatar(value.getString("id"),value.getString("content_type"),value.getInt("width"),value.getInt("height"),value.getInt("size"),Math.toIntExact(Timestamps.parse(value.getString("date")).getEpochSecond()));
     }
     public void deleteAvatarForUser(String owner,String id) throws Exception {requestForUser(owner,"DELETE","/v1/me/avatar/"+id,null,true);}
     public String uploadAvatarForUser(String owner,byte[] image) throws Exception {
@@ -126,7 +125,7 @@ public final class RestRepository implements Models.Repository {
     public boolean blockedForUser(String owner,String target) throws Exception{return ((JSONObject)requestForUser(owner,"GET","/v1/blocks/"+target,null,true)).getBoolean("blocked");}
     public Models.BlockedPage blockedForUser(String owner,int offset,int limit) throws Exception{
         JSONObject page=(JSONObject)requestForUser(owner,"GET","/v1/blocks?offset="+offset+"&limit="+limit,null,true);JSONArray items=page.getJSONArray("items");List<Models.BlockedUser> users=new ArrayList<>();
-        for(int i=0;i<items.length();i++){JSONObject item=items.getJSONObject(i);users.add(new Models.BlockedUser(user(item),item.isNull("created_at")?0:Math.toIntExact(Instant.parse(item.getString("created_at")).getEpochSecond())));}
+        for(int i=0;i<items.length();i++){JSONObject item=items.getJSONObject(i);users.add(new Models.BlockedUser(user(item),item.isNull("created_at")?0:Math.toIntExact(Timestamps.parse(item.getString("created_at")).getEpochSecond())));}
         return new Models.BlockedPage(users,page.getInt("count"));
     }
     public List<Models.User> members(String conversation) throws Exception {
@@ -146,7 +145,7 @@ public final class RestRepository implements Models.Repository {
     private Models.Message message(JSONObject m) throws Exception {
         boolean encrypted=m.getBoolean("encrypted");int ordinal=m.getInt("ordinal");if(ordinal<=0)throw new IllegalStateException("invalid_message_order");
         int revision=m.getInt("revision");if(revision<1)throw new IllegalStateException("invalid_message_revision");
-        return new Models.Message(m.getString("id"),m.getString("sender_id"),encrypted?"":m.getJSONObject("payload").optString("text"),(int)Instant.parse(m.getString("created_at")).getEpochSecond(),ordinal,encrypted,!m.isNull("deleted_at"),m.getString("conversation_id"),revision,m.isNull("edited_at")?0:(int)Instant.parse(m.getString("edited_at")).getEpochSecond());
+        return new Models.Message(m.getString("id"),m.getString("sender_id"),encrypted?"":m.getJSONObject("payload").optString("text"),(int)Timestamps.parse(m.getString("created_at")).getEpochSecond(),ordinal,encrypted,!m.isNull("deleted_at"),m.getString("conversation_id"),revision,m.isNull("edited_at")?0:(int)Timestamps.parse(m.getString("edited_at")).getEpochSecond());
     }
     public Models.Message message(String id) throws Exception {return message((JSONObject)request("GET","/v1/messages/"+id,null,true));}
     public Models.Message editText(String user,String id,int revision,String text) throws Exception { synchronized(vault.guard()) {

@@ -42,6 +42,16 @@ final class SignalIntegration {
     private static File database(Context context,String user,String device){return new File(context.getNoBackupFilesDir(),"vyrn_signal_"+user+"_"+device+".db");}
     private static boolean contains(byte[] data,byte[] needle){outer:for(int i=0;i<=data.length-needle.length;i++){for(int j=0;j<needle.length;j++)if(data[i+j]!=needle[j])continue outer;return true;}return false;}
     static void run(Context context,String phase,BiConsumer<Boolean,String> check) throws Exception {
+        if(phase.equals("signal")) {
+            java.time.Instant expected=java.time.Instant.ofEpochSecond(1767225600L,123456789);
+            check.accept(expected.equals(xyz.eclipseofficial.vyrn.data.Timestamps.parse("2026-01-01T00:00:00.123456789Z"))
+                    && expected.equals(xyz.eclipseofficial.vyrn.data.Timestamps.parse("2026-01-01T00:00:00.123456789+00:00"))
+                    && expected.equals(xyz.eclipseofficial.vyrn.data.Timestamps.parse("2026-01-01T03:30:00.123456789+03:30")),"timestamp_utc_numeric_offset_and_nanoseconds");
+            boolean denied=false;
+            try {xyz.eclipseofficial.vyrn.data.Timestamps.parse("2026-01-01T00:00:00");}
+            catch(java.time.format.DateTimeParseException expectedFailure) {denied=true;}
+            check.accept(denied,"timestamp_missing_offset_rejected");
+        }
         File state=new File(context.getFilesDir(),"vyrn-signal-test.json");
         if(phase.equals("signal-restart")){
             JSONObject saved=new JSONObject(new String(Files.readAllBytes(state.toPath()),StandardCharsets.UTF_8));

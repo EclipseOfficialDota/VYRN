@@ -1,4 +1,4 @@
-param([ValidateSet('vyrn_api35','vyrn_api35_peer')][string]$AvdName='vyrn_api35')
+param([ValidateSet('vyrn_api35','vyrn_api35_peer','vyrn_api30')][string]$AvdName='vyrn_api35')
 $ErrorActionPreference='Stop'
 $ProgressPreference='SilentlyContinue'
 $root=Split-Path $PSScriptRoot -Parent
@@ -29,15 +29,17 @@ if(!(Test-Path -LiteralPath $emulatorMetadata)){
     $license.InnerText=$officialLicense.InnerText
     $metadata.Save($emulatorMetadata)
 }
-$target=Join-Path $sdk 'system-images/android-35/default/x86_64'
+$api=if($AvdName -eq 'vyrn_api30'){30}else{35}
+$imagePackage="system-images;android-$api;default;x86_64"
+$target=Join-Path $sdk "system-images/android-$api/default/x86_64"
 if(!(Test-Path -LiteralPath (Join-Path $target 'source.properties'))){
     $catalogPath=Join-Path $root '.tools/system-images.xml'
     Invoke-WebRequest 'https://dl.google.com/android/repository/sys-img/android/sys-img2-3.xml' -OutFile $catalogPath
     [xml]$catalog=Get-Content -LiteralPath $catalogPath -Raw
-    $package=$catalog.SelectNodes('//*[local-name()="remotePackage"]') | Where-Object {$_.path -eq 'system-images;android-35;default;x86_64'} | Select-Object -First 1
-    if(!$package){throw 'Official Android 35 x86_64 image not found'}
+    $package=$catalog.SelectNodes('//*[local-name()="remotePackage"]') | Where-Object {$_.path -eq $imagePackage} | Select-Object -First 1
+    if(!$package){throw "Official Android $api x86_64 image not found"}
     $archive=$package.archives.archive.complete
-    $zip=Join-Path $root '.tools/android-35-x86_64.zip'
+    $zip=Join-Path $root ".tools/android-$api-x86_64.zip"
     if(!(Test-Path -LiteralPath $zip)){Invoke-WebRequest ('https://dl.google.com/android/repository/sys-img/android/'+$archive.url) -OutFile $zip}
     if((Get-FileHash $zip -Algorithm SHA1).Hash -ne $archive.checksum.InnerText){throw 'System image checksum failed'}
     $unpack=Join-Path $root ('.tools/unpack-system-image-'+[guid]::NewGuid().ToString('N'))
@@ -57,7 +59,7 @@ $env:JAVA_TOOL_OPTIONS='-Djavax.net.ssl.trustStoreType=Windows-ROOT -Djavax.net.
 if($proxy.Host -ne 'dl.google.com'){$env:JAVA_TOOL_OPTIONS+=" -Dhttps.proxyHost=$($proxy.Host) -Dhttps.proxyPort=$($proxy.Port) -Dhttp.proxyHost=$($proxy.Host) -Dhttp.proxyPort=$($proxy.Port)"}
 $avd=Join-Path $env:ANDROID_AVD_HOME "$AvdName.avd"
 if(!(Test-Path -LiteralPath (Join-Path $avd 'config.ini'))){
-    'no' | & (Join-Path $sdk 'cmdline-tools/latest/bin/avdmanager.bat') create avd --name $AvdName --package 'system-images;android-35;default;x86_64' --path $avd
+    'no' | & (Join-Path $sdk 'cmdline-tools/latest/bin/avdmanager.bat') create avd --name $AvdName --package $imagePackage --path $avd
     if($LASTEXITCODE -ne 0){throw 'AVD creation failed'}
 }
-Write-Output 'Verified Android 35 x86_64 system image and local VYRN AVD are ready.'
+Write-Output "Verified Android $api x86_64 system image and local VYRN AVD are ready."

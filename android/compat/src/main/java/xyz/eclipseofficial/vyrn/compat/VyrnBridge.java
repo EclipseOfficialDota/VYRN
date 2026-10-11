@@ -457,7 +457,7 @@ public final class VyrnBridge {
                 try{display=messages.display(peer,context.getString("conversation"),context.getString("message"),sender,context.getInt("revision"),id);}catch(SecurityException changed){if(!"signal_display_context_changed".equals(changed.getMessage()))throw changed;display=null;}
                 if(display==null){JSONObject packet=(JSONObject)bridge.repository.requestForSession(keys.user,session,"GET","/v1/messages/"+context.getString("message"),null);messages.receive(peer,context.getString("conversation"),packet);display=messages.display(peer,context.getString("conversation"),context.getString("message"),sender,context.getInt("revision"),id);}
             }
-            if(display==null)return;final String text=display.getString("text");final long expiry=display.isNull("expires_at")?Long.MAX_VALUE:java.time.Instant.parse(display.getString("expires_at")).toEpochMilli();
+            if(display==null)return;final String text=display.getString("text");final long expiry=display.isNull("expires_at")?Long.MAX_VALUE:xyz.eclipseofficial.vyrn.data.Timestamps.parse(display.getString("expires_at")).toEpochMilli();
             AndroidUtilities.runOnUIThread(()->{try{
                 MessageObject target=reference.get();if(!samePrivateRow(target,row,id,dialog,senderId,date,edited,placeholder)||UserConfig.getInstance(account).getClientUserId()!=owner||!bridge.repository.vault.isUser(authenticatedUser)||!session.equals(bridge.repository.vault.cachedSession())||expiry<=System.currentTimeMillis()||!context.toString().equals(String.valueOf(bridge.ids.privateContext(id))))return;
                 Map<Long,java.util.Set<Integer>> deleted=MessagesStorage.getInstance(account).getVyrnDeletedMessages();if(deleted==null||deleted.containsKey(dialog)&&deleted.get(dialog).contains(id))return;
@@ -759,8 +759,8 @@ public final class VyrnBridge {
             value.current=row.getBoolean("current");value.encrypted_requests_disabled=true;value.call_requests_disabled=true;value.flags=(value.current?1:0)|8|16;
             value.hash=ids.local(kind,row.getString("id"));value.device_model=row.getString("device_name");
             value.platform="";value.system_version="";value.app_name="VYRN";value.app_version="";value.ip="";value.country="";value.region="";
-            value.date_created=Math.toIntExact(java.time.Instant.parse(row.getString("created_at")).getEpochSecond());
-            value.date_active=Math.toIntExact(java.time.Instant.parse(row.getString("last_seen")).getEpochSecond());result.authorizations.add(value);
+            value.date_created=Math.toIntExact(xyz.eclipseofficial.vyrn.data.Timestamps.parse(row.getString("created_at")).getEpochSecond());
+            value.date_active=Math.toIntExact(xyz.eclipseofficial.vyrn.data.Timestamps.parse(row.getString("last_seen")).getEpochSecond());result.authorizations.add(value);
         }
         return result;
     }

@@ -1,3 +1,14 @@
+API35 network39012 exits0/235 on the same final local APK after the timestamp change. This is component regression coverage; older native UI561/563 remains tied to its original APK.
+
+## Android 11 compatibility — 2026-10-11
+
+The requested phone range is roughly five years old through current devices. Keep minSdk26 (Android8) and both ARM64/ARMv7 in the phone Universal Debug APK. Manifest support is not physical-device acceptance. Xiaomi Note10 Pro installation remains unverified; no Android version/installer reason or physical ADB evidence was supplied.
+
+Create the checksum-verified official Android11/API30 x86_64 AVD with scripts/start-emulator.ps1 -Serial emulator-5564 -ColdBoot. Existing API35 AVDs are preserved. Run scripts/test-signal.ps1 -Serial emulator-5564, then the same command with -Network, then scripts/test-android-smoke.ps1 -Serial emulator-5564 -LocalTest. Do not overlap ADB suites. API30 reports use separate filenames; measured API must match the AVD name.
+
+Actual older-platform testing found that Instant.parse rejected numeric-offset API timestamps. Timestamps.parse uses OffsetDateTime.parse and converts to Instant; explicit offsets remain mandatory. The regression checks cover Z, +00:00, +03:30 and nanosecond precision, and reject offset-free timestamps. The expiry test harness uses the same parser.
+
+Final local test APK8ac89c3f8eea0197a7ab83c53e3ed01e52e16e866743d34d9df6e59c51fa9c19 passes API30 Signal29 checks (23+6), network235 (169+46+20), and two stable cold launcher starts. These are x86_64 emulator results, not ARM installation or full native messaging UI acceptance. Current normal phone APK hashes are recorded in artifacts/apk-verification.json. The older two-client561/563 evidence below belongs to572509 and was not rerun on this new build.
 ## Private edit offline intent and native Retry — 2026-10-11
 
 After building the local x86_64 instrumentation APK, run `scripts/test-signal.ps1 -Network` for235 component checks, then `scripts/test-two-client-messaging.ps1 -PrivateComposerEditOffline` for561 checks using actual Edit/Done/Retry in both independent emulator directions. Do not overlap ADB suites. The host discovers the dedicated127.0.0.1:18443 listener, verifies its executable/upstream, stops that proxy after preflight to close existing HTTPS connections and restores it with the same CA. Removing ADB reverse alone did not prove disconnection of a live process. Production services are not stopped.

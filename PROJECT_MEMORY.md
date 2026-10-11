@@ -1,3 +1,12 @@
+API35 network39012 exits0/235 on the same final local APK after the timestamp change. This is component regression coverage; older native UI561/563 remains tied to its original APK.
+
+## Android 11 compatibility checkpoint — 2026-10-11
+
+Official API30/default/x86_64 image checksum verified; new isolated vyrn_api30 AVD on5564 preserves existing API35 devices. Actual network run41128 failed production RestRepository.message DateTimeParseException. Shared explicit-offset parser replaced Instant.parse in REST dates, private expiry and native bridge dates. Local35289 build passes2m19s. Run77219 then reached the same problem in the test's expiry timestamp (SignalNetworkIntegration.codec line505); fixed harness parser too. Local75520 build passes2m2s.
+
+Final local APK8ac89c3f8eea0197a7ab83c53e3ed01e52e16e866743d34d9df6e59c51fa9c19: API30 network61121 exits0/235, Signal21326 exits0/29 with UTC/offset/precision/reject-offset-free regression checks, smoke88670 exits0 with installation, launcher resolution, two actual cold starts and no observed crash. Separate artifacts/android-signal-network-api30.json, android-signal-api30.json, android-smoke-api30.json preserve API35 evidence.
+
+Normal phone24145 build exits0/2m; verify-apks passes signatures/package/minAPI26/ARM architectures/no localCA. ARM64=122477389 bytes/ffc12a77ffc44d09b7b76c3e1218f63adc68214243b6b88edcd920649ebb7ac1; ARMv7=108190695/a933ba8dac6401ddf86b4a63acde52a90510b3e6378a1d4f7a0f339a5a06961e; Universal=158702806/b820966996b8e1e2de33405c0bf0231f4dff786e327b0b023a79767f4def1f2e. All Debug; no final signing/production server change. Emulator support does not confirm the Xiaomi installation fix or all five-year phones. Full original goal remains active; already-offline native edit preflight and cold pending editor recovery were inspected but not changed in this checkpoint.
 ## Private edit offline intent and native Retry accepted — 2026-10-11
 
 SignalMessages.stageEdit validates authenticated cached owner/peer/conversation/client/revision/participants, saves text/session/body-null to existing encrypted private-edit journal before transport HTTP, no claims/ciphertext/ratchet. Exact retries preserve intent; prepare checks server revision/live membership/ready roster, then atomically fills body/inner with ratchet. Original native private edit error dialog exposes actual Retry using original captured request/session and guarded updates. New offline component/native UI tests; runner reports cause class/status only, no error text/secrets.
