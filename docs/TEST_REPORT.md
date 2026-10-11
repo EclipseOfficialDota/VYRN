@@ -1,3 +1,9 @@
+## Media descriptor access and download ranges — 2026-10-11
+
+Pinned Go1.26.8 compiles Linux API tests; actual Ubuntu-24.04/PostgreSQL isolated-schema run97e3d1 exits0 with TestIntegrationMedia, TestIntegrationExpiryAndMediaCollection and TestAvatarImagesMetadataAndAccess passing. Existing media test now verifies descriptor fields/no storage-key exposure, authentication and unpublished/outsider denial, live referenced-message access, SHA256 ETag/If-Range byte range, expiry/deletion recipient revocation, retained owner access and truncated-file rejection. Existing disk-reserve and text-message survival checks remain.
+
+Metadata and bytes share the same SQL access boundary. New source endpoint and ETag are not yet deployed to local running Core or VPS, and native chat attachments/progress/cancel/upload resume/private-media encryption are not established. Android binaries unchanged. Windows direct DB test failed because WSL PG listens only127.0.0.1; Linux stdin LF corrected a Windows CRLF DSN setup error before the successful real run. No database listener expansion or production change.
+
 ## Account lifecycle regression — 2026-10-11
 
 Same final local APK b2da7451a54b77d2758f1830630848b48828226c9fc1eb5e71ef0a7be46eeebb: auth97274 exits0/12, sessions1818 exits0/67, logout25511 exits0/38 across3phases, onboarding31960 exits0/45 across5phases, sessions-network6733 PASS/97. Total259; reports2026-10-11 at21:32:33/21:33:33/21:34:34/21:35:14/21:36:03+03:30, no startup attach retries. Covers original UI recovery/login, session actions, offline/online logout and current-session revocation, cold recovery-code lifecycle and actual session-network failure/retry. Mixed58387 auth+sessions failed a fresh-account setup guard; separate accepted invocations required. No acceptance attributed to mixed failure.

@@ -127,6 +127,7 @@ func (s *Server) Handler() http.Handler {
 	secure("GET /v1/ws", s.websocket)
 	secure("POST /v1/media", s.upload)
 	secure("GET /v1/media/{id}", s.download)
+	secure("GET /v1/media/{id}/metadata", s.mediaMetadata)
 	secure("POST /v1/admin/unlock", s.adminUnlock)
 	admin := func(pattern string, fn http.HandlerFunc) { mux.Handle(pattern, s.requireAuth(s.requireAdmin(fn))) }
 	admin("GET /v1/admin/dashboard", s.adminDashboard)

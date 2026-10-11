@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -262,15 +263,62 @@ func (s *Server) deleteAvatar(w http.ResponseWriter, r *http.Request) {
 	}
 	w.WriteHeader(204)
 }
+
+type mediaDetails struct {
+	ID           string    `json:"id"`
+	Kind         string    `json:"kind"`
+	Filename     string    `json:"filename"`
+	ContentType  string    `json:"content_type"`
+	Size         int64     `json:"size"`
+	SHA256       string    `json:"sha256"`
+	Encrypted    bool      `json:"encrypted"`
+	CreatedAt    time.Time `json:"created_at"`
+	Conversation *string   `json:"conversation_id"`
+	storageKey   string
+}
+
+// Metadata and bytes must use the same live-message membership boundary.
+func (s *Server) accessibleMedia(ctx context.Context, id, user string) (mediaDetails, error) {
+	var value mediaDetails
+	err := s.db.QueryRow(ctx, `SELECT f.id::text,f.kind,f.filename,f.content_type,f.size,f.sha256,f.encrypted,f.created_at,f.conversation_id::text,f.storage_key FROM media f WHERE f.id=$1 AND (f.owner_id=$2 OR EXISTS(SELECT 1 FROM users u WHERE u.avatar_id=f.id AND NOT u.disabled) OR EXISTS(SELECT 1 FROM messages msg JOIN members m ON m.conversation_id=msg.conversation_id WHERE msg.media_id=f.id AND m.user_id=$2 AND msg.deleted_at IS NULL AND (msg.expires_at IS NULL OR msg.expires_at>now())))`, id, user).Scan(&value.ID, &value.Kind, &value.Filename, &value.ContentType, &value.Size, &value.SHA256, &value.Encrypted, &value.CreatedAt, &value.Conversation, &value.storageKey)
+	return value, err
+}
+
+func (s *Server) mediaMetadata(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if !validID(id) {
+		fail(w, 404, "not_found")
+		return
+	}
+	value, err := s.accessibleMedia(r.Context(), id, current(r).UserID)
+	if err == pgx.ErrNoRows {
+		fail(w, 404, "not_found")
+		return
+	}
+	if err != nil {
+		s.internal(w)
+		return
+	}
+	path, err := (storage.Local{Root: s.cfg.MediaDir}).Path(value.storageKey)
+	if err != nil {
+		s.internal(w)
+		return
+	}
+	info, err := os.Stat(path)
+	if err != nil || !info.Mode().IsRegular() || info.Size() != value.Size {
+		fail(w, 404, "not_found")
+		return
+	}
+	respond(w, 200, value)
+}
+
 func (s *Server) download(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	if !validID(id) {
 		fail(w, 404, "not_found")
 		return
 	}
-	var key, name, contentType string
-	var size int64
-	err := s.db.QueryRow(r.Context(), `SELECT storage_key,filename,content_type,size FROM media f WHERE f.id=$1 AND (f.owner_id=$2 OR EXISTS(SELECT 1 FROM users u WHERE u.avatar_id=f.id AND NOT u.disabled) OR EXISTS(SELECT 1 FROM messages msg JOIN members m ON m.conversation_id=msg.conversation_id WHERE msg.media_id=f.id AND m.user_id=$2 AND msg.deleted_at IS NULL AND (msg.expires_at IS NULL OR msg.expires_at>now())))`, id, current(r).UserID).Scan(&key, &name, &contentType, &size)
+	value, err := s.accessibleMedia(r.Context(), id, current(r).UserID)
 	if err == pgx.ErrNoRows {
 		fail(w, 404, "not_found")
 		return
@@ -280,7 +328,7 @@ func (s *Server) download(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	store := storage.Local{Root: s.cfg.MediaDir}
-	path, err := store.Path(key)
+	path, err := store.Path(value.storageKey)
 	if err != nil {
 		s.internal(w)
 		return
@@ -292,12 +340,13 @@ func (s *Server) download(w http.ResponseWriter, r *http.Request) {
 	}
 	defer f.Close()
 	info, err := f.Stat()
-	if err != nil {
-		s.internal(w)
+	if err != nil || !info.Mode().IsRegular() || info.Size() != value.Size {
+		fail(w, 404, "not_found")
 		return
 	}
-	w.Header().Set("Content-Type", contentType)
-	w.Header().Set("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": name}))
-	w.Header().Set("Content-Length", strconv.FormatInt(size, 10))
-	http.ServeContent(w, r, name, info.ModTime(), f)
+	w.Header().Set("Content-Type", value.ContentType)
+	w.Header().Set("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": value.Filename}))
+	w.Header().Set("Content-Length", strconv.FormatInt(value.Size, 10))
+	w.Header().Set("ETag", `"`+value.SHA256+`"`)
+	http.ServeContent(w, r, value.Filename, info.ModTime(), f)
 }

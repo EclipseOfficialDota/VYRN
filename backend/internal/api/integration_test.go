@@ -290,8 +290,43 @@ func TestIntegrationMedia(t *testing.T) {
 		t.Fatal("decode media")
 	}
 	id := media["id"].(string)
+	metadataPath := "/v1/media/" + id + "/metadata"
+	f.request("GET", metadataPath, "", nil, 401)
+	f.request("GET", "/v1/media/not-an-id/metadata", a.Access, nil, 404)
+	var details map[string]any
+	if json.Unmarshal(f.request("GET", metadataPath, a.Access, nil, 200), &details) != nil || details["id"] != id || details["filename"] != "sample.txt" || details["kind"] != "file" || details["size"] != float64(len("test file content")) || details["sha256"] != media["sha256"] || details["encrypted"] != false || details["conversation_id"] != group || details["storage_key"] != nil || details["storageKey"] != nil {
+		t.Fatal("media descriptor or private storage key exposure")
+	}
+	f.request("GET", metadataPath, b.Access, nil, 404)
 	f.request("GET", "/v1/media/"+id, b.Access, nil, 404)
-	f.request("POST", "/v1/conversations/"+group+"/messages", a.Access, messageInput{ClientID: uuid.NewString(), Payload: json.RawMessage(`{"text":"file"}`), MediaID: &id}, 201)
+	sent := f.request("POST", "/v1/conversations/"+group+"/messages", a.Access, messageInput{ClientID: uuid.NewString(), Payload: json.RawMessage(`{"text":"file"}`), MediaID: &id}, 201)
+	var message map[string]string
+	if json.Unmarshal(sent, &message) != nil {
+		t.Fatal("media message response")
+	}
+	f.request("GET", metadataPath, b.Access, nil, 200)
+	f.request("GET", metadataPath, c.Access, nil, 404)
+	req, _ = http.NewRequest("GET", f.http.URL+"/v1/media/"+id, nil)
+	req.Header.Set("Authorization", "Bearer "+b.Access)
+	req.Header.Set("Range", "bytes=5-8")
+	req.Header.Set("If-Range", `"`+media["sha256"].(string)+`"`)
+	ranged, err := f.http.Client().Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	part, readErr := io.ReadAll(ranged.Body)
+	ranged.Body.Close()
+	if readErr != nil || ranged.StatusCode != 206 || string(part) != "file" || ranged.Header.Get("ETag") != req.Header.Get("If-Range") {
+		t.Fatal("media hash-bound range response")
+	}
+	if _, err = f.db.Exec(context.Background(), `UPDATE messages SET expires_at=now()-interval '1 second' WHERE id=$1`, message["id"]); err != nil {
+		t.Fatal(err)
+	}
+	f.request("GET", metadataPath, b.Access, nil, 404)
+	f.request("GET", "/v1/media/"+id, b.Access, nil, 404)
+	if _, err = f.db.Exec(context.Background(), `UPDATE messages SET expires_at=NULL WHERE id=$1`, message["id"]); err != nil {
+		t.Fatal(err)
+	}
 	if string(f.request("GET", "/v1/media/"+id, b.Access, nil, 200)) != "test file content" {
 		t.Fatal("media corrupted")
 	}
@@ -308,6 +343,15 @@ func TestIntegrationMedia(t *testing.T) {
 		t.Fatalf("disk reserve status %d", res.StatusCode)
 	}
 	f.request("POST", "/v1/conversations/"+group+"/messages", a.Access, messageInput{ClientID: uuid.NewString(), Payload: json.RawMessage(`{"text":"text survives disk reserve"}`)}, 201)
+	f.request("DELETE", "/v1/messages/"+message["id"], a.Access, nil, 204)
+	f.request("GET", metadataPath, b.Access, nil, 404)
+	f.request("GET", "/v1/media/"+id, b.Access, nil, 404)
+	f.request("GET", metadataPath, a.Access, nil, 200)
+	if err = os.WriteFile(filepath.Join(f.s.cfg.MediaDir, id), []byte("truncated"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	f.request("GET", metadataPath, a.Access, nil, 404)
+	f.request("GET", "/v1/media/"+id, a.Access, nil, 404)
 }
 func TestIntegrationWebSocketResume(t *testing.T) {
 	f := setup(t)
