@@ -80,6 +80,22 @@ public final class VyrnBridge {
         });return result;
     }
     private static final Map<MessageObject,EditRequest> EDITS=new java.util.WeakHashMap<>();
+    private static final Map<TLRPC.Message,PrivateEditState> PRIVATE_EDITS=new java.util.WeakHashMap<>();
+    private static final class PrivateEditState {
+        final EditRequest basis;final String session,placeholder,hash;final int date,edited;final long expiry;
+        PrivateEditState(EditRequest basis,String session,TLRPC.Message row,String text,long expiry){this.basis=basis;this.session=session;placeholder=row.message;date=row.date;edited=row.edit_date;hash=textHash(text);this.expiry=expiry;}
+    }
+    /** Only hydrated, authenticated own plaintext can advertise an edit; nothing is persisted in native rows. */
+    public static synchronized boolean canEditPrivate(int account,TLRPC.Message row,boolean scheduled){
+        if(row==null||scheduled||row.id<=0||row.peer_id==null||row.from_id==null||row.media!=null&&!(row.media instanceof TLRPC.TL_messageMediaEmpty))return false;
+        PrivateEditState proof=PRIVATE_EDITS.get(row);if(proof==null)return false;EditRequest basis=proof.basis;VyrnBridge bridge=forAccount(account);long self=UserConfig.getInstance(account).getClientUserId();
+        if(basis.account!=account||basis.originalId!=row.id||basis.dialog!=row.peer_id.user_id||row.from_id.user_id!=self||self==0||basis.dialog==self||row.date!=proof.date||row.edit_date!=proof.edited||!java.util.Objects.equals(row.message,proof.placeholder)||proof.expiry<=System.currentTimeMillis()||!bridge.repository.vault.isUser(basis.user)||!proof.session.equals(bridge.repository.vault.cachedSession())||self!=bridge.ids.local("user",basis.user))return false;
+        try{JSONObject context=bridge.ids.privateContext(row.id);Map<Long,java.util.Set<Integer>> deleted=MessagesStorage.getInstance(account).getVyrnDeletedMessages();return context!=null&&basis.revision==context.getInt("revision")&&basis.conversation.equals(context.getString("conversation"))&&basis.serverId.equals(context.getString("message"))&&deleted!=null&&(!deleted.containsKey(basis.dialog)||!deleted.get(basis.dialog).contains(row.id));}catch(Exception unavailable){return false;}
+    }
+    private static synchronized void rememberPrivateEdit(int account,TLRPC.Message row,JSONObject context,String user,String session,String text,long expiry) throws Exception {
+        if(row.from_id.user_id!=UserConfig.getInstance(account).getClientUserId())return;
+        EditRequest basis=new EditRequest(account,context.getInt("revision"),row.id,row.peer_id.user_id,user,context.getString("conversation"),context.getString("message"));PRIVATE_EDITS.put(row,new PrivateEditState(basis,session,row,text,expiry));
+    }
     public static final String EDIT_SNAPSHOT="vyrn_edit_snapshot";
     private static String textHash(String text){try{return java.util.Base64.getEncoder().encodeToString(java.security.MessageDigest.getInstance("SHA-256").digest(text.getBytes(StandardCharsets.UTF_8)));}catch(java.security.NoSuchAlgorithmException impossible){throw new AssertionError(impossible);}}
     private static String editSnapshot(Models.Message value){
@@ -94,12 +110,15 @@ public final class VyrnBridge {
         if(snapshot!=null){if(message.params==null)message.params=new HashMap<>();message.params.put(EDIT_SNAPSHOT,snapshot);}
     }
     private static final class EditRequest extends TLRPC.TL_messages_editMessage {
-        final int account,revision,originalId;final long dialog;final String user,conversation,serverId;
-        EditRequest(int account,int revision,int id,long dialog,String user,String conversation,String serverId){this.account=account;this.revision=revision;this.originalId=id;this.dialog=dialog;this.user=user;this.conversation=conversation;this.serverId=serverId;}
+        final int account,revision,originalId;final long dialog;final String user,conversation,serverId,session;
+        EditRequest(int account,int revision,int id,long dialog,String user,String conversation,String serverId){this(account,revision,id,dialog,user,conversation,serverId,forAccount(account).repository.vault.cachedSession());}
+        EditRequest(int account,int revision,int id,long dialog,String user,String conversation,String serverId,String session){this.account=account;this.revision=revision;this.originalId=id;this.dialog=dialog;this.user=user;this.conversation=conversation;this.serverId=serverId;this.session=session;}
     }
     public static synchronized void captureEdit(int account,MessageObject object){
         if(object==null)return;EDITS.remove(object);
-        TLRPC.Message message=object.messageOwner;if(message==null||message.params==null||object.getDialogId()>=0)return;
+        TLRPC.Message message=object.messageOwner;if(message==null)return;
+        if(object.getDialogId()>0){PrivateEditState proof=PRIVATE_EDITS.get(message);if(canEditPrivate(account,message,object.scheduled)&&proof!=null&&object.messageText!=null&&proof.hash.equals(textHash(object.messageText.toString())))EDITS.put(object,proof.basis);return;}
+        if(message.params==null||object.getDialogId()>=0)return;
         try{JSONObject value=new JSONObject(message.params.get(EDIT_SNAPSHOT));VyrnBridge bridge=forAccount(account);String sender=value.getString("sender"),conversation=value.getString("conversation"),id=value.getString("id");
             if(value.getInt("version")!=1||value.getInt("revision")<=0||value.getInt("ordinal")!=object.getId()||value.getInt("date")!=message.date||value.getInt("edited")!=message.edit_date||!value.getString("hash").equals(textHash(message.message))||!bridge.repository.vault.isUser(sender)||UserConfig.getInstance(account).getClientUserId()!=bridge.ids.local("user",sender)||message.from_id==null||message.from_id.user_id!=bridge.ids.local("user",sender)||!conversation.equals(bridge.ids.remote("conversation",-object.getDialogId()))||!id.equals(bridge.ids.remote("message",object.getId())))return;
             EDITS.put(object,new EditRequest(account,value.getInt("revision"),object.getId(),object.getDialogId(),sender,conversation,id));
@@ -108,11 +127,11 @@ public final class VyrnBridge {
     public static synchronized TLRPC.TL_messages_editMessage editRequest(int account,MessageObject object){
         EditRequest basis=EDITS.get(object);
         if(basis==null||basis.account!=account||basis.originalId!=object.getId()||basis.dialog!=object.getDialogId())return new EditRequest(account,0,object.getId(),object.getDialogId(),null,null,null);
-        return new EditRequest(account,basis.revision,basis.originalId,basis.dialog,basis.user,basis.conversation,basis.serverId);
+        return new EditRequest(account,basis.revision,basis.originalId,basis.dialog,basis.user,basis.conversation,basis.serverId,basis.session);
     }
     public static void processEditUpdates(int account,TLRPC.TL_messages_editMessage request,TLRPC.Updates updates){
         if(!(request instanceof EditRequest))return;EditRequest basis=(EditRequest)request;
-        Utilities.stageQueue.postRunnable(()->{VyrnBridge bridge=forAccount(account);if(bridge.repository.vault.isUser(basis.user)&&UserConfig.getInstance(account).getClientUserId()==bridge.ids.local("user",basis.user))MessagesController.getInstance(account).processUpdateArray(updates.updates,updates.users,updates.chats,true,updates.date);});
+        Utilities.stageQueue.postRunnable(()->{VyrnBridge bridge=forAccount(account);if(bridge.repository.vault.isUser(basis.user)&&UserConfig.getInstance(account).getClientUserId()==bridge.ids.local("user",basis.user)&&(basis.dialog<0||java.util.Objects.equals(basis.session,bridge.repository.vault.cachedSession())))MessagesController.getInstance(account).processUpdateArray(updates.updates,updates.users,updates.chats,true,updates.date);});
     }
     private static final ConcurrentHashMap<Long,PendingRequest> REQUESTS=new ConcurrentHashMap<>();
     private static long requestKey(int account,int token){return ((long)account<<32)|(token&0xffffffffL);}
@@ -435,14 +454,14 @@ public final class VyrnBridge {
                 if(bridge.ids.local("user",keys.user)!=owner||!session.equals(bridge.repository.vault.cachedSession()))return;
                 authenticatedUser=keys.user;
                 SignalMessages messages=new SignalMessages(keys);
-                display=messages.display(peer,context.getString("conversation"),context.getString("message"),sender,context.getInt("revision"),id);
+                try{display=messages.display(peer,context.getString("conversation"),context.getString("message"),sender,context.getInt("revision"),id);}catch(SecurityException changed){if(!"signal_display_context_changed".equals(changed.getMessage()))throw changed;display=null;}
                 if(display==null){JSONObject packet=(JSONObject)bridge.repository.requestForSession(keys.user,session,"GET","/v1/messages/"+context.getString("message"),null);messages.receive(peer,context.getString("conversation"),packet);display=messages.display(peer,context.getString("conversation"),context.getString("message"),sender,context.getInt("revision"),id);}
             }
             if(display==null)return;final String text=display.getString("text");final long expiry=display.isNull("expires_at")?Long.MAX_VALUE:java.time.Instant.parse(display.getString("expires_at")).toEpochMilli();
             AndroidUtilities.runOnUIThread(()->{try{
                 MessageObject target=reference.get();if(!samePrivateRow(target,row,id,dialog,senderId,date,edited,placeholder)||UserConfig.getInstance(account).getClientUserId()!=owner||!bridge.repository.vault.isUser(authenticatedUser)||!session.equals(bridge.repository.vault.cachedSession())||expiry<=System.currentTimeMillis()||!context.toString().equals(String.valueOf(bridge.ids.privateContext(id))))return;
                 Map<Long,java.util.Set<Integer>> deleted=MessagesStorage.getInstance(account).getVyrnDeletedMessages();if(deleted==null||deleted.containsKey(dialog)&&deleted.get(dialog).contains(id))return;
-                target.applyNewText(text);NotificationCenter.getInstance(account).postNotificationName(NotificationCenter.updateInterfaces,PRIVATE_TEXT_UPDATE);
+                target.applyNewText(text);rememberPrivateEdit(account,row,context,authenticatedUser,session,text,expiry);NotificationCenter.getInstance(account).postNotificationName(NotificationCenter.updateInterfaces,PRIVATE_TEXT_UPDATE);
                 AndroidUtilities.runOnUIThread(new Runnable(){public void run(){MessageObject current=reference.get();if(current==null)return;if(current.messageOwner!=row){clearReplacedPrivateText(current,row,text);return;}
                     boolean live=false;try{Map<Long,java.util.Set<Integer>> fences=MessagesStorage.getInstance(account).getVyrnDeletedMessages();live=fences!=null&&(!fences.containsKey(dialog)||!fences.get(dialog).contains(id))&&context.toString().equals(String.valueOf(bridge.ids.privateContext(id)));}catch(Exception unavailable){/* Clear volatile text if provenance cannot be checked. */}
                     if(!live||!samePrivateRow(current,row,id,dialog,senderId,date,edited,placeholder)||UserConfig.getInstance(account).getClientUserId()!=owner||!bridge.repository.vault.isUser(authenticatedUser)||!session.equals(bridge.repository.vault.cachedSession())||expiry<=System.currentTimeMillis()){
@@ -750,6 +769,7 @@ public final class VyrnBridge {
     private static TLRPC.TL_error problem(Throwable failure){
         TLRPC.TL_error error=null;if(failure!=null){error=new TLRPC.TL_error();error.code=failure instanceof RestRepository.ApiException?((RestRepository.ApiException)failure).status:503;error.text=failure instanceof UnsupportedOperationException?"VYRN_FEATURE_UNAVAILABLE":"VYRN_REQUEST_FAILED";}
         if(failure instanceof RestRepository.ApiException&&((RestRepository.ApiException)failure).code.equals("revision_conflict"))error.text="VYRN_EDIT_CONFLICT";
+        if(failure instanceof SecurityException&&"signal_edit_revision_conflict".equals(failure.getMessage())){error.code=409;error.text="VYRN_EDIT_CONFLICT";}
         if(failure instanceof IllegalStateException&&"edit_snapshot_required".equals(failure.getMessage())){error.code=409;error.text="VYRN_EDIT_RELOAD_REQUIRED";}
         return error;
     }
@@ -900,8 +920,20 @@ public final class VyrnBridge {
         if(request instanceof TLRPC.TL_messages_editMessage){
             if(!(request instanceof EditRequest))throw new UnsupportedOperationException();EditRequest in=(EditRequest)request;
             if(in.revision<=0)throw new IllegalStateException("edit_snapshot_required");
-            if(in.account!=account||in.id!=in.originalId||in.peer==null||in.peer.chat_id<=0||-in.peer.chat_id!=in.dialog||!in.conversation.equals(ids.remote("conversation",in.peer.chat_id))||!in.serverId.equals(ids.remote("message",in.id)))throw new SecurityException("edit_identity_changed");
+            boolean privateEdit=in.dialog>0;
+            if(in.account!=account||in.id!=in.originalId||in.peer==null||!in.serverId.equals(ids.remote("message",in.id)))throw new SecurityException("edit_identity_changed");
+            if(privateEdit?(in.peer.user_id!=in.dialog||!in.conversation.equals(conversation(in.peer))):(in.peer.chat_id<=0||-in.peer.chat_id!=in.dialog||!in.conversation.equals(ids.remote("conversation",in.peer.chat_id))))throw new SecurityException("edit_identity_changed");
             if((in.flags&2048)==0||(in.flags&~(2048|8|2))!=0||in.media!=null||in.reply_markup!=null||in.rich_message!=null||in.entities!=null&&!in.entities.isEmpty())throw new UnsupportedOperationException();
+            if(privateEdit){
+                if(in.session==null||!in.session.equals(repository.vault.cachedSession()))throw new SecurityException("account_changed");
+                if(!repository.vault.isUser(in.user)||UserConfig.getInstance(account).getClientUserId()!=ids.local("user",in.user))throw new SecurityException("account_changed");
+                try(SignalDeviceKeys keys=SignalDeviceKeys.openLocal(ApplicationLoader.applicationContext,repository)){if(!in.user.equals(keys.user)||!in.session.equals(repository.vault.cachedSession()))throw new SecurityException("account_changed");new SignalMessages(keys).edit(ids.remote("user",in.dialog),in.conversation,in.serverId,in.revision,in.message);}
+                Models.Message edited=repository.messageForUser(in.user,in.serverId);if(UserConfig.getInstance(account).getClientUserId()!=ids.local("user",in.user))throw new SecurityException("account_changed");
+                TLRPC.TL_updates result=new TLRPC.TL_updates();result.date=edited.editedDate;
+                if(edited.deleted){fenceDeleted(in.user,in.dialog,java.util.Collections.singletonList(in.id));TL_update.TL_updateDeleteMessages update=new TL_update.TL_updateDeleteMessages();update.messages.add(in.id);result.updates.add(update);}
+                else{TLRPC.TL_peerUser peer=new TLRPC.TL_peerUser();peer.user_id=in.dialog;TL_update.TL_updateEditMessage update=new TL_update.TL_updateEditMessage();update.message=message(edited,peer);result.updates.add(update);}
+                for(Models.User member:repository.members(in.conversation))result.users.add(mapUser(member));return result;
+            }
             synchronized(repository.vault.guard()){
                 if(!repository.vault.isUser(in.user)||UserConfig.getInstance(account).getClientUserId()!=ids.local("user",in.user))throw new SecurityException("account_changed");
                 Models.Message edited=repository.editText(in.user,in.serverId,in.revision,in.message);
@@ -970,10 +1002,10 @@ public final class VyrnBridge {
         }
         if(request instanceof TLRPC.TL_messages_getMessageEditData){
             TLRPC.TL_messages_getMessageEditData in=(TLRPC.TL_messages_getMessageEditData)request;
-            if(in.peer==null || in.peer.chat_id<=0 || in.id<=0)throw new UnsupportedOperationException();
+            if(in.peer==null || in.peer.chat_id<=0&&in.peer.user_id<=0 || in.id<=0)throw new UnsupportedOperationException();
             String user=repository.vault.load().getString("user_id"),group=conversation(in.peer);
             Models.Message value=repository.messageForUser(user,ids.remote("message",in.id));
-            if(value.deleted || value.encrypted || !user.equals(value.sender) || !group.equals(value.conversation))throw new SecurityException("message_not_editable");
+            if(value.deleted || value.encrypted!=(in.peer.user_id>0) || !user.equals(value.sender) || !group.equals(value.conversation))throw new SecurityException("message_not_editable");
             return new TLRPC.TL_messages_messageEditData();
         }
         if(request instanceof TLRPC.TL_messages_setTyping){TLRPC.TL_messages_setTyping in=(TLRPC.TL_messages_setTyping)request;repository.request("POST","/v1/conversations/"+conversation(in.peer)+"/typing",new JSONObject(),true);return new TLRPC.TL_boolTrue();}

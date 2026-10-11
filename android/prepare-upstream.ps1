@@ -579,7 +579,7 @@ Edit 'TMessagesProj/src/main/java/org/telegram/ui/Components/ChatActivityEnterVi
  $submit='SendMessagesHelper.getInstance(currentAccount).editMessage(editingMessageObject, null, null, null, null, null, null, false, editingMessageObject.hasMediaSpoilers(), null);'
  if(!$t.Contains($submit)){throw 'Pinned composer edit submit marker missing'}
  $t.Replace($submit,@'
-if (dialog_id < 0 && !DialogObject.isEncryptedDialog(dialog_id) && !editingMessageObject.scheduled && (editingMessageObject.messageOwner.media == null || editingMessageObject.messageOwner.media instanceof TLRPC.TL_messageMediaEmpty)) {
+if (dialog_id != 0 && !DialogObject.isEncryptedDialog(dialog_id) && !editingMessageObject.scheduled && (editingMessageObject.messageOwner.media == null || editingMessageObject.messageOwner.media instanceof TLRPC.TL_messageMediaEmpty)) {
                     SendMessagesHelper.getInstance(currentAccount).editMessage(editingMessageObject, message[0].toString(), messageWebPageSearch, parentFragment, entities, 0, 0);
                 } else {
                     SendMessagesHelper.getInstance(currentAccount).editMessage(editingMessageObject, null, null, null, null, null, null, false, editingMessageObject.hasMediaSpoilers(), null);
@@ -613,7 +613,7 @@ Edit 'TMessagesProj/src/main/java/org/telegram/messenger/MessageObject.java' {
  if(!$t.Contains($marker)){throw 'Pinned private text constructor marker missing'}
  foreach($edit in @('public static boolean canEditMessage(int currentAccount, TLRPC.Message message, TLRPC.Chat chat, boolean scheduled) {','public static boolean canEditMessageAnytime(int currentAccount, TLRPC.Message message, TLRPC.Chat chat) {')){
   if(!$t.Contains($edit)){throw 'Pinned private edit capability marker missing'}
-  $t=$t.Replace($edit,$edit+"`n        if (message != null && message.peer_id != null && message.peer_id.user_id != 0) return false; // Private encrypted edits are not connected yet.")
+  $t=$t.Replace($edit,$edit+"`n        if (message != null && message.peer_id != null && message.peer_id.user_id != 0) return xyz.eclipseofficial.vyrn.compat.VyrnBridge.canEditPrivate(currentAccount, message, $(if ($edit.Contains('boolean scheduled')) {'scheduled'} else {'false'}));")
  }
  $t.Replace($marker,$marker+"`n        xyz.eclipseofficial.vyrn.compat.VyrnBridge.hydratePrivateText(this);")
 }

@@ -1,7 +1,7 @@
 # Native foreground send/edit/delete and optional offline queue/recovery. Physical-phone acceptance remains separate.
-param([switch]$Edit,[switch]$Delete,[switch]$Offline,[switch]$ManualRetry,[switch]$LostAck,[switch]$MutationRestart,[switch]$PrivateKeys,[switch]$PrivateChat,[switch]$PrivateDelete,[switch]$PrivateAutomatic,[switch]$PrivateManualRetry,[switch]$PrivateCancel,[switch]$PrivateVerification,[switch]$PrivateComposer,[switch]$PrivateComposerCancel,[switch]$PrivateComposerRetry,[switch]$PrivateComposerLostAck,[switch]$PrivateComposerDelete)
-if(@($PrivateComposerCancel,$PrivateComposerRetry,$PrivateComposerLostAck,$PrivateComposerDelete | Where-Object {$_}).Count -gt 1){throw 'Staged cancellation, retry and lost acknowledgement must run separately'}
-if($PrivateComposerCancel -or $PrivateComposerRetry -or $PrivateComposerLostAck -or $PrivateComposerDelete){$PrivateComposer=$true}
+param([switch]$Edit,[switch]$Delete,[switch]$Offline,[switch]$ManualRetry,[switch]$LostAck,[switch]$MutationRestart,[switch]$PrivateKeys,[switch]$PrivateChat,[switch]$PrivateDelete,[switch]$PrivateAutomatic,[switch]$PrivateManualRetry,[switch]$PrivateCancel,[switch]$PrivateVerification,[switch]$PrivateComposer,[switch]$PrivateComposerCancel,[switch]$PrivateComposerRetry,[switch]$PrivateComposerLostAck,[switch]$PrivateComposerDelete,[switch]$PrivateComposerEdit)
+if(@($PrivateComposerCancel,$PrivateComposerRetry,$PrivateComposerLostAck,$PrivateComposerDelete,$PrivateComposerEdit | Where-Object {$_}).Count -gt 1){throw 'Private composer mutation scenarios must run separately'}
+if($PrivateComposerCancel -or $PrivateComposerRetry -or $PrivateComposerLostAck -or $PrivateComposerDelete -or $PrivateComposerEdit){$PrivateComposer=$true}
 if($PrivateComposer){$PrivateChat=$true;if($Edit -or $Delete -or $Offline -or $ManualRetry -or $LostAck -or $MutationRestart -or $PrivateDelete -or $PrivateAutomatic -or $PrivateManualRetry -or $PrivateCancel -or $PrivateVerification){throw 'Private composer must run as its own scenario'}}
 if($PrivateVerification){$PrivateChat=$true;if($PrivateCancel -or $PrivateManualRetry -or $PrivateAutomatic -or $LostAck -or $PrivateDelete -or $MutationRestart){throw 'Private verification must run as its own scenario'}}
 if($PrivateCancel){$PrivateChat=$true;if($PrivateManualRetry -or $PrivateAutomatic -or $LostAck -or $PrivateDelete -or $MutationRestart){throw 'Private cancellation must run as its own scenario'}}
@@ -195,6 +195,27 @@ try{
                 }
             }
             $registration=Get-Content (Join-Path $root 'artifacts/android-two-client-registration.json') -Raw | ConvertFrom-Json
+            if($PrivateComposerEdit){
+                foreach($message in $delivered){
+                    $edited='چت خصوصی بومی ویرایش '+[guid]::NewGuid().ToString('N')
+                    foreach($serial in @($message.sender,$message.recipient)){$peer=if($serial -eq $message.sender){$users[$message.recipient]}else{$users[$message.sender]};Write-Fixture $serial @{peer_user=$peer;text=$message.text;edited=$edited;conversation=$message.conversation;message_id=$message.message_id;ordinal=$message.ordinal;client_id=$message.client_id}}
+                    $receiver=Start-Phase $message.recipient 'chat-private-watch-edit';$deadline=[DateTimeOffset]::UtcNow.AddSeconds(60);$ready=$false
+                    while([DateTimeOffset]::UtcNow -lt $deadline -and !$receiver.process.HasExited){$state=Read-State $message.recipient;if($state.ready){$ready=$true;break};Start-Sleep -Milliseconds 500}
+                    if(!$ready){$rounds+=Finish-Phase $receiver;throw 'Private edit receiver readiness missing'}
+                    $rounds+=Finish-Phase (Start-Phase $message.sender 'chat-private-native-edit') -TimeoutMs 120000
+                    $rounds+=Finish-Phase $receiver -TimeoutMs 120000
+                    foreach($serial in @($message.sender,$message.recipient)){
+                        $peer=if($serial -eq $message.sender){$users[$message.recipient]}else{$users[$message.sender]};Write-Fixture $serial @{peer_user=$peer;text=$edited;conversation=$message.conversation;message_id=$message.message_id;ordinal=$message.ordinal;client_id=$message.client_id}
+                        $rounds+=Finish-Phase (Start-Phase $serial 'chat-private-view')
+                        $privateReverseRemoved=$true;$removed=Invoke-TestAdb -Arguments @('-s',$serial,'reverse','--remove','tcp:18443');if($removed.code -ne 0){throw 'Private edited offline mapping removal failed'}
+                        $rounds+=Finish-Phase (Start-Phase $serial 'chat-private-offline-view')
+                        $restored=Invoke-TestAdb -Arguments @('-s',$serial,'reverse','tcp:18443','tcp:18443');if($restored.code -ne 0){throw 'Private edited mapping restoration failed'};$privateReverseRemoved=$false
+                    }
+                }
+                @{date=[DateTimeOffset]::Now.ToString('o');result='passed';apk_sha256=(Get-FileHash (Join-Path $root 'artifacts/VyrnApp-dev-x86_64-debug-local-tls.apk')).Hash.ToLowerInvariant();devices=$registration.devices;rounds=$rounds;physical_devices='not tested';scope='Both actual native offline Send/cold worker confirmations, then own native Edit/menu/decrypted composer/Done and recipient realtime update in same process. Original server/native IDs retained with revision2, encrypted owner placeholders and both online/cold offline decrypted displays. Physical phones, edit offline intent, held-response/process-death edit and full account/device/media lifecycle remain untested.'} | ConvertTo-Json -Depth 9 | Set-Content (Join-Path $root 'artifacts/android-two-client-private-composer-edit.json') -Encoding utf8
+                Write-Output 'PASS: actual native encrypted private editing in both directions, realtime recipient update and both cold offline displays.'
+                return
+            }
             if($PrivateComposerDelete){
                 $deleted=$delivered[0];$live=$delivered[1]
                 foreach($serial in @($deleted.recipient,$deleted.sender)){
@@ -206,7 +227,7 @@ try{
                     $rounds+=Finish-Phase (Start-Phase $serial 'chat-private-deleted-offline-view') -TimeoutMs 120000
                     $restored=Invoke-TestAdb -Arguments @('-s',$serial,'reverse','tcp:18443','tcp:18443');if($restored.code -ne 0){throw 'Private deletion mapping restoration failed'};$privateReverseRemoved=$false
                 }
-                @{date=[DateTimeOffset]::Now.ToString('o');result='passed';apk_sha256=(Get-FileHash (Join-Path $root 'artifacts/VyrnApp-dev-x86_64-debug-local-tls.apk')).Hash.ToLowerInvariant();devices=$registration.devices;rounds=$rounds;physical_devices='not tested';scope='Both native offline Send/cold confirmation/recipient scenarios; recipient uses actual native Delete, cancels confirmation with message preserved, then confirms explicit deletion for both people. Original server tombstone, encrypted cache and sender journal retired, both native durable fences and late object/SQL/dialog replay rejection, both cold offline reopens with known live message retained. Unsupported private edit capability disabled. Physical phones, private encrypted editing, offline deletion failure, multi-select gestures and full lifecycle remain untested.'} | ConvertTo-Json -Depth 9 | Set-Content (Join-Path $root 'artifacts/android-two-client-private-composer-delete.json') -Encoding utf8
+                @{date=[DateTimeOffset]::Now.ToString('o');result='passed';apk_sha256=(Get-FileHash (Join-Path $root 'artifacts/VyrnApp-dev-x86_64-debug-local-tls.apk')).Hash.ToLowerInvariant();devices=$registration.devices;rounds=$rounds;physical_devices='not tested';scope='Both native offline Send/cold confirmation/recipient scenarios; recipient uses actual native Delete, cancels confirmation with message preserved, then confirms explicit deletion for both people. Original server tombstone, encrypted cache and sender journal retired, both native durable fences and late object/SQL/dialog replay rejection, both cold offline reopens with known live message retained. Owned authenticated private edit capability checked; actual Edit is a separate scenario. Physical phones, offline deletion failure, multi-select gestures and full lifecycle remain untested.'} | ConvertTo-Json -Depth 9 | Set-Content (Join-Path $root 'artifacts/android-two-client-private-composer-delete.json') -Encoding utf8
                 Write-Output 'PASS: actual native shared private deletion, cancellation, recipient cache cleanup and both cold offline reopens.'
                 return
             }
