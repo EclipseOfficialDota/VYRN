@@ -1,10 +1,26 @@
 # Deployment runbook
 
-Status (2026-10-04): **VPS provisioned; Core and PostgreSQL healthy; public API DNS/TLS active; owner panel active through SSH only. Full production Android acceptance remains pending.** See [Persian owner guide](OWNER_GUIDE.fa.md).
+Status (2026-10-11): **Core updated to source a00a123; Core and PostgreSQL healthy; public API DNS/TLS active; owner panel active through SSH only. Full production Android acceptance remains pending.** See [Persian owner guide](OWNER_GUIDE.fa.md).
 
 ## Active deployment
 
-The actual host is Ubuntu 24.04.3 LTS, with Docker 29.1.3 and Compose 2.40.3 installed from Ubuntu packages. Source release: `/opt/vyrn/releases/vps-initial-20261004`, linked as `/opt/vyrn/current`. Run Compose with both `deployment/compose.yaml` and `deployment/compose.existing-nginx.yaml` and `/etc/vyrn/runtime.env`. Core listens only on `127.0.0.1:18080`; PostgreSQL is unpublished. Caddy is excluded by its `standalone-proxy` profile because existing Nginx uses 80/443. The owner panel Nginx site listens only on `127.0.0.1:19091`.
+The actual host is Ubuntu 24.04.3 LTS, with Docker 29.1.3 and Compose 2.40.3 installed from Ubuntu packages. Source release: `/opt/vyrn/releases/core-20261011-a00a123`, linked as `/opt/vyrn/current`. Run Compose with both `deployment/compose.yaml` and `deployment/compose.existing-nginx.yaml` and `/etc/vyrn/runtime.env`. Core listens only on `127.0.0.1:18080`; PostgreSQL is unpublished. Caddy is excluded by its `standalone-proxy` profile because existing Nginx uses 80/443. The owner panel Nginx site listens only on `127.0.0.1:19091`.
+
+The October 11 update deploys the tested private-message deletion backend. Archive and executable SHA256 were checked before activation, and the running container executable matches `157771edb9eb31f93eba73d6f44a6cda852be86791a289ee1a091a71d1928cda`. All seven migration files and both Compose files match the previous release exactly. Only Core was recreated with `up -d --no-deps --no-build core`; PostgreSQL retains its October 4 start time and the existing media volume. The initial image build failed before activation because the installed builder lacks `COPY --chmod`; a00a123 uses ordinary COPY followed by RUN chmod, verified by the successful actual image build. Current image is `vyrn-core:a00a123`, also tagged `vyrn-core:latest`. The previous release and `vyrn-core:rollback-20261011` remain available.
+
+Post-deployment checks from Windows passed certificate-validated readiness on API, WS, media and push hosts; the unauthenticated bulk deletion endpoint returns401. Core and PostgreSQL Docker health are healthy, and the SSH-only owner panel returns200 after release directory/static permissions were normalized. Evidence: `artifacts/core-production-a00a123.json`. These checks do not establish authenticated production deletion or physical-phone acceptance.
+
+For rollback on this unchanged-schema deployment, run on the VPS:
+
+```sh
+docker tag vyrn-core:rollback-20261011 vyrn-core:latest
+ln -s /opt/vyrn/releases/vps-initial-20261004 /opt/vyrn/current.rollback
+mv -Tf /opt/vyrn/current.rollback /opt/vyrn/current
+docker compose --env-file /etc/vyrn/runtime.env -f /opt/vyrn/current/deployment/compose.yaml -f /opt/vyrn/current/deployment/compose.existing-nginx.yaml up -d --no-deps --no-build core
+curl -fsS http://127.0.0.1:18080/health/ready
+```
+
+Rollback was retained, not exercised after the successful deployment. Future releases with migration changes require a separate database rollback assessment.
 
 Dedicated key login was verified. Existing root/password access, SSH settings, firewall policy and unrelated services were preserved. Owner credentials live only in `/etc/vyrn/owner-access.json` mode 0600. Owner login, TOTP, all panel read endpoints, invite creation/revocation and session logout passed on the VPS. Bootstrap environment was removed. Containers use restart `unless-stopped` and Docker is enabled; whole-host reboot has not been tested.
 
