@@ -576,6 +576,9 @@ Edit 'TMessagesProj/src/main/java/org/telegram/ui/Components/ChatActivityEnterVi
  $marker='        editingMessageObject = messageObject;'
  if(!$t.Contains($marker)){throw 'Pinned composer edit marker missing'}
  $t=$t.Replace($marker,$marker+"`n        xyz.eclipseofficial.vyrn.compat.VyrnBridge.captureEdit(currentAccount, messageObject);")
+ $editText='editingText = editingMessageObject.messageText;'
+ if(!$t.Contains($editText)){throw 'Pinned composer editing text marker missing'}
+ $t=$t.Replace($editText,'editingText = xyz.eclipseofficial.vyrn.compat.VyrnBridge.editTextForComposer(currentAccount, editingMessageObject);')
  $submit='SendMessagesHelper.getInstance(currentAccount).editMessage(editingMessageObject, null, null, null, null, null, null, false, editingMessageObject.hasMediaSpoilers(), null);'
  if(!$t.Contains($submit)){throw 'Pinned composer edit submit marker missing'}
  $t.Replace($submit,@'

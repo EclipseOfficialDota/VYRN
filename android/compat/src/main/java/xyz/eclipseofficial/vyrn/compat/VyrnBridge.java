@@ -82,8 +82,8 @@ public final class VyrnBridge {
     private static final Map<MessageObject,EditRequest> EDITS=new java.util.WeakHashMap<>();
     private static final Map<TLRPC.Message,PrivateEditState> PRIVATE_EDITS=new java.util.WeakHashMap<>();
     private static final class PrivateEditState {
-        final EditRequest basis;final String session,placeholder,hash;final int date,edited;final long expiry;
-        PrivateEditState(EditRequest basis,String session,TLRPC.Message row,String text,long expiry){this.basis=basis;this.session=session;placeholder=row.message;date=row.date;edited=row.edit_date;hash=textHash(text);this.expiry=expiry;}
+        final EditRequest basis;final String session,placeholder,hash,pendingText;final int date,edited;final long expiry;
+        PrivateEditState(EditRequest basis,String session,TLRPC.Message row,String text,String pendingText,long expiry){this.basis=basis;this.session=session;placeholder=row.message;date=row.date;edited=row.edit_date;hash=textHash(text);this.pendingText=pendingText;this.expiry=expiry;}
     }
     /** Only hydrated, authenticated own plaintext can advertise an edit; nothing is persisted in native rows. */
     public static synchronized boolean canEditPrivate(int account,TLRPC.Message row,boolean scheduled){
@@ -92,9 +92,9 @@ public final class VyrnBridge {
         if(basis.account!=account||basis.originalId!=row.id||basis.dialog!=row.peer_id.user_id||row.from_id.user_id!=self||self==0||basis.dialog==self||row.date!=proof.date||row.edit_date!=proof.edited||!java.util.Objects.equals(row.message,proof.placeholder)||proof.expiry<=System.currentTimeMillis()||!bridge.repository.vault.isUser(basis.user)||!proof.session.equals(bridge.repository.vault.cachedSession())||self!=bridge.ids.local("user",basis.user))return false;
         try{JSONObject context=bridge.ids.privateContext(row.id);Map<Long,java.util.Set<Integer>> deleted=MessagesStorage.getInstance(account).getVyrnDeletedMessages();return context!=null&&basis.revision==context.getInt("revision")&&basis.conversation.equals(context.getString("conversation"))&&basis.serverId.equals(context.getString("message"))&&deleted!=null&&(!deleted.containsKey(basis.dialog)||!deleted.get(basis.dialog).contains(row.id));}catch(Exception unavailable){return false;}
     }
-    private static synchronized void rememberPrivateEdit(int account,TLRPC.Message row,JSONObject context,String user,String session,String text,long expiry) throws Exception {
+    private static synchronized void rememberPrivateEdit(int account,TLRPC.Message row,JSONObject context,String user,String session,String text,String pendingText,long expiry) throws Exception {
         if(row.from_id.user_id!=UserConfig.getInstance(account).getClientUserId())return;
-        EditRequest basis=new EditRequest(account,context.getInt("revision"),row.id,row.peer_id.user_id,user,context.getString("conversation"),context.getString("message"));PRIVATE_EDITS.put(row,new PrivateEditState(basis,session,row,text,expiry));
+        EditRequest basis=new EditRequest(account,context.getInt("revision"),row.id,row.peer_id.user_id,user,context.getString("conversation"),context.getString("message"));PRIVATE_EDITS.put(row,new PrivateEditState(basis,session,row,text,pendingText,expiry));
     }
     public static final String EDIT_SNAPSHOT="vyrn_edit_snapshot";
     private static String textHash(String text){try{return java.util.Base64.getEncoder().encodeToString(java.security.MessageDigest.getInstance("SHA-256").digest(text.getBytes(StandardCharsets.UTF_8)));}catch(java.security.NoSuchAlgorithmException impossible){throw new AssertionError(impossible);}}
@@ -128,6 +128,12 @@ public final class VyrnBridge {
         EditRequest basis=EDITS.get(object);
         if(basis==null||basis.account!=account||basis.originalId!=object.getId()||basis.dialog!=object.getDialogId())return new EditRequest(account,0,object.getId(),object.getDialogId(),null,null,null);
         return new EditRequest(account,basis.revision,basis.originalId,basis.dialog,basis.user,basis.conversation,basis.serverId,basis.session);
+    }
+    /** UI-only text from the encrypted journal; native messageOwner and drafts remain untouched. */
+    public static synchronized CharSequence editTextForComposer(int account,MessageObject object){
+        PrivateEditState proof=PRIVATE_EDITS.get(object.messageOwner);
+        if(proof!=null&&proof.pendingText!=null&&EDITS.get(object)==proof.basis&&canEditPrivate(account,object.messageOwner,object.scheduled)&&object.messageText!=null&&proof.hash.equals(textHash(object.messageText.toString())))return proof.pendingText;
+        return object.messageText;
     }
     public static void processEditUpdates(int account,TLRPC.TL_messages_editMessage request,TLRPC.Updates updates){
         if(!(request instanceof EditRequest))return;EditRequest basis=(EditRequest)request;
@@ -457,11 +463,11 @@ public final class VyrnBridge {
                 try{display=messages.display(peer,context.getString("conversation"),context.getString("message"),sender,context.getInt("revision"),id);}catch(SecurityException changed){if(!"signal_display_context_changed".equals(changed.getMessage()))throw changed;display=null;}
                 if(display==null){JSONObject packet=(JSONObject)bridge.repository.requestForSession(keys.user,session,"GET","/v1/messages/"+context.getString("message"),null);messages.receive(peer,context.getString("conversation"),packet);display=messages.display(peer,context.getString("conversation"),context.getString("message"),sender,context.getInt("revision"),id);}
             }
-            if(display==null)return;final String text=display.getString("text");final long expiry=display.isNull("expires_at")?Long.MAX_VALUE:xyz.eclipseofficial.vyrn.data.Timestamps.parse(display.getString("expires_at")).toEpochMilli();
+            if(display==null)return;final String text=display.getString("text"),pendingText=display.optString("edit_text",null);final long expiry=display.isNull("expires_at")?Long.MAX_VALUE:xyz.eclipseofficial.vyrn.data.Timestamps.parse(display.getString("expires_at")).toEpochMilli();
             AndroidUtilities.runOnUIThread(()->{try{
                 MessageObject target=reference.get();if(!samePrivateRow(target,row,id,dialog,senderId,date,edited,placeholder)||UserConfig.getInstance(account).getClientUserId()!=owner||!bridge.repository.vault.isUser(authenticatedUser)||!session.equals(bridge.repository.vault.cachedSession())||expiry<=System.currentTimeMillis()||!context.toString().equals(String.valueOf(bridge.ids.privateContext(id))))return;
                 Map<Long,java.util.Set<Integer>> deleted=MessagesStorage.getInstance(account).getVyrnDeletedMessages();if(deleted==null||deleted.containsKey(dialog)&&deleted.get(dialog).contains(id))return;
-                target.applyNewText(text);rememberPrivateEdit(account,row,context,authenticatedUser,session,text,expiry);NotificationCenter.getInstance(account).postNotificationName(NotificationCenter.updateInterfaces,PRIVATE_TEXT_UPDATE);
+                target.applyNewText(text);rememberPrivateEdit(account,row,context,authenticatedUser,session,text,pendingText,expiry);NotificationCenter.getInstance(account).postNotificationName(NotificationCenter.updateInterfaces,PRIVATE_TEXT_UPDATE);
                 AndroidUtilities.runOnUIThread(new Runnable(){public void run(){MessageObject current=reference.get();if(current==null)return;if(current.messageOwner!=row){clearReplacedPrivateText(current,row,text);return;}
                     boolean live=false;try{Map<Long,java.util.Set<Integer>> fences=MessagesStorage.getInstance(account).getVyrnDeletedMessages();live=fences!=null&&(!fences.containsKey(dialog)||!fences.get(dialog).contains(id))&&context.toString().equals(String.valueOf(bridge.ids.privateContext(id)));}catch(Exception unavailable){/* Clear volatile text if provenance cannot be checked. */}
                     if(!live||!samePrivateRow(current,row,id,dialog,senderId,date,edited,placeholder)||UserConfig.getInstance(account).getClientUserId()!=owner||!bridge.repository.vault.isUser(authenticatedUser)||!session.equals(bridge.repository.vault.cachedSession())||expiry<=System.currentTimeMillis()){

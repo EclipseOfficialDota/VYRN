@@ -368,7 +368,14 @@ public final class SignalMessages {
             if(!conversation.equals(head.getString("conversation"))||!sender.equals(head.getString("owner"))||revision!=head.getInt("revision")||ordinal!=head.getInt("ordinal"))throw new SecurityException("signal_display_context_changed");
             JSONObject cached=load("private-cache",message+"_"+revision);if(cached==null)return null;JSONObject inner=cached.getJSONObject("inner");
             if(!conversation.equals(string(inner,"conversation_id"))||!head.getString("client").equals(string(inner,"client_id"))||revision!=number(inner,"revision")||!participants(peer).toString().equals(inner.getJSONArray("participants").toString())||!sender.equals(inner.getJSONObject("sender").getString("user_id")))throw new SecurityException("signal_display_context_changed");
-            return new JSONObject().put("text",string(inner,"text")).put("expires_at",head.get("expires_at"));
+            JSONObject result=new JSONObject().put("text",string(inner,"text")).put("expires_at",head.get("expires_at"));
+            if(keys.user.equals(sender)){
+                JSONObject pending=load("private-edit",message+"_"+revision);
+                if(pending!=null&&peer.equals(pending.optString("peer"))&&conversation.equals(pending.optString("conversation"))&&message.equals(pending.optString("message"))&&head.getString("client").equals(pending.optString("client"))&&keys.sessionId().equals(pending.optString("session"))&&pending.has("text")){
+                    String draft=string(pending,"text");text(draft);result.put("edit_text",draft);
+                }
+            }
+            return result;
         });
     }}
     /** Adapter only: forget cached plaintext after an authenticated shared deletion is confirmed. */
