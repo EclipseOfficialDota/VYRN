@@ -1,5 +1,6 @@
 # Native foreground send/edit/delete and optional offline queue/recovery. Physical-phone acceptance remains separate.
-param([switch]$Edit,[switch]$Delete,[switch]$Offline,[switch]$ManualRetry,[switch]$LostAck,[switch]$MutationRestart,[switch]$PrivateKeys,[switch]$PrivateChat,[switch]$PrivateDelete,[switch]$PrivateAutomatic,[switch]$PrivateManualRetry,[switch]$PrivateCancel,[switch]$PrivateVerification,[switch]$PrivateComposer,[switch]$PrivateComposerCancel,[switch]$PrivateComposerRetry,[switch]$PrivateComposerLostAck,[switch]$PrivateComposerDelete,[switch]$PrivateComposerEdit)
+param([switch]$Edit,[switch]$Delete,[switch]$Offline,[switch]$ManualRetry,[switch]$LostAck,[switch]$MutationRestart,[switch]$PrivateKeys,[switch]$PrivateChat,[switch]$PrivateDelete,[switch]$PrivateAutomatic,[switch]$PrivateManualRetry,[switch]$PrivateCancel,[switch]$PrivateVerification,[switch]$PrivateComposer,[switch]$PrivateComposerCancel,[switch]$PrivateComposerRetry,[switch]$PrivateComposerLostAck,[switch]$PrivateComposerDelete,[switch]$PrivateComposerEdit,[switch]$PrivateComposerEditLostAck)
+if($PrivateComposerEditLostAck){$PrivateComposerEdit=$true}
 if(@($PrivateComposerCancel,$PrivateComposerRetry,$PrivateComposerLostAck,$PrivateComposerDelete,$PrivateComposerEdit | Where-Object {$_}).Count -gt 1){throw 'Private composer mutation scenarios must run separately'}
 if($PrivateComposerCancel -or $PrivateComposerRetry -or $PrivateComposerLostAck -or $PrivateComposerDelete -or $PrivateComposerEdit){$PrivateComposer=$true}
 if($PrivateComposer){$PrivateChat=$true;if($Edit -or $Delete -or $Offline -or $ManualRetry -or $LostAck -or $MutationRestart -or $PrivateDelete -or $PrivateAutomatic -or $PrivateManualRetry -or $PrivateCancel -or $PrivateVerification){throw 'Private composer must run as its own scenario'}}
@@ -19,7 +20,7 @@ if(($readiness | ConvertFrom-Json).status -ne 'ready'){throw 'Local VYRN backend
 $adb=Join-Path $root '.tools/android-sdk/platform-tools/adb.exe'
 $package='xyz.eclipseofficial.vyrn.dev'
 . (Join-Path $PSScriptRoot 'android-test-tools.ps1')
-if($LostAck -or $PrivateComposerLostAck){& go build -o (Join-Path $root '.local/lost-ack-proxy.exe') (Join-Path $PSScriptRoot 'lost-ack-proxy/main.go');if($LASTEXITCODE){throw 'Local lost-ack proxy build failed'}}
+if($LostAck -or $PrivateComposerLostAck -or $PrivateComposerEditLostAck){& go build -o (Join-Path $root '.local/lost-ack-proxy.exe') (Join-Path $PSScriptRoot 'lost-ack-proxy/main.go');if($LASTEXITCODE){throw 'Local lost-ack proxy build failed'}}
 & (Join-Path $PSScriptRoot 'test-two-client-registration.ps1')
 $rounds=@()
 function Write-Fixture([string]$Serial,[hashtable]$Fixture){
@@ -198,21 +199,23 @@ try{
             if($PrivateComposerEdit){
                 foreach($message in $delivered){
                     $edited='چت خصوصی بومی ویرایش '+[guid]::NewGuid().ToString('N')
-                    foreach($serial in @($message.sender,$message.recipient)){$peer=if($serial -eq $message.sender){$users[$message.recipient]}else{$users[$message.sender]};Write-Fixture $serial @{peer_user=$peer;text=$message.text;edited=$edited;conversation=$message.conversation;message_id=$message.message_id;ordinal=$message.ordinal;client_id=$message.client_id}}
+                    foreach($serial in @($message.sender,$message.recipient)){$peer=if($serial -eq $message.sender){$users[$message.recipient]}else{$users[$message.sender]};Write-Fixture $serial @{peer_user=$peer;text=$message.text;edited=$edited;conversation=$message.conversation;message_id=$message.message_id;ordinal=$message.ordinal;client_id=$message.client_id;owner_user=$users[$message.sender];interrupt_mutation=[bool]$PrivateComposerEditLostAck}}
                     $receiver=Start-Phase $message.recipient 'chat-private-watch-edit';$deadline=[DateTimeOffset]::UtcNow.AddSeconds(60);$ready=$false
                     while([DateTimeOffset]::UtcNow -lt $deadline -and !$receiver.process.HasExited){$state=Read-State $message.recipient;if($state.ready){$ready=$true;break};Start-Sleep -Milliseconds 500}
                     if(!$ready){$rounds+=Finish-Phase $receiver;throw 'Private edit receiver readiness missing'}
-                    $rounds+=Finish-Phase (Start-Phase $message.sender 'chat-private-native-edit') -TimeoutMs 120000
+                    if($PrivateComposerEditLostAck){$interrupted=Interrupt-HeldRequest -Phase 'chat-private-native-edit' -Group $message.conversation -Operation 'edit' -Message $message.message_id -Serial $message.sender;$rounds+=$interrupted.round;if(!$interrupted.pending.ciphertext_sha256 -or !$interrupted.pending.ratchet_sha256){throw 'Original private edit ciphertext/ratchet proof missing'}}
+                    else{$rounds+=Finish-Phase (Start-Phase $message.sender 'chat-private-native-edit') -TimeoutMs 120000}
                     $rounds+=Finish-Phase $receiver -TimeoutMs 120000
                     foreach($serial in @($message.sender,$message.recipient)){
                         $peer=if($serial -eq $message.sender){$users[$message.recipient]}else{$users[$message.sender]};Write-Fixture $serial @{peer_user=$peer;text=$edited;conversation=$message.conversation;message_id=$message.message_id;ordinal=$message.ordinal;client_id=$message.client_id}
-                        $rounds+=Finish-Phase (Start-Phase $serial 'chat-private-view')
+                        if($PrivateComposerEditLostAck -and $serial -eq $message.sender){Write-Fixture $serial @{peer_user=$peer;text=$edited;conversation=$message.conversation;message_id=$message.message_id;ordinal=$message.ordinal;client_id=$message.client_id;ciphertext_sha256=$interrupted.pending.ciphertext_sha256;ratchet_sha256=$interrupted.pending.ratchet_sha256};$rounds+=Finish-Phase (Start-Phase $serial 'chat-private-edit-reconciled')}
+                        else{$rounds+=Finish-Phase (Start-Phase $serial 'chat-private-view')}
                         $privateReverseRemoved=$true;$removed=Invoke-TestAdb -Arguments @('-s',$serial,'reverse','--remove','tcp:18443');if($removed.code -ne 0){throw 'Private edited offline mapping removal failed'}
                         $rounds+=Finish-Phase (Start-Phase $serial 'chat-private-offline-view')
                         $restored=Invoke-TestAdb -Arguments @('-s',$serial,'reverse','tcp:18443','tcp:18443');if($restored.code -ne 0){throw 'Private edited mapping restoration failed'};$privateReverseRemoved=$false
                     }
                 }
-                @{date=[DateTimeOffset]::Now.ToString('o');result='passed';apk_sha256=(Get-FileHash (Join-Path $root 'artifacts/VyrnApp-dev-x86_64-debug-local-tls.apk')).Hash.ToLowerInvariant();devices=$registration.devices;rounds=$rounds;physical_devices='not tested';scope='Both actual native offline Send/cold worker confirmations, then own native Edit/menu/decrypted composer/Done and recipient realtime update in same process. Original server/native IDs retained with revision2, encrypted owner placeholders and both online/cold offline decrypted displays. Physical phones, edit offline intent, held-response/process-death edit and full account/device/media lifecycle remain untested.'} | ConvertTo-Json -Depth 9 | Set-Content (Join-Path $root 'artifacts/android-two-client-private-composer-edit.json') -Encoding utf8
+                @{date=[DateTimeOffset]::Now.ToString('o');result='passed';apk_sha256=(Get-FileHash (Join-Path $root 'artifacts/VyrnApp-dev-x86_64-debug-local-tls.apk')).Hash.ToLowerInvariant();devices=$registration.devices;rounds=$rounds;physical_devices='not tested';scope=$(if($PrivateComposerEditLostAck){'Both actual native offline Send/cold confirmations and native Edit/Done; exact successful edit response held locally, app force-stopped before20s read timeout with original encrypted journal/ciphertext/ratchet and no local confirmation. Recipient realtime update, actual cold sender history reconciliation to revision2, exact transport retry with unchanged ciphertext/ratchet/revision, one original server/native ID and both cold offline displays. Physical phones, precommit offline edit intent and full account/device/media lifecycle remain untested.'}else{'Both actual native offline Send/cold confirmations then native Edit/Done, recipient realtime update, same original server/native ID revision2 and both cold offline displays. Physical phones, edit offline intent and held-response/crash recovery remain untested.'})} | ConvertTo-Json -Depth 9 | Set-Content (Join-Path $root $(if($PrivateComposerEditLostAck){'artifacts/android-two-client-private-composer-edit-lost-ack.json'}else{'artifacts/android-two-client-private-composer-edit.json'})) -Encoding utf8
                 Write-Output 'PASS: actual native encrypted private editing in both directions, realtime recipient update and both cold offline displays.'
                 return
             }
