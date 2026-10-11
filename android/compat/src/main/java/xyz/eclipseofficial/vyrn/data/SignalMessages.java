@@ -230,21 +230,36 @@ public final class SignalMessages {
         return new JSONObject().put("payload",envelope).put("inner",own);
     }
 
+    /** Persist the authenticated local edit intent before HTTP; no roster lookup or ratchet advance. */
+    public JSONObject stageEdit(String peer,String conversation,String message,int revision,String text) throws Exception {synchronized(keys.guard()){
+        keys.requireSession();id(peer);id(conversation);id(message);text(text);if(peer.equals(keys.user)||revision<1||revision==Integer.MAX_VALUE)throw new IllegalArgumentException("invalid_signal_edit");
+        return store.transaction(()->{
+            JSONObject head=load("private-head",message);if(head==null||head.optBoolean("deleted")||expired(head))throw new SecurityException("signal_message_deleted");
+            if(!keys.user.equals(head.getString("owner"))||!conversation.equals(head.getString("conversation")))throw new SecurityException("signal_edit_context_changed");
+            String name=message+"_"+revision;JSONObject prior=load("private-edit",name);
+            if(prior!=null){String original=prior.has("text")?prior.getString("text"):prior.getJSONObject("inner").getString("text");if(!peer.equals(prior.getString("peer"))||!conversation.equals(prior.getString("conversation"))||!message.equals(prior.getString("message"))||!head.getString("client").equals(prior.getString("client"))||!text.equals(original)||prior.has("session")&&!keys.sessionId().equals(prior.getString("session")))throw new SecurityException("signal_edit_intent_changed");return prior;}
+            if(head.getInt("revision")!=revision)throw new SecurityException("signal_edit_revision_conflict");
+            JSONObject cached=load("private-cache",message+"_"+revision);if(cached==null)throw new SecurityException("signal_edit_context_changed");JSONObject inner=cached.getJSONObject("inner");
+            if(!conversation.equals(inner.getString("conversation_id"))||!head.getString("client").equals(inner.getString("client_id"))||revision!=inner.getInt("revision")||!participants(peer).toString().equals(inner.getJSONArray("participants").toString())||!keys.user.equals(inner.getJSONObject("sender").getString("user_id")))throw new SecurityException("signal_edit_context_changed");
+            JSONObject intent=new JSONObject().put("peer",peer).put("conversation",conversation).put("message",message).put("client",head.getString("client")).put("session",keys.sessionId()).put("text",text).put("body",JSONObject.NULL);
+            save("private-edit",name,intent);return intent;
+        });
+    }}
+
     /** Persist one exact encrypted edit per original revision; retries first reconcile server state. */
     public JSONObject edit(String peer,String conversation,String message,int revision,String text) throws Exception {synchronized(keys.guard()){
         keys.requireSession();id(peer);id(conversation);id(message);text(text);if(peer.equals(keys.user)||revision<1||revision==Integer.MAX_VALUE)throw new IllegalArgumentException("invalid_signal_edit");
-        String name=message+"_"+revision;JSONObject pending=load("private-edit",name);
-        if(pending!=null&&(!peer.equals(pending.getString("peer"))||!conversation.equals(pending.getString("conversation"))||!text.equals(pending.getJSONObject("inner").getString("text"))))throw new SecurityException("signal_edit_intent_changed");
+        String name=message+"_"+revision;JSONObject pending=stageEdit(peer,conversation,message,revision,text);
         JSONObject current=(JSONObject)keys.request("GET","/v1/messages/"+message,null);
         if(!message.equals(current.getString("id"))||!conversation.equals(current.getString("conversation_id"))||!keys.user.equals(current.getString("sender_id"))||current.get("encrypted")!=Boolean.TRUE)throw new SecurityException("signal_edit_context_changed");
         String client=id(current.getString("client_id"));
         if(!current.isNull("deleted_at")||!current.isNull("expires_at")&&!Instant.parse(current.getString("expires_at")).isAfter(Instant.now())){receive(peer,conversation,current);throw new SecurityException("signal_message_deleted");}
-        if(pending!=null&&current.getInt("revision")==revision+1&&canonical(current.getJSONObject("payload")).equals(canonical(pending.getJSONObject("body").getJSONObject("payload")))){receive(peer,conversation,current);return current;}
+        if(!pending.isNull("body")&&current.getInt("revision")==revision+1&&canonical(current.getJSONObject("payload")).equals(canonical(pending.getJSONObject("body").getJSONObject("payload")))){receive(peer,conversation,current);return current;}
         if(current.getInt("revision")!=revision)throw new SecurityException("signal_edit_revision_conflict");
         requirePrivateConversation(peer,conversation);receive(peer,conversation,current);
-        if(pending==null){List<SignalDeviceKeys.ClaimedKey> targets=keys.targets(peer);pending=store.transaction(()->{
+        if(pending.isNull("body")){List<SignalDeviceKeys.ClaimedKey> targets=keys.targets(peer);pending=store.transaction(()->{
             JSONObject head=load("private-head",message);if(head==null||head.optBoolean("deleted")||!keys.user.equals(head.getString("owner"))||!client.equals(head.getString("client"))||!conversation.equals(head.getString("conversation"))||head.getInt("revision")!=revision)throw new SecurityException("signal_edit_context_changed");
-            JSONObject encrypted=encrypt(peer,conversation,client,revision+1,text,targets);JSONObject journal=new JSONObject().put("peer",peer).put("conversation",conversation).put("message",message).put("client",client).put("inner",encrypted.getJSONObject("inner")).put("body",new JSONObject().put("encrypted",true).put("revision",revision).put("payload",encrypted.getJSONObject("payload")));save("private-edit",name,journal);return journal;
+            JSONObject encrypted=encrypt(peer,conversation,client,revision+1,text,targets);JSONObject journal=load("private-edit",name);if(journal==null||!journal.isNull("body")||!text.equals(journal.getString("text"))||!client.equals(journal.getString("client")))throw new SecurityException("signal_edit_intent_changed");journal.put("inner",encrypted.getJSONObject("inner")).put("body",new JSONObject().put("encrypted",true).put("revision",revision).put("payload",encrypted.getJSONObject("payload")));save("private-edit",name,journal);return journal;
         });}
         keys.request("PATCH","/v1/messages/"+message,pending.getJSONObject("body"));
         JSONObject committed=(JSONObject)keys.request("GET","/v1/messages/"+message,null);

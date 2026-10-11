@@ -112,6 +112,7 @@ public final class LocalIntegrationRunner extends Instrumentation {
             result.putString("vyrn_result", "failed");
             result.putString("stage", stage);
             result.putString("failure_type", failure.getClass().getSimpleName());
+            if(failure.getCause()!=null){result.putString("failure_cause_type",failure.getCause().getClass().getSimpleName());if(failure.getCause() instanceof RestRepository.ApiException)result.putInt("failure_cause_status",((RestRepository.ApiException)failure.getCause()).status);}
             if(failure instanceof RestRepository.ApiException)result.putInt("failure_status",((RestRepository.ApiException)failure).status);
             StringBuilder trace=new StringBuilder();
             for(StackTraceElement frame:failure.getStackTrace()) if(frame.getClassName().startsWith("xyz.eclipseofficial")) trace.append(frame.toString()).append(";");

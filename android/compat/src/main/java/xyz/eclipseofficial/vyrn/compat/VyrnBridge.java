@@ -774,7 +774,14 @@ public final class VyrnBridge {
         return error;
     }
     public static void showEditError(int account,TLRPC.TL_error error,org.telegram.ui.ActionBar.BaseFragment fragment,TLRPC.TL_messages_editMessage request){
+        if(fragment==null||fragment.getParentActivity()==null)return;
         boolean rtl=org.telegram.messenger.LocaleController.isRTL;
+        if(request instanceof EditRequest&&((EditRequest)request).dialog>0&&error.code>=500){
+            org.telegram.ui.ActionBar.AlertDialog.Builder builder=new org.telegram.ui.ActionBar.AlertDialog.Builder(fragment.getParentActivity());
+            builder.setTitle(rtl?"ارسال ویرایش ناموفق بود":"Edit not sent");builder.setMessage(rtl?"اتصال را بررسی کنید و همین ویرایش را دوباره ارسال کنید.":"Check your connection and retry this edit.");
+            builder.setPositiveButton(rtl?"تلاش مجدد":"Retry",(dialog,which)->dispatch(account,request,(response,retryError)->{if(retryError==null)processEditUpdates(account,request,(TLRPC.Updates)response);else AndroidUtilities.runOnUIThread(()->showEditError(account,retryError,fragment,request));},null));
+            builder.setNegativeButton(org.telegram.messenger.LocaleController.getString(org.telegram.messenger.R.string.Cancel),null);fragment.showDialog(builder.create());return;
+        }
         if("VYRN_EDIT_CONFLICT".equals(error.text)||"VYRN_EDIT_RELOAD_REQUIRED".equals(error.text))org.telegram.ui.Components.AlertsCreator.showSimpleAlert(fragment,rtl?"پیام تغییر کرده یا نسخهٔ آن مشخص نیست. پیام را دوباره بارگیری کنید و ویرایش را تکرار کنید.":"The message changed or its version is unknown. Reload the message and edit again.");
         else org.telegram.ui.Components.AlertsCreator.processError(account,error,fragment,request);
     }
