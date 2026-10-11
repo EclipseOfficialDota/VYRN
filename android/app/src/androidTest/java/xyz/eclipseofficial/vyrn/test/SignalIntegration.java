@@ -43,6 +43,13 @@ final class SignalIntegration {
     private static boolean contains(byte[] data,byte[] needle){outer:for(int i=0;i<=data.length-needle.length;i++){for(int j=0;j<needle.length;j++)if(data[i+j]!=needle[j])continue outer;return true;}return false;}
     static void run(Context context,String phase,BiConsumer<Boolean,String> check) throws Exception {
         if(phase.equals("signal")) {
+            java.lang.reflect.Method classify=xyz.eclipseofficial.vyrn.compat.VyrnBridge.class.getDeclaredMethod("problem",Throwable.class);classify.setAccessible(true);
+            for(Throwable failure:new Throwable[]{new javax.net.ssl.SSLHandshakeException("test"),new java.io.IOException("storage"),new SecurityException("account_changed")})check.accept(!"VYRN_RETRYABLE_REQUEST_FAILED".equals(((org.telegram.tgnet.TLRPC.TL_error)classify.invoke(null,failure)).text),"private_edit_permanent_"+failure.getClass().getSimpleName()+"_not_retryable");
+            check.accept("VYRN_RETRYABLE_REQUEST_FAILED".equals(((org.telegram.tgnet.TLRPC.TL_error)classify.invoke(null,new java.net.ConnectException("offline"))).text),"private_edit_connection_failure_retryable");
+            javax.net.ssl.SSLHandshakeException interrupted=new javax.net.ssl.SSLHandshakeException("test");interrupted.initCause(new java.io.EOFException());
+            check.accept("VYRN_RETRYABLE_REQUEST_FAILED".equals(((org.telegram.tgnet.TLRPC.TL_error)classify.invoke(null,interrupted)).text),"private_edit_tls_connection_closed_retryable");
+            javax.net.ssl.SSLHandshakeException certificate=new javax.net.ssl.SSLHandshakeException("test");certificate.initCause(new java.security.cert.CertificateException());
+            check.accept(!"VYRN_RETRYABLE_REQUEST_FAILED".equals(((org.telegram.tgnet.TLRPC.TL_error)classify.invoke(null,certificate)).text),"private_edit_tls_certificate_failure_not_retryable");
             java.time.Instant expected=java.time.Instant.ofEpochSecond(1767225600L,123456789);
             check.accept(expected.equals(xyz.eclipseofficial.vyrn.data.Timestamps.parse("2026-01-01T00:00:00.123456789Z"))
                     && expected.equals(xyz.eclipseofficial.vyrn.data.Timestamps.parse("2026-01-01T00:00:00.123456789+00:00"))

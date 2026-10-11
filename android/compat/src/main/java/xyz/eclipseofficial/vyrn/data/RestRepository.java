@@ -19,6 +19,9 @@ public final class RestRepository implements Models.Repository {
         public final int status;public final String code;
         ApiException(int status,String code){super(code);this.status=status;this.code=code;}
     }
+    public static final class NetworkException extends java.io.IOException {
+        NetworkException(java.io.IOException cause){super("network_exchange_failed",cause);}
+    }
     public Object request(String method,String path,JSONObject body,boolean authenticated) throws Exception {
         return requestForUser(null,method,path,body,authenticated);
     }
@@ -57,7 +60,9 @@ public final class RestRepository implements Models.Repository {
             if(stream!=null){try(InputStream input=stream;ByteArrayOutputStream output=new ByteArrayOutputStream()){byte[] buffer=new byte[8192];int n;while((n=input.read(buffer))!=-1){if(output.size()+n>4*1024*1024)throw new IllegalStateException("response_too_large");output.write(buffer,0,n);}text=output.toString("UTF-8");}}
             if(status<200||status>=300){String code="request_failed";try{code=new JSONObject(text).optString("error",code);}catch(Exception ignored){}throw new ApiException(status,code);}
             return text.trim().startsWith("[")?new JSONArray(text):new JSONObject(text);
-        }finally{connection.disconnect();}
+        }catch(javax.net.ssl.SSLHandshakeException|javax.net.ssl.SSLPeerUnverifiedException failure){throw failure;}
+        catch(java.io.IOException failure){throw new NetworkException(failure);}
+        finally{connection.disconnect();}
     }
     public Models.User me() throws Exception {return user((JSONObject)request("GET","/v1/me",null,true));}
     public Models.User me(String expectedUser,String session) throws Exception {Models.User value=user((JSONObject)requestForSession(expectedUser,session,"GET","/v1/me",null));if(!expectedUser.equals(value.id))throw new SecurityException("account_changed");return value;}

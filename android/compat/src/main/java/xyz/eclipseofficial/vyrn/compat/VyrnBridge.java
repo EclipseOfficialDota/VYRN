@@ -773,22 +773,28 @@ public final class VyrnBridge {
     public static void bindRequestToGuid(int account,int token,int guid){PendingRequest pending=REQUESTS.get(requestKey(account,token));if(pending!=null && guid!=0)synchronized(pending){pending.guid=guid;}}
     public static void cancelRequestsForGuid(int account,int guid){if(guid==0)return;for(PendingRequest pending:REQUESTS.values()){boolean matches;synchronized(pending){matches=pending.account==account && pending.guid==guid;}if(matches)pending.cancel(null);}}
     private static TLRPC.TL_error problem(Throwable failure){
+        if(org.telegram.messenger.BuildConfig.DEBUG&&failure!=null){String detail="";if(failure instanceof SecurityException&&java.util.Arrays.asList("account_changed","session_changed","signal_edit_context_changed","signal_edit_intent_changed","signal_message_deleted","signal_edit_revision_conflict").contains(failure.getMessage()))detail=" guard="+failure.getMessage();android.util.Log.w("VyrnBridge","request_failure="+failure.getClass().getName()+" cause_type="+(failure.getCause()==null?"none":failure.getCause().getClass().getName())+detail);}
         TLRPC.TL_error error=null;if(failure!=null){error=new TLRPC.TL_error();error.code=failure instanceof RestRepository.ApiException?((RestRepository.ApiException)failure).status:503;error.text=failure instanceof UnsupportedOperationException?"VYRN_FEATURE_UNAVAILABLE":"VYRN_REQUEST_FAILED";}
+        if(failure instanceof RestRepository.NetworkException||failure instanceof java.net.UnknownHostException||failure instanceof java.net.SocketTimeoutException||failure instanceof java.net.SocketException||failure instanceof java.io.EOFException||failure instanceof javax.net.ssl.SSLHandshakeException&&failure.getCause() instanceof java.io.EOFException||failure instanceof RestRepository.ApiException&&(error.code>=500||error.code==429))error.text="VYRN_RETRYABLE_REQUEST_FAILED";
         if(failure instanceof RestRepository.ApiException&&((RestRepository.ApiException)failure).code.equals("revision_conflict"))error.text="VYRN_EDIT_CONFLICT";
         if(failure instanceof SecurityException&&"signal_edit_revision_conflict".equals(failure.getMessage())){error.code=409;error.text="VYRN_EDIT_CONFLICT";}
         if(failure instanceof IllegalStateException&&"edit_snapshot_required".equals(failure.getMessage())){error.code=409;error.text="VYRN_EDIT_RELOAD_REQUIRED";}
+        if(failure instanceof SecurityException&&"signal_edit_intent_changed".equals(failure.getMessage())){error.code=409;error.text="VYRN_EDIT_PENDING_TEXT_CHANGED";}
         return error;
     }
     public static void showEditError(int account,TLRPC.TL_error error,org.telegram.ui.ActionBar.BaseFragment fragment,TLRPC.TL_messages_editMessage request){
         if(fragment==null||fragment.getParentActivity()==null)return;
         boolean rtl=org.telegram.messenger.LocaleController.isRTL;
-        if(request instanceof EditRequest&&((EditRequest)request).dialog>0&&error.code>=500){
+        boolean privateEdit=request instanceof EditRequest&&((EditRequest)request).dialog>0;
+        if(privateEdit&&"VYRN_RETRYABLE_REQUEST_FAILED".equals(error.text)){
             org.telegram.ui.ActionBar.AlertDialog.Builder builder=new org.telegram.ui.ActionBar.AlertDialog.Builder(fragment.getParentActivity());
             builder.setTitle(rtl?"ارسال ویرایش ناموفق بود":"Edit not sent");builder.setMessage(rtl?"اتصال را بررسی کنید و همین ویرایش را دوباره ارسال کنید.":"Check your connection and retry this edit.");
             builder.setPositiveButton(rtl?"تلاش مجدد":"Retry",(dialog,which)->dispatch(account,request,(response,retryError)->{if(retryError==null)processEditUpdates(account,request,(TLRPC.Updates)response);else AndroidUtilities.runOnUIThread(()->showEditError(account,retryError,fragment,request));},null));
             builder.setNegativeButton(org.telegram.messenger.LocaleController.getString(org.telegram.messenger.R.string.Cancel),null);fragment.showDialog(builder.create());return;
         }
         if("VYRN_EDIT_CONFLICT".equals(error.text)||"VYRN_EDIT_RELOAD_REQUIRED".equals(error.text))org.telegram.ui.Components.AlertsCreator.showSimpleAlert(fragment,rtl?"پیام تغییر کرده یا نسخهٔ آن مشخص نیست. پیام را دوباره بارگیری کنید و ویرایش را تکرار کنید.":"The message changed or its version is unknown. Reload the message and edit again.");
+        else if(privateEdit&&"VYRN_EDIT_PENDING_TEXT_CHANGED".equals(error.text))org.telegram.ui.Components.AlertsCreator.showSimpleAlert(fragment,rtl?"ویرایش قبلی هنوز در انتظار ارسال است. «ویرایش» را دوباره باز کنید و متن ذخیره‌شده را ارسال کنید.":"An earlier edit is still pending. Reopen Edit to retry its saved text.");
+        else if(privateEdit)org.telegram.ui.Components.AlertsCreator.showSimpleAlert(fragment,rtl?"ویرایش ارسال نشد. حساب، وضعیت پیام و فضای خالی دستگاه را بررسی کنید؛ سپس گفت‌وگو را دوباره باز کنید.":"This edit could not be sent. Check your account, message and available storage, then reopen the chat.");
         else org.telegram.ui.Components.AlertsCreator.processError(account,error,fragment,request);
     }
     private static IdMap avatarMap;
