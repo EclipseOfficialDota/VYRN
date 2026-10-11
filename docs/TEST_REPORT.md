@@ -1,3 +1,9 @@
+## Account lifecycle regression — 2026-10-11
+
+Same final local APK b2da7451a54b77d2758f1830630848b48828226c9fc1eb5e71ef0a7be46eeebb: auth97274 exits0/12, sessions1818 exits0/67, logout25511 exits0/38 across3phases, onboarding31960 exits0/45 across5phases, sessions-network6733 PASS/97. Total259; reports2026-10-11 at21:32:33/21:33:33/21:34:34/21:35:14/21:36:03+03:30, no startup attach retries. Covers original UI recovery/login, session actions, offline/online logout and current-session revocation, cold recovery-code lifecycle and actual session-network failure/retry. Mixed58387 auth+sessions failed a fresh-account setup guard; separate accepted invocations required. No acceptance attributed to mixed failure.
+
+sessions-network actual worker absent; childless RTK11140 identity verified/stopped, outer6733 exit1 is wrapper cleanup, not observed script exit0. Other four scripts exit0. One emulator, programmatic Settings entry and API-created companion-session fixtures remain limits; physical-device/full account-switch/storage/Keystore/media/background acceptance not established. Product source/normal phone APKs unchanged from98c88ff; no production change.
+
 ## Private edit Retry classification accepted — 2026-10-11
 
 Native Cold8659 report2026-10-11T21:25:33.5827815+03:30 passes635 checks (30registration+605scenario),37rounds, local APK b2da7451a54b77d2758f1830630848b48828226c9fc1eb5e71ef0a7be46eeebb. Both cold edit phases39 checks: changed pending text gets specific permanent feedback, no Retry loop, exact encrypted journal unchanged, actual Edit restores saved text, original offline Retry updates one server/native identity to revision2, live recipient and final cold offline displays pass. Signal40545 exits0/35 on the same APK,2026-10-11T21:14:34.4318859+03:30, including certificate/security/storage rejection and transport/TLS-EOF Retry.
