@@ -31,3 +31,5 @@ android/upstream/
 *.gpg
 *.bak
 *.p8
+__pycache__/
+*.py[cod]
