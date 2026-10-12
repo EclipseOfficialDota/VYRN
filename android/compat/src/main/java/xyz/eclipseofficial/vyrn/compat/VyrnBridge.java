@@ -894,6 +894,7 @@ public final class VyrnBridge {
         chat.default_banned_rights=new TLRPC.TL_chatBannedRights();chat.flags|=1<<18;
         TLRPC.TL_chatBannedRights rights=chat.default_banned_rights;
         rights.send_media=rights.send_photos=rights.send_videos=rights.send_roundvideos=rights.send_audios=rights.send_voices=rights.send_docs=rights.send_polls=rights.send_stickers=rights.send_gifs=rights.send_games=rights.send_inline=true;
+        rights.send_media=rights.send_docs=false;
         rights.change_info=rights.invite_users=rights.pin_messages=true;
         return chat;
     }

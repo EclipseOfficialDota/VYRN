@@ -631,6 +631,27 @@ foreach($aiFile in @('Components/CaptionPhotoViewer.java','Components/ChatAttach
   param($t)
   $t=(& git -c "safe.directory=$($upstream.Replace('\','/'))" -C $upstream show "${pin}:$relative") -join "`n"
   $t=Disable-AiControls $t
+  if($aiFile -eq 'Components/ChatAttachAlert.java'){
+   $init='    public void init() {'
+   $counts='            int count = buttonsCount;'
+   $rows='            attachBotsEndRow = -1;'
+   $photoInit='        photoLayout.onInit(videosEnabled, photosEnabled, documentsEnabled);'
+   foreach($marker in @($init,$counts,$rows,$photoInit)){if(!$t.Contains($marker)){throw 'Pinned attachment capability marker missing'}}
+   $helper='    private boolean vyrnFilesOnly() { return baseFragment instanceof ChatActivity && ((ChatActivity) baseFragment).getCurrentChat() != null && avatarPicker == 0 && !storyMediaPicker && !isPollAttach && editingMessageObject == null; }'
+   $t=$t.Replace($init,$helper+"`n"+$init)
+   $t=$t.Replace($counts,$counts+"`n            if (vyrnFilesOnly()) return count;")
+   $t=$t.Replace($rows,$rows+"`n            if (vyrnFilesOnly()) { if (documentsEnabled) documentButton = buttonsCount++; super.notifyDataSetChanged(); return; }")
+   $t=$t.Replace($photoInit,'        if (vyrnFilesOnly()) { photosEnabled = videosEnabled = musicEnabled = pollsEnabled = todoEnabled = false; } else photoLayout.onInit(videosEnabled, photosEnabled, documentsEnabled);')
+   $layout='        if (isStoryLocationPicker || isBizLocationPicker || isLocationPicker) {'
+   if(!$t.Contains($layout)){throw 'Pinned attachment initial layout marker missing'}
+   $t=$t.Replace($layout,"        if (vyrnFilesOnly()) { openDocumentsLayout(false); layoutToSet = documentLayout; selectedId = 4; typeButtonsAvailable = true; } else if (isStoryLocationPicker || isBizLocationPicker || isLocationPicker) {")
+   $docStart=$t.IndexOf('                } else if (num == 4) {')
+   $docEnd=$t.IndexOf('                } else if (num == 5) {',$docStart)
+   if($docStart -lt 0 -or $docEnd -lt 0){throw 'Pinned document permission markers missing'}
+   $section=$t.Substring($docStart,$docEnd-$docStart).Replace('if (Build.VERSION.SDK_INT >= 33) {','if (!vyrnFilesOnly() && Build.VERSION.SDK_INT >= 33) {').Replace('} else if (Build.VERSION.SDK_INT >= 23 &&','} else if (!vyrnFilesOnly() && Build.VERSION.SDK_INT >= 23 &&')
+   $t=$t.Substring(0,$docStart)+$section+$t.Substring($docEnd)
+   $t=$t.Replace('err = !checkPhotoAndDocumentsPermission(mContext);','err = !vyrnFilesOnly() && !checkPhotoAndDocumentsPermission(mContext);')
+  }
   if($aiFile -eq 'iv/RichEditor.java'){
    $enabled='        public void setEnabled(boolean enabled) {'
    if(!$t.Contains($enabled)){throw 'Pinned rich button enabled marker missing'}
