@@ -13,6 +13,56 @@ import (
 	"time"
 )
 
+func TestCommittedUploadAckDiscardedAndReplayObserved(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("failed") == "1" {
+			w.WriteHeader(503)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer upstream.Close()
+	target, _ := url.Parse(upstream.URL)
+	state := filepath.Join(t.TempDir(), "part.json")
+	front := httptest.NewServer(partFaultProxy(target, http.DefaultTransport, state))
+	defer front.Close()
+	path := "/v1/media-uploads/00000000-0000-0000-0000-000000000001/parts/0"
+	for _, unrelated := range []struct {
+		method, path string
+		status       int
+	}{{http.MethodGet, path, 204}, {http.MethodPut, strings.TrimSuffix(path, "0") + "1", 204}, {http.MethodPut, path + "?failed=1", 503}} {
+		request, _ := http.NewRequest(unrelated.method, front.URL+unrelated.path, strings.NewReader("same bytes"))
+		response, err := http.DefaultClient.Do(request)
+		if err != nil || response.StatusCode != unrelated.status {
+			t.Fatal("unrelated or failed response changed")
+		}
+		response.Body.Close()
+		if _, err := os.Stat(state); !os.IsNotExist(err) {
+			t.Fatal("unrelated or failed response armed fault")
+		}
+	}
+	for attempt := 0; attempt < 2; attempt++ {
+		request, _ := http.NewRequest(http.MethodPut, front.URL+path, strings.NewReader("same bytes"))
+		response, err := http.DefaultClient.Do(request)
+		if attempt == 0 {
+			if err == nil {
+				response.Body.Close()
+				t.Fatal("committed acknowledgement escaped")
+			}
+		} else {
+			if err != nil || response.StatusCode != http.StatusNoContent {
+				t.Fatal("replay did not pass")
+			}
+			response.Body.Close()
+		}
+	}
+	data, err := os.ReadFile(state)
+	var proof heldSend
+	if err != nil || json.Unmarshal(data, &proof) != nil || proof.Status != 204 || proof.Replays != 1 || proof.Server != "00000000-0000-0000-0000-000000000001" {
+		t.Fatal("missing commit and replay evidence")
+	}
+}
+
 func TestCommittedResponseHeldOnce(t *testing.T) {
 	for _, scenario := range []struct {
 		operation, method, path, body, message, expected string

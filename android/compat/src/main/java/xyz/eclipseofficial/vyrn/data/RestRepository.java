@@ -130,7 +130,9 @@ public final class RestRepository implements Models.Repository {
                 byte[] value=output.toByteArray();if(status<200||status>=300){String code="request_failed";try{code=new JSONObject(new String(value,StandardCharsets.UTF_8)).optString("error",code);}catch(Exception ignored){}throw new ApiException(status,code);}
                 if(body==null && value.length>limit)throw new IllegalStateException("range_too_large");return value;
             }
-        }finally{connection.disconnect();}
+        }catch(javax.net.ssl.SSLHandshakeException|javax.net.ssl.SSLPeerUnverifiedException failure){throw failure;}
+        catch(java.io.IOException failure){throw new NetworkException(failure);}
+        finally{connection.disconnect();}
     }
     public Models.User updateProfileForUser(String user,JSONObject changes) throws Exception{return user((JSONObject)requestForUser(user,"PATCH","/v1/me",changes,true));}
     public Models.Attachment attachmentForUser(String user,String id) throws Exception {

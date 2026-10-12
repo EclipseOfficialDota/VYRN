@@ -30,7 +30,7 @@ import xyz.eclipseofficial.vyrn.domain.Models;
 
 /** Native file selection/send and receive/download scenarios; group setup uses API fixtures. */
 final class MediaUiIntegration {
-    static void sendUi(Instrumentation instrumentation,Activity activity,JSONObject fixture,AuthUiIntegration.Check check,boolean member,boolean offline) throws Exception {
+    static void sendUi(Instrumentation instrumentation,Activity activity,JSONObject fixture,AuthUiIntegration.Check check,boolean member,boolean offline,boolean ackLoss) throws Exception {
         AuthUiIntegration.registration(instrumentation,activity,fixture,check);
         int account=UserConfig.selectedAccount;RestRepository repository=VyrnBridge.forAccount(account).repository;String owner=repository.me().id;
         RestRepository creator=repository;String creatorId=owner;
@@ -75,6 +75,7 @@ final class MediaUiIntegration {
             awaitUi(instrumentation,()->cell(chat.getFragmentView(),sent.ordinal)!=null&&cell(chat.getFragmentView(),sent.ordinal).getMessageObject().messageOwner.send_state==0,check,"file_ui_original_bubble_acknowledged");
             Thread.sleep(1500);check.verify(repository.liveMessages(conversation,null,100).size()==1,"file_ui_no_duplicate_after_ack");
             for(String permission:new String[]{"android.permission.READ_MEDIA_IMAGES","android.permission.READ_MEDIA_VIDEO","android.permission.CAMERA"})check.verify(instrumentation.getTargetContext().checkSelfPermission(permission)==android.content.pm.PackageManager.PERMISSION_DENIED,"file_ui_send_preserves_unrelated_permission_denial");
+            if(ackLoss){try(xyz.eclipseofficial.vyrn.data.OutboxStore outbox=new xyz.eclipseofficial.vyrn.data.OutboxStore(instrumentation.getTargetContext(),account);android.database.Cursor intent=outbox.getReadableDatabase().rawQuery("SELECT upload_body FROM outbox WHERE user_id=? AND conversation_id=? AND state=1",new String[]{owner,conversation})){check.verify(intent.getCount()==1&&intent.moveToFirst(),"file_ui_ack_loss_one_durable_media_intent");String upload=new JSONObject(intent.getString(0)).getString("id");Files.write(new File(instrumentation.getTargetContext().getFilesDir(),"vyrn-test-media-upload-id.txt").toPath(),upload.getBytes(StandardCharsets.UTF_8));}}
         }finally{instrumentation.runOnMainSync(()->{org.telegram.messenger.NotificationCenter.getInstance(account).removeObserver(observer,org.telegram.messenger.NotificationCenter.fileUploadProgressChanged);org.telegram.messenger.NotificationCenter.getInstance(account).removeObserver(observer,org.telegram.messenger.NotificationCenter.fileUploadFailed);});}
     }
     private static Object field(Object object,String name) throws Exception {Class<?> type=object.getClass();while(type!=null){try{java.lang.reflect.Field value=type.getDeclaredField(name);value.setAccessible(true);return value.get(object);}catch(NoSuchFieldException missing){type=type.getSuperclass();}}throw new NoSuchFieldException(name);}
