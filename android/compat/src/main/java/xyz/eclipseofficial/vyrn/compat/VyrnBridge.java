@@ -778,7 +778,8 @@ public final class VyrnBridge {
                 MediaRequest in=(MediaRequest)request;UploadIdentity identity=in.identity;
                 if(!currentUploadIdentity(account,identity))throw new SecurityException("account_changed");
                 if(in.peer==null||in.peer.chat_id<=0||!(in.media instanceof TLRPC.TL_inputMediaUploadedDocument))throw new UnsupportedOperationException("media_variant_unavailable");
-                if(in.reply_to!=null||in.reply_markup!=null||!in.entities.isEmpty()||in.schedule_date!=0||in.schedule_repeat_period!=0||in.send_as!=null||in.quick_reply_shortcut!=null||in.effect!=0||in.allow_paid_stars!=0||in.suggested_post!=null||in.ephemeralReceiverBotId!=0)throw new UnsupportedOperationException("media_options_unavailable");
+                boolean selfSender=in.send_as==null||in.send_as instanceof TLRPC.TL_inputPeerSelf||in.send_as instanceof TLRPC.TL_inputPeerUser&&in.send_as.user_id==identity.origin;
+                if(in.reply_to!=null||in.reply_markup!=null||!in.entities.isEmpty()||in.schedule_date!=0||in.schedule_repeat_period!=0||!selfSender||in.quick_reply_shortcut!=null||in.effect!=0||in.allow_paid_stars!=0||in.suggested_post!=null||in.ephemeralReceiverBotId!=0)throw new UnsupportedOperationException("media_options_unavailable");
                 TLRPC.TL_inputMediaUploadedDocument media=(TLRPC.TL_inputMediaUploadedDocument)in.media;
                 if(media.file==null||media.thumb!=null||media.ttl_seconds!=0||!media.stickers.isEmpty()||media.spoiler||media.attributes.size()!=1||!(media.attributes.get(0) instanceof TLRPC.TL_documentAttributeFilename))throw new UnsupportedOperationException("media_variant_unavailable");
                 String filename=((TLRPC.TL_documentAttributeFilename)media.attributes.get(0)).file_name;

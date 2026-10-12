@@ -1,5 +1,5 @@
 # Real Android networking/Keystore integration; not a claim of full UI acceptance.
-param([ValidateSet('emulator-5560','emulator-5562')][string]$Serial='emulator-5560',[ValidateSet('first','mutations','profile','offline','restart','media-ui','media-upload','media-upload-big','media-upload-cancel','auth-ui','registration-ui','sessions-ui','sessions-network','logout-prepare','logout-offline','logout-ui','onboarding-prepare','onboarding-restart','onboarding-gap','onboarding-recover','onboarding-complete')][string[]]$Phases=@('first','mutations','profile','offline','restart'))
+param([ValidateSet('emulator-5560','emulator-5562')][string]$Serial='emulator-5560',[ValidateSet('first','mutations','profile','offline','restart','media-ui','media-send-ui','media-upload','media-upload-big','media-upload-cancel','auth-ui','registration-ui','sessions-ui','sessions-network','logout-prepare','logout-offline','logout-ui','onboarding-prepare','onboarding-restart','onboarding-gap','onboarding-recover','onboarding-complete')][string[]]$Phases=@('first','mutations','profile','offline','restart'))
 $ErrorActionPreference='Stop'
 $root=Split-Path $PSScriptRoot -Parent
 $adb=Join-Path $root '.tools/android-sdk/platform-tools/adb.exe'
@@ -113,6 +113,7 @@ try {
             $stage='instrumentation_start';$failure='unknown'
             if($result -match 'stage=([a-zA-Z0-9_]+)'){$stage=$Matches[1]}
             if($result -match 'failure_type=([a-zA-Z0-9_]+)'){$failure=$Matches[1]}
+            if($result -match 'failure_location=([^\r\n]*)'){Write-Output ('Test failure frames: '+$Matches[1])}
             if($result -match 'failure_status=([0-9]+)'){$failure+=" HTTP $($Matches[1])"}
             throw "Android integration failed at $stage ($failure)"
         }
@@ -121,7 +122,7 @@ try {
         $rounds+=@{phase=$phase;checks=$checks;result='passed';startup_attach_retry=$attachRetried}
         Write-Output "PASS: Android integration phase $phase"
     }
-    $report=if(@($Phases | Where-Object {$_ -notlike 'onboarding-*'}).Count -eq 0){'artifacts/android-onboarding-ui.json'}elseif(@($Phases | Where-Object {$_ -notlike 'logout-*'}).Count -eq 0){'artifacts/android-logout-ui.json'}elseif($Phases.Count -eq 1 -and $Phases[0] -in @('media-ui','media-upload','media-upload-big','media-upload-cancel','auth-ui','registration-ui','sessions-ui','sessions-network')){"artifacts/android-$($Phases[0]).json"}else{'artifacts/android-integration.json'}
+    $report=if(@($Phases | Where-Object {$_ -notlike 'onboarding-*'}).Count -eq 0){'artifacts/android-onboarding-ui.json'}elseif(@($Phases | Where-Object {$_ -notlike 'logout-*'}).Count -eq 0){'artifacts/android-logout-ui.json'}elseif($Phases.Count -eq 1 -and $Phases[0] -in @('media-ui','media-send-ui','media-upload','media-upload-big','media-upload-cancel','auth-ui','registration-ui','sessions-ui','sessions-network')){"artifacts/android-$($Phases[0]).json"}else{'artifacts/android-integration.json'}
     if($deviceSuffix){$report=$report.Replace('.json',"$deviceSuffix.json")}
     @{date=[DateTimeOffset]::UtcNow.ToString('o');apk=[IO.Path]::GetFileName($apk);sha256=(Get-FileHash $apk).Hash.ToLowerInvariant();device=$avdName;serial=$Serial;api=35;transport='HTTPS with scoped local CA';rounds=$rounds;full_ui_e2e='not tested'} | ConvertTo-Json -Depth 6 | Set-Content (Join-Path $root $report) -Encoding utf8
 } finally {

@@ -87,7 +87,9 @@ public final class LocalIntegrationRunner extends Instrumentation {
             check(foreground!=null,"foreground_activity");
             stage="foreground_idle";
             if(!boundedChatStartup)waitForIdleSync();
-            if(phase.equals("media-upload-cancel")){
+            if(phase.equals("media-send-ui")){
+                stage="media_send_ui";MediaUiIntegration.sendUi(this,foreground,read("vyrn-test-fixture.json"),(condition,name)->{check(condition,name);passed.put(name);});
+            }else if(phase.equals("media-upload-cancel")){
                 stage="media_upload_cancel";MediaUiIntegration.cancelUpload(this,foreground,read("vyrn-test-fixture.json"),(condition,name)->{check(condition,name);passed.put(name);});
             }else if(phase.equals("media-upload")||phase.equals("media-upload-big")){
                 stage="media_upload";MediaUiIntegration.upload(this,foreground,read("vyrn-test-fixture.json"),(condition,name)->{check(condition,name);passed.put(name);},phase.equals("media-upload-big"));
@@ -121,7 +123,7 @@ public final class LocalIntegrationRunner extends Instrumentation {
             if(failure.getCause()!=null){result.putString("failure_cause_type",failure.getCause().getClass().getSimpleName());if(failure.getCause() instanceof RestRepository.ApiException)result.putInt("failure_cause_status",((RestRepository.ApiException)failure.getCause()).status);}
             if(failure instanceof RestRepository.ApiException)result.putInt("failure_status",((RestRepository.ApiException)failure).status);
             StringBuilder trace=new StringBuilder();
-            for(StackTraceElement frame:failure.getStackTrace()) if(frame.getClassName().startsWith("xyz.eclipseofficial")) trace.append(frame.toString()).append(";");
+            for(StackTraceElement frame:failure.getStackTrace()) if(frame.getClassName().startsWith("xyz.eclipseofficial")||frame.getClassName().startsWith("android.app.Instrumentation")||frame.getClassName().startsWith("android.view")) trace.append(frame.toString()).append(";");
             result.putString("failure_location",trace.toString());
             finish(Activity.RESULT_CANCELED, result);
         } finally {if(diagnostic!=null)diagnostic.interrupt();}

@@ -28,8 +28,50 @@ import xyz.eclipseofficial.vyrn.data.IdMap;
 import xyz.eclipseofficial.vyrn.data.RestRepository;
 import xyz.eclipseofficial.vyrn.domain.Models;
 
-/** Real native file bubble/action/download; upload is an API fixture, not native Send. */
+/** Native file selection/send and receive/download scenarios; group setup uses API fixtures. */
 final class MediaUiIntegration {
+    static void sendUi(Instrumentation instrumentation,Activity activity,JSONObject fixture,AuthUiIntegration.Check check) throws Exception {
+        AuthUiIntegration.registration(instrumentation,activity,fixture,check);
+        int account=UserConfig.selectedAccount;RestRepository repository=VyrnBridge.forAccount(account).repository;String owner=repository.me().id;
+        JSONObject group=(JSONObject)repository.requestForUser(owner,"POST","/v1/conversations",new JSONObject().put("kind","group").put("title","File picker UI").put("members",new org.json.JSONArray()),true);
+        String conversation=group.getString("id");CompletableFuture<org.telegram.tgnet.TLObject> dialogs=new CompletableFuture<>();
+        ConnectionsManager.getInstance(account).sendRequest(new TLRPC.TL_messages_getDialogs(),(value,error)->{if(error!=null)dialogs.completeExceptionally(new AssertionError("dialogs_failed"));else dialogs.complete(value);});
+        TLRPC.TL_messages_dialogs loaded=(TLRPC.TL_messages_dialogs)dialogs.get(40,TimeUnit.SECONDS);
+        instrumentation.runOnMainSync(()->{org.telegram.messenger.MessagesController.getInstance(account).putChats(loaded.chats,false);org.telegram.messenger.MessagesController.getInstance(account).putUsers(loaded.users,false);});
+        int local;try(IdMap ids=new IdMap(instrumentation.getTargetContext(),account)){local=ids.local("conversation",conversation);}
+        AuthUiIntegration.handlePrompts(instrumentation,activity,check);
+        awaitUi(instrumentation,()->LaunchActivity.getLastFragment()!=null&&LaunchActivity.getLastFragment().getParentLayout()!=null&&!LaunchActivity.getLastFragment().getParentLayout().isTransitionAnimationInProgress(),check,"file_ui_navigation_ready");
+        boolean[] opened={false};instrumentation.runOnMainSync(()->{Bundle args=new Bundle();args.putLong("chat_id",local);opened[0]=LaunchActivity.getLastFragment().presentFragment(new ChatActivity(args));});check.verify(opened[0],"file_ui_actual_chat_open");
+        awaitUi(instrumentation,()->LaunchActivity.getLastFragment() instanceof ChatActivity&&((ChatActivity)LaunchActivity.getLastFragment()).getChatActivityEnterView()!=null&&!LaunchActivity.getLastFragment().getParentLayout().isTransitionAnimationInProgress(),check,"file_ui_composer_ready");
+        ChatActivity chat=(ChatActivity)LaunchActivity.getLastFragment();
+        // Fixture permissions/directory only; original visible controls perform selection and Send.
+        for(String permission:new String[]{"android.permission.READ_MEDIA_IMAGES","android.permission.READ_MEDIA_VIDEO","android.permission.CAMERA"})instrumentation.getUiAutomation().grantRuntimePermission(instrumentation.getTargetContext().getPackageName(),permission);
+        File external=instrumentation.getTargetContext().getExternalFilesDir(null);check.verify(external!=null,"file_ui_fixture_external_storage");File directory=new File(external,"vyrn-picker-fixture");if(!directory.isDirectory()&&!directory.mkdir())throw new AssertionError("fixture_directory");
+        byte[] bytes=new byte[2*1024*1024+113];for(int i=0;i<bytes.length;i++)bytes[i]=(byte)(i*19);File source=new File(directory,"vyrn-picker-file.bin");Files.write(source.toPath(),bytes);
+        java.util.concurrent.atomic.AtomicLong progress=new java.util.concurrent.atomic.AtomicLong();org.telegram.messenger.NotificationCenter.NotificationCenterDelegate observer=(event,selected,args)->{if(selected==account&&args.length>1&&source.getAbsolutePath().equals(args[0]))progress.accumulateAndGet(((Number)args[1]).longValue(),Math::max);};
+        instrumentation.runOnMainSync(()->org.telegram.messenger.NotificationCenter.getInstance(account).addObserver(observer,org.telegram.messenger.NotificationCenter.fileUploadProgressChanged));
+        try{
+            tap(instrumentation,(View)field(chat.getChatActivityEnterView(),"attachButton"),check,"file_ui_attach_control");
+            awaitUi(instrumentation,()->chat.chatAttachAlert!=null&&chat.chatAttachAlert.isShowing(),check,"file_ui_attach_sheet_visible");Thread.sleep(700);
+            ViewGroup tabs=(ViewGroup)field(chat.chatAttachAlert,"buttonsRecyclerView");View[] fileTab={null};instrumentation.runOnMainSync(()->{for(int i=0;i<tabs.getChildCount();i++){View child=tabs.getChildAt(i);if(Integer.valueOf(4).equals(child.getTag()))fileTab[0]=child;}});tap(instrumentation,fileTab[0],check,"file_ui_document_tab");
+            awaitUi(instrumentation,()->chat.chatAttachAlert.getCurrentAttachLayout() instanceof org.telegram.ui.Components.ChatAttachAlertDocumentLayout,check,"file_ui_document_picker_visible");
+            org.telegram.ui.Components.ChatAttachAlertDocumentLayout picker=(org.telegram.ui.Components.ChatAttachAlertDocumentLayout)chat.chatAttachAlert.getCurrentAttachLayout();
+            java.lang.reflect.Method list=picker.getClass().getDeclaredMethod("listFiles",File.class);list.setAccessible(true);Throwable[] listing={null};instrumentation.runOnMainSync(()->{try{if(!Boolean.TRUE.equals(list.invoke(picker,directory)))listing[0]=new AssertionError("fixture_not_listed");}catch(Exception failure){listing[0]=failure;}});if(listing[0]!=null)throw new AssertionError(listing[0]);
+            awaitUi(instrumentation,()->textView(picker,source.getName())!=null,check,"file_ui_filename_visible");View[] row={null};instrumentation.runOnMainSync(()->row[0]=textView(picker,source.getName()));tap(instrumentation,row[0],check,"file_ui_select_visible_file");
+            awaitUi(instrumentation,()->picker.getSelectedItemsCount()==1,check,"file_ui_selection_count_one");
+            View send=(View)field(chat.chatAttachAlert,"writeButton");awaitUi(instrumentation,()->send.isShown()&&send.getAlpha()>0.9f,check,"file_ui_send_visible");tap(instrumentation,send,check,"file_ui_original_send_control");
+            java.util.List<Models.Message> messages=java.util.Collections.emptyList();long deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(60);while(System.nanoTime()<deadline){messages=repository.liveMessages(conversation,null,100);if(!messages.isEmpty())break;Thread.sleep(200);}
+            check.verify(messages.size()==1&&messages.get(0).attachment!=null,"file_ui_one_server_message_with_attachment");Models.Message sent=messages.get(0);
+            check.verify(sent.attachment.size==bytes.length&&sent.attachment.sha256.equals(hex(MessageDigest.getInstance("SHA-256").digest(bytes))),"file_ui_uploaded_exact_original_bytes");
+            check.verify(progress.get()==bytes.length,"file_ui_original_upload_progress_complete");
+            awaitUi(instrumentation,()->cell(chat.getFragmentView(),sent.ordinal)!=null&&cell(chat.getFragmentView(),sent.ordinal).getMessageObject().messageOwner.send_state==0,check,"file_ui_original_bubble_acknowledged");
+            Thread.sleep(1500);check.verify(repository.liveMessages(conversation,null,100).size()==1,"file_ui_no_duplicate_after_ack");
+        }finally{instrumentation.runOnMainSync(()->org.telegram.messenger.NotificationCenter.getInstance(account).removeObserver(observer,org.telegram.messenger.NotificationCenter.fileUploadProgressChanged));}
+    }
+    private static Object field(Object object,String name) throws Exception {Class<?> type=object.getClass();while(type!=null){try{java.lang.reflect.Field value=type.getDeclaredField(name);value.setAccessible(true);return value.get(object);}catch(NoSuchFieldException missing){type=type.getSuperclass();}}throw new NoSuchFieldException(name);}
+    private static View textView(View root,String text){if(root instanceof android.widget.TextView&&text.contentEquals(((android.widget.TextView)root).getText()))return root;if(root instanceof ViewGroup)for(int i=0;i<((ViewGroup)root).getChildCount();i++){View found=textView(((ViewGroup)root).getChildAt(i),text);if(found!=null)return found;}return null;}
+    private static void awaitUi(Instrumentation instrumentation,java.util.function.BooleanSupplier condition,AuthUiIntegration.Check check,String name) throws Exception {boolean[] ready={false};long deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(30);do{instrumentation.runOnMainSync(()->ready[0]=condition.getAsBoolean());if(ready[0])break;Thread.sleep(100);}while(System.nanoTime()<deadline);check.verify(ready[0],name);}
+    private static void tap(Instrumentation instrumentation,View view,AuthUiIntegration.Check check,String name){check.verify(view!=null,name+"_present");int[] position=new int[2];boolean[] shown={false};instrumentation.runOnMainSync(()->{android.graphics.Rect visible=new android.graphics.Rect();shown[0]=view.isShown()&&view.getGlobalVisibleRect(visible);position[0]=visible.centerX();position[1]=visible.centerY();});check.verify(shown[0],name+"_shown");long time=android.os.SystemClock.uptimeMillis();for(int action:new int[]{android.view.MotionEvent.ACTION_DOWN,android.view.MotionEvent.ACTION_UP}){android.view.MotionEvent event=android.view.MotionEvent.obtain(time,time+40,action,position[0],position[1],0);event.setSource(android.view.InputDevice.SOURCE_TOUCHSCREEN);try{check.verify(instrumentation.getUiAutomation().injectInputEvent(event,true),name+"_injected");}finally{event.recycle();}}}
     static void cancelUpload(Instrumentation instrumentation,Activity activity,JSONObject fixture,AuthUiIntegration.Check check) throws Exception {
         AuthUiIntegration.registration(instrumentation,activity,fixture,check);int account=UserConfig.selectedAccount;VyrnBridge bridge=VyrnBridge.forAccount(account);VyrnBridge.UploadIdentity identity=VyrnBridge.captureUploadIdentity(account);
         File source=new File(instrumentation.getTargetContext().getCacheDir(),"vyrn-native-cancel-upload.bin");byte[] bytes=new byte[16*1024*1024+113];for(int i=0;i<bytes.length;i++)bytes[i]=(byte)i;Files.write(source.toPath(),bytes);String path=source.getAbsolutePath();
@@ -76,12 +118,16 @@ final class MediaUiIntegration {
         TLRPC.TL_messages_sendMedia send=VyrnBridge.mediaRequest(account);TLRPC.TL_inputPeerChat destination=new TLRPC.TL_inputPeerChat();
         try(IdMap map=new IdMap(instrumentation.getTargetContext(),account)){destination.chat_id=map.local("conversation",group.getString("id"));}
         send.peer=destination;send.random_id=java.util.concurrent.ThreadLocalRandom.current().nextLong(1,Long.MAX_VALUE);send.message="Native file caption";
+        TLRPC.TL_inputPeerUser self=new TLRPC.TL_inputPeerUser();self.user_id=identity.origin;send.send_as=self;
         TLRPC.TL_inputMediaUploadedDocument payload=new TLRPC.TL_inputMediaUploadedDocument();payload.file=input;payload.mime_type="application/octet-stream";
         TLRPC.TL_documentAttributeFilename name=new TLRPC.TL_documentAttributeFilename();name.file_name=input.name;payload.attributes.add(name);send.media=payload;
-        TLRPC.TL_updateShortSentMessage first=sendFile(account,send),replayed=sendFile(account,send);
+        TLRPC.TL_updateShortSentMessage first=sendFile(account,send);send.send_as=new TLRPC.TL_inputPeerSelf();TLRPC.TL_updateShortSentMessage replayed=sendFile(account,send);
         check.verify(first.id==replayed.id&&first.media instanceof TLRPC.TL_messageMediaDocument&&first.media.document.size==bytes.length,"upload_native_send_replay_same_message_and_document");
         java.util.List<xyz.eclipseofficial.vyrn.domain.Models.Message> messages=bridge.repository.liveMessages(group.getString("id"),null,100);
         check.verify(messages.size()==1&&messages.get(0).attachment!=null&&messages.get(0).attachment.id.equals(complete.getString("id")),"upload_native_send_one_server_message_with_original_media");
+        TLRPC.TL_inputPeerUser other=new TLRPC.TL_inputPeerUser();other.user_id=identity.origin+1;send.send_as=other;
+        CompletableFuture<TLRPC.TL_error> rejected=new CompletableFuture<>();VyrnBridge.dispatch(account,send,(response,error)->rejected.complete(error),null);
+        TLRPC.TL_error denial=rejected.get(45,TimeUnit.SECONDS);check.verify(denial!=null&&"VYRN_FEATURE_UNAVAILABLE".equals(denial.text)&&bridge.repository.liveMessages(group.getString("id"),null,100).size()==1,"upload_native_send_rejects_other_sender_identity");
         String client=UUID.nameUUIDFromBytes((owner+":"+send.random_id).getBytes(java.nio.charset.StandardCharsets.UTF_8)).toString();
         try(xyz.eclipseofficial.vyrn.data.OutboxStore outbox=new xyz.eclipseofficial.vyrn.data.OutboxStore(instrumentation.getTargetContext(),account)){
             xyz.eclipseofficial.vyrn.data.OutboxStore.Entry saved=outbox.get(owner,client);
