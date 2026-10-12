@@ -33,8 +33,13 @@ public final class OutboxSender implements AutoCloseable {
     private String key(String user,String client){return user+":"+client;}
     private Models.Message result(OutboxStore.Entry e){return new Models.Message(e.server,e.user,"",e.date,e.ordinal,false,false);}
     public CompletableFuture<Models.Message> send(String user,String conversation,String client,String text) throws Exception {
+        return send(user,conversation,client,text,null,null);
+    }
+    public CompletableFuture<Models.Message> sendMedia(String user,String session,String conversation,String client,String text,JSONObject upload) throws Exception {return send(user,conversation,client,text,session,upload);}
+    private CompletableFuture<Models.Message> send(String user,String conversation,String client,String text,String session,JSONObject upload) throws Exception {
         if(!user.equals(repository.vault.load().optString("user_id")))throw new SecurityException("account_changed");
-        OutboxStore.Entry entry=store.enqueue(user,client,conversation,text);
+        if(session!=null&&!session.equals(repository.vault.cachedSession()))throw new SecurityException("session_changed");
+        OutboxStore.Entry entry=upload==null?store.enqueue(user,client,conversation,text):store.enqueueMedia(user,client,conversation,text,session,upload);
         if(entry.state==OutboxStore.SENT)return CompletableFuture.completedFuture(result(entry));
         CompletableFuture<Models.Message> future=waiting.computeIfAbsent(key(user,client),ignored->new CompletableFuture<>());
         // Re-read after attaching: the worker may have committed between enqueue and registration.
@@ -55,6 +60,11 @@ public final class OutboxSender implements AutoCloseable {
                     if("cancelled".equals(reply.getString("status"))){store.cancelled(entry);completeCancellation(user,entry.client,true);return;}
                     if(!"committed".equals(reply.getString("status")))throw new IOException("invalid_cancel_response");
                     sent=repository.messageForUser(user,reply.getString("message_id"));
+                }else if(entry.upload!=null){
+                    if(!entry.session.equals(repository.vault.cachedSession()))throw new RestRepository.ApiException(409,"session_changed");
+                    if(entry.media==null){JSONObject original=new JSONObject(entry.upload);String upload=original.getString("id");original.remove("id");original.put("conversation_id",entry.conversation);JSONObject complete=(JSONObject)repository.requestForSession(user,entry.session,"POST","/v1/media-uploads/"+upload+"/complete",original);store.assignedMedia(entry,complete.getString("id"));}
+                    OutboxStore.Entry current=store.get(user,entry.client);if(current.cancellation){store.release(entry);return;}
+                    sent=repository.sendMediaForSession(user,entry.session,entry.conversation,entry.client,entry.text,entry.media);
                 }else sent=repository.sendForUser(user,entry.conversation,entry.client,entry.text);
                 store.accepted(entry,sent);
                 CompletableFuture<Models.Message> future=waiting.remove(key(user,entry.client));if(future!=null)future.complete(sent);

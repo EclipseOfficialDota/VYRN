@@ -14,31 +14,42 @@ import java.util.List;
 import android.util.Base64;
 import xyz.eclipseofficial.vyrn.domain.Models;
 
-/** App-private, account-bound group-text queue. Private plaintext must never enter this queue. */
+/** App-private, account-bound group queue. Private plaintext must never enter this queue. */
 public final class OutboxStore extends SQLiteOpenHelper {
     public static final int QUEUED=0, SENT=1, FAILED=2, SENDING=3, CANCELLED=4;
     public static final class Entry {
-        public String user, client, conversation, text, server;
+        public String user, client, conversation, text, server,media,upload,session;
         public int state, attempts, ordinal, date, error;
         public boolean cancellation;
     }
     public static final class UiResolution {public String user,client;public int localId,state,ordinal,date;public long dialogId,randomId;public String server;}
-    public OutboxStore(Context context,int account){super(context,"vyrn_outbox_"+account+".db",null,4);}
+    public OutboxStore(Context context,int account){super(context,"vyrn_outbox_"+account+".db",null,5);}
     private void createUiJournal(SQLiteDatabase db){db.execSQL("CREATE TABLE ui_cancellations(user_id TEXT NOT NULL,client_id TEXT NOT NULL,local_id INTEGER NOT NULL,dialog_id INTEGER NOT NULL,random_id INTEGER NOT NULL,PRIMARY KEY(user_id,client_id))");}
     @Override public void onCreate(SQLiteDatabase db){
         db.execSQL("CREATE TABLE outbox(queue_id INTEGER PRIMARY KEY AUTOINCREMENT,user_id TEXT NOT NULL,client_id TEXT NOT NULL,conversation_id TEXT NOT NULL,body TEXT,fingerprint TEXT NOT NULL,state INTEGER NOT NULL DEFAULT 0,attempts INTEGER NOT NULL DEFAULT 0,attempted INTEGER NOT NULL DEFAULT 0,next_at INTEGER NOT NULL DEFAULT 0,server_id TEXT,ordinal INTEGER,date INTEGER,error INTEGER NOT NULL DEFAULT 0,created_at INTEGER NOT NULL,completed_at INTEGER,UNIQUE(user_id,client_id))");
         db.execSQL("CREATE INDEX outbox_ready ON outbox(user_id,state,next_at,created_at)");
         db.execSQL("ALTER TABLE outbox ADD COLUMN cancel_requested INTEGER NOT NULL DEFAULT 0");
         createUiJournal(db);
+        mediaColumns(db);
     }
-    @Override public void onUpgrade(SQLiteDatabase db,int oldVersion,int newVersion){if(oldVersion<2){db.execSQL("ALTER TABLE outbox ADD COLUMN completed_at INTEGER");db.execSQL("ALTER TABLE outbox ADD COLUMN attempted INTEGER NOT NULL DEFAULT 1");db.execSQL("UPDATE outbox SET completed_at=created_at WHERE state=1");}if(oldVersion<3)db.execSQL("ALTER TABLE outbox ADD COLUMN cancel_requested INTEGER NOT NULL DEFAULT 0");if(oldVersion<4)createUiJournal(db);}
-    private Entry entry(Cursor c){Entry e=new Entry();e.user=c.getString(0);e.client=c.getString(1);e.conversation=c.getString(2);e.text=c.getString(3);e.state=c.getInt(4);e.attempts=c.getInt(5);e.server=c.getString(6);e.ordinal=c.getInt(7);e.date=c.getInt(8);e.error=c.getInt(9);e.cancellation=c.getInt(10)!=0;return e;}
-    private static final String COLUMNS="user_id,client_id,conversation_id,body,state,attempts,server_id,ordinal,date,error,cancel_requested";
+    private void mediaColumns(SQLiteDatabase db){db.execSQL("ALTER TABLE outbox ADD COLUMN media_id TEXT");db.execSQL("ALTER TABLE outbox ADD COLUMN upload_body TEXT");db.execSQL("ALTER TABLE outbox ADD COLUMN origin_session TEXT");}
+    @Override public void onUpgrade(SQLiteDatabase db,int oldVersion,int newVersion){if(oldVersion<2){db.execSQL("ALTER TABLE outbox ADD COLUMN completed_at INTEGER");db.execSQL("ALTER TABLE outbox ADD COLUMN attempted INTEGER NOT NULL DEFAULT 1");db.execSQL("UPDATE outbox SET completed_at=created_at WHERE state=1");}if(oldVersion<3)db.execSQL("ALTER TABLE outbox ADD COLUMN cancel_requested INTEGER NOT NULL DEFAULT 0");if(oldVersion<4)createUiJournal(db);if(oldVersion<5)mediaColumns(db);}
+    private Entry entry(Cursor c){Entry e=new Entry();e.user=c.getString(0);e.client=c.getString(1);e.conversation=c.getString(2);e.text=c.getString(3);e.state=c.getInt(4);e.attempts=c.getInt(5);e.server=c.getString(6);e.ordinal=c.getInt(7);e.date=c.getInt(8);e.error=c.getInt(9);e.cancellation=c.getInt(10)!=0;e.media=c.getString(11);e.upload=c.getString(12);e.session=c.getString(13);return e;}
+    private static final String COLUMNS="user_id,client_id,conversation_id,body,state,attempts,server_id,ordinal,date,error,cancel_requested,media_id,upload_body,origin_session";
     public synchronized Entry get(String user,String client){try(Cursor c=getReadableDatabase().rawQuery("SELECT "+COLUMNS+" FROM outbox WHERE user_id=? AND client_id=?",new String[]{user,client})){return c.moveToFirst()?entry(c):null;}}
     public synchronized Entry enqueue(String user,String client,String conversation,String text) throws Exception {
+        return enqueue(user,client,conversation,text,null,null);
+    }
+    public synchronized Entry enqueueMedia(String user,String client,String conversation,String text,String session,org.json.JSONObject upload) throws Exception {
+        java.util.UUID.fromString(session);java.util.UUID.fromString(upload.getString("id"));if(upload.getInt("part_count")<1||upload.getInt("part_count")>8192||!"file".equals(upload.getString("kind")))throw new IllegalArgumentException("media_intent");
+        return enqueue(user,client,conversation,text,session,upload);
+    }
+    private Entry enqueue(String user,String client,String conversation,String text,String session,org.json.JSONObject upload) throws Exception {
         java.util.UUID.fromString(user);java.util.UUID.fromString(client);java.util.UUID.fromString(conversation);
         if(text==null || text.codePointCount(0,text.length())>16384)throw new IllegalArgumentException("invalid_message");
-        String fingerprint=Base64.encodeToString(MessageDigest.getInstance("SHA-256").digest((conversation+"\0"+text).getBytes(StandardCharsets.UTF_8)),Base64.NO_WRAP);
+        String material=conversation+"\0"+text;
+        if(upload!=null)material+="\0media\0"+session+"\0"+upload.getString("kind")+"\0"+upload.getString("filename")+"\0"+upload.getString("md5")+"\0"+upload.getInt("part_count");
+        String fingerprint=Base64.encodeToString(MessageDigest.getInstance("SHA-256").digest(material.getBytes(StandardCharsets.UTF_8)),Base64.NO_WRAP);
         SQLiteDatabase db=getWritableDatabase();db.beginTransaction();
         try {
             try(Cursor c=db.rawQuery("SELECT fingerprint,state,cancel_requested FROM outbox WHERE user_id=? AND client_id=?",new String[]{user,client})){
@@ -48,12 +59,15 @@ public final class OutboxStore extends SQLiteOpenHelper {
                     if(c.getInt(1)==FAILED){ContentValues v=new ContentValues();v.put("state",QUEUED);v.put("body",text);v.put("attempts",0);v.put("next_at",0);v.put("error",0);v.putNull("completed_at");db.update("outbox",v,"user_id=? AND client_id=?",new String[]{user,client});}
                 }else{
                     if(DatabaseUtils.longForQuery(db,"SELECT count(*) FROM outbox WHERE user_id=? AND state IN (0,2,3)",new String[]{user})>=1000)throw new IllegalStateException("outbox_full");
-                    ContentValues v=new ContentValues();v.put("user_id",user);v.put("client_id",client);v.put("conversation_id",conversation);v.put("body",text);v.put("fingerprint",fingerprint);v.put("created_at",System.currentTimeMillis());db.insertOrThrow("outbox",null,v);
+                    ContentValues v=new ContentValues();v.put("user_id",user);v.put("client_id",client);v.put("conversation_id",conversation);v.put("body",text);v.put("fingerprint",fingerprint);v.put("created_at",System.currentTimeMillis());if(upload!=null){v.put("upload_body",upload.toString());v.put("origin_session",session);}db.insertOrThrow("outbox",null,v);
                 }
             }
             db.setTransactionSuccessful();
         }finally{db.endTransaction();}
         return get(user,client);
+    }
+    public synchronized void assignedMedia(Entry entry,String id){
+        java.util.UUID.fromString(id);SQLiteDatabase db=getWritableDatabase();db.beginTransaction();try{Entry saved=get(entry.user,entry.client);if(saved==null||saved.upload==null||saved.media!=null&&!id.equals(saved.media))throw new IllegalStateException("media_intent_changed");ContentValues value=new ContentValues();value.put("media_id",id);db.update("outbox",value,"user_id=? AND client_id=?",new String[]{entry.user,entry.client});db.setTransactionSuccessful();entry.media=id;}finally{db.endTransaction();}
     }
     public synchronized void recover(){SQLiteDatabase db=getWritableDatabase();ContentValues v=new ContentValues();v.put("state",QUEUED);v.put("next_at",0);db.update("outbox",v,"state=?",new String[]{Integer.toString(SENDING)});prune(db);}
     public synchronized Entry next(String user){

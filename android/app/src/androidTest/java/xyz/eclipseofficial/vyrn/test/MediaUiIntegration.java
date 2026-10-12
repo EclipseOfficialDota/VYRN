@@ -73,11 +73,30 @@ final class MediaUiIntegration {
         JSONObject complete=(JSONObject)bridge.repository.requestForSession(owner,identity.session,"POST","/v1/media-uploads/"+id+"/complete",request);
         check.verify(complete.getLong("size")==bytes.length&&complete.getString("sha256").equals(hex(MessageDigest.getInstance("SHA-256").digest(bytes))),"upload_original_worker_final_bytes_and_hash");
         JSONObject repeat=(JSONObject)bridge.repository.requestForSession(owner,identity.session,"POST","/v1/media-uploads/"+id+"/complete",request);check.verify(repeat.getString("id").equals(complete.getString("id")),"upload_completion_replay_same_media_id");
+        TLRPC.TL_messages_sendMedia send=VyrnBridge.mediaRequest(account);TLRPC.TL_inputPeerChat destination=new TLRPC.TL_inputPeerChat();
+        try(IdMap map=new IdMap(instrumentation.getTargetContext(),account)){destination.chat_id=map.local("conversation",group.getString("id"));}
+        send.peer=destination;send.random_id=java.util.concurrent.ThreadLocalRandom.current().nextLong(1,Long.MAX_VALUE);send.message="Native file caption";
+        TLRPC.TL_inputMediaUploadedDocument payload=new TLRPC.TL_inputMediaUploadedDocument();payload.file=input;payload.mime_type="application/octet-stream";
+        TLRPC.TL_documentAttributeFilename name=new TLRPC.TL_documentAttributeFilename();name.file_name=input.name;payload.attributes.add(name);send.media=payload;
+        TLRPC.TL_updateShortSentMessage first=sendFile(account,send),replayed=sendFile(account,send);
+        check.verify(first.id==replayed.id&&first.media instanceof TLRPC.TL_messageMediaDocument&&first.media.document.size==bytes.length,"upload_native_send_replay_same_message_and_document");
+        java.util.List<xyz.eclipseofficial.vyrn.domain.Models.Message> messages=bridge.repository.liveMessages(group.getString("id"),null,100);
+        check.verify(messages.size()==1&&messages.get(0).attachment!=null&&messages.get(0).attachment.id.equals(complete.getString("id")),"upload_native_send_one_server_message_with_original_media");
+        String client=UUID.nameUUIDFromBytes((owner+":"+send.random_id).getBytes(java.nio.charset.StandardCharsets.UTF_8)).toString();
+        try(xyz.eclipseofficial.vyrn.data.OutboxStore outbox=new xyz.eclipseofficial.vyrn.data.OutboxStore(instrumentation.getTargetContext(),account)){
+            xyz.eclipseofficial.vyrn.data.OutboxStore.Entry saved=outbox.get(owner,client);
+            check.verify(saved.state==xyz.eclipseofficial.vyrn.data.OutboxStore.SENT&&saved.media.equals(complete.getString("id"))&&saved.session.equals(identity.session)&&new JSONObject(saved.upload).getString("id").equals(id),"upload_native_send_durable_origin_and_media_binding");
+        }
         VyrnBridge.cancelUpload(account,identity,input.id);long deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(30);boolean cancelled=false;
         while(System.nanoTime()<deadline){JSONObject value=(JSONObject)bridge.repository.requestForSession(owner,identity.session,"GET","/v1/media-uploads/"+id,null);if(value.getString("state").equals("cancelled")&&value.getJSONArray("parts").length()==0){cancelled=true;break;}Thread.sleep(100);}
         check.verify(cancelled,"upload_adapter_cancel_fence_and_part_cleanup");check.verify(bridge.repository.attachmentForUser(owner,complete.getString("id")).size==bytes.length,"upload_cancel_preserves_completed_media");
         check.verify(!VyrnBridge.uploadPreferenceKey(identity,"same-file").equals(VyrnBridge.uploadPreferenceKey(newIdentityForTest(identity),"same-file")),"upload_saved_preferences_separate_session");
         Files.deleteIfExists(source.toPath());
+    }
+    private static TLRPC.TL_updateShortSentMessage sendFile(int account,TLRPC.TL_messages_sendMedia request) throws Exception {
+        CompletableFuture<TLRPC.TL_updateShortSentMessage> result=new CompletableFuture<>();
+        VyrnBridge.dispatch(account,request,(response,error)->{if(error!=null||!(response instanceof TLRPC.TL_updateShortSentMessage))result.completeExceptionally(new AssertionError("native_media_send_failed"));else result.complete((TLRPC.TL_updateShortSentMessage)response);},null);
+        return result.get(45,TimeUnit.SECONDS);
     }
     private static String hex(byte[] value){StringBuilder result=new StringBuilder();for(byte b:value)result.append(String.format(java.util.Locale.ROOT,"%02x",b&255));return result.toString();}
     private static VyrnBridge.UploadIdentity newIdentityForTest(VyrnBridge.UploadIdentity identity) throws Exception {java.lang.reflect.Constructor<VyrnBridge.UploadIdentity> constructor=VyrnBridge.UploadIdentity.class.getDeclaredConstructor(long.class,String.class,String.class);constructor.setAccessible(true);return constructor.newInstance(identity.origin,identity.owner,UUID.randomUUID().toString());}

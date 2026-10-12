@@ -179,6 +179,11 @@ public final class RestRepository implements Models.Repository {
         return messageForUser(user,id);
     }}
     public Models.Message messageForUser(String user,String id) throws Exception {return message((JSONObject)requestForUser(user,"GET","/v1/messages/"+id,null,true));}
+    public Models.Message messageForSession(String user,String session,String id) throws Exception {return message((JSONObject)requestForSession(user,session,"GET","/v1/messages/"+id,null));}
+    public Models.Message sendMediaForSession(String user,String session,String conversation,String client,String text,String media) throws Exception {synchronized(vault.guard()){
+        JSONObject input=new JSONObject().put("client_id",client).put("payload",new JSONObject().put("text",text)).put("encrypted",false).put("media_id",media);
+        JSONObject accepted=(JSONObject)requestForSession(user,session,"POST","/v1/conversations/"+conversation+"/messages",input);return messageForSession(user,session,accepted.getString("id"));
+    }}
     public String send(String conversation,String clientId,String text) throws Exception{
         JSONObject input=new JSONObject().put("client_id",clientId).put("payload",new JSONObject().put("text",text)).put("encrypted",false);
         return ((JSONObject)request("POST","/v1/conversations/"+conversation+"/messages",input,true)).getString("id");

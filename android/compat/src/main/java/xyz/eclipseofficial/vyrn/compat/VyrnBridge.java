@@ -47,6 +47,11 @@ public final class VyrnBridge {
         public final long origin;public final String owner,session;
         private UploadIdentity(long origin,String owner,String session){this.origin=origin;this.owner=owner;this.session=session;}
     }
+    private static final class MediaRequest extends TLRPC.TL_messages_sendMedia {
+        final UploadIdentity identity;
+        MediaRequest(int account){identity=captureUploadIdentity(account);}
+    }
+    public static TLRPC.TL_messages_sendMedia mediaRequest(int account){return new MediaRequest(account);}
     public static UploadIdentity captureUploadIdentity(int account){
         long origin=UserConfig.getInstance(account).getClientUserId();try{VyrnBridge bridge=forAccount(account);String owner=bridge.ids.remote("user",origin);return new UploadIdentity(origin,owner,bridge.repository.vault.cachedSession());}catch(Exception unavailable){return new UploadIdentity(origin,"",null);}
     }
@@ -666,7 +671,7 @@ public final class VyrnBridge {
         return dispatch(account,request,callback,timestamp,0);
     }
     public static boolean dispatch(int account,TLObject request,RequestDelegate callback,RequestDelegateTimestamp timestamp,int token){
-        PendingRequest pending=new PendingRequest(account,token,request instanceof TLRPC.TL_messages_sendMessage,callback,timestamp);
+        PendingRequest pending=new PendingRequest(account,token,request instanceof TLRPC.TL_messages_sendMessage||request instanceof TLRPC.TL_messages_sendMedia,callback,timestamp);
         if(token!=0 && REQUESTS.putIfAbsent(requestKey(account,token),pending)!=null)throw new IllegalStateException("duplicate_request_token");
         if(request instanceof UploadPartRequest){
             UploadPartRequest part=(UploadPartRequest)request;pending.bridge=forAccount(account);pending.user=part.identity.owner;pending.sessionOrigin=part.identity.origin;pending.boundSession=part.identity.session;
@@ -766,6 +771,34 @@ public final class VyrnBridge {
                     else pending.complete(bridge.sessions(user,revoke,hash),null);
                 }
             }catch(Exception failure){pending.complete(null,failure);}});return true;
+        }
+        if(request instanceof TLRPC.TL_messages_sendMedia){
+            SEND.execute(()->{try{
+                if(!(request instanceof MediaRequest))throw new SecurityException("media_origin_missing");
+                MediaRequest in=(MediaRequest)request;UploadIdentity identity=in.identity;
+                if(!currentUploadIdentity(account,identity))throw new SecurityException("account_changed");
+                if(in.peer==null||in.peer.chat_id<=0||!(in.media instanceof TLRPC.TL_inputMediaUploadedDocument))throw new UnsupportedOperationException("media_variant_unavailable");
+                if(in.reply_to!=null||in.reply_markup!=null||!in.entities.isEmpty()||in.schedule_date!=0||in.schedule_repeat_period!=0||in.send_as!=null||in.quick_reply_shortcut!=null||in.effect!=0||in.allow_paid_stars!=0||in.suggested_post!=null||in.ephemeralReceiverBotId!=0)throw new UnsupportedOperationException("media_options_unavailable");
+                TLRPC.TL_inputMediaUploadedDocument media=(TLRPC.TL_inputMediaUploadedDocument)in.media;
+                if(media.file==null||media.thumb!=null||media.ttl_seconds!=0||!media.stickers.isEmpty()||media.spoiler||media.attributes.size()!=1||!(media.attributes.get(0) instanceof TLRPC.TL_documentAttributeFilename))throw new UnsupportedOperationException("media_variant_unavailable");
+                String filename=((TLRPC.TL_documentAttributeFilename)media.attributes.get(0)).file_name;
+                JSONObject upload=new JSONObject().put("id",uploadId(identity,media.file.id)).put("part_count",media.file.parts).put("kind","file").put("filename",filename).put("md5",media.file.md5_checksum==null?"":media.file.md5_checksum);
+                VyrnBridge bridge=forAccount(account);String client=UUID.nameUUIDFromBytes((identity.owner+":"+in.random_id).getBytes(StandardCharsets.UTF_8)).toString();
+                java.util.concurrent.CompletableFuture<Models.Message> delivery;
+                synchronized(pending){
+                    pending.bridge=bridge;pending.user=identity.owner;pending.client=client;pending.sessionOrigin=identity.origin;pending.boundSession=identity.session;
+                    if(pending.finished||pending.cancellationRequested){pending.bridge=null;pending.complete(null,new java.util.concurrent.CancellationException());return;}
+                    delivery=bridge.outbox.sendMedia(identity.owner,identity.session,bridge.ids.remote("conversation",in.peer.chat_id),client,in.message,upload);pending.ready=true;
+                }
+                delivery.whenComplete((sent,failure)->execute(()->{try{
+                    if(failure!=null){pending.complete(null,failure);return;}
+                    Models.Message full=bridge.repository.messageForSession(identity.owner,identity.session,sent.id);
+                    if(full.deleted)throw new IllegalStateException("message_deleted");
+                    if(!currentUploadIdentity(account,identity))throw new SecurityException("account_changed");
+                    bridge.ids.observe(full);TLRPC.TL_peerChat peer=new TLRPC.TL_peerChat();peer.chat_id=in.peer.chat_id;
+                    TLRPC.TL_updateShortSentMessage out=new TLRPC.TL_updateShortSentMessage();out.id=bridge.ids.message(full.id,full.ordinal);out.date=full.date;out.out=true;out.pts=out.id;out.pts_count=1;out.media=bridge.message(full,peer).media;out.flags=512;pending.complete(out,null);
+                }catch(Exception error){pending.complete(null,error);}}));pending.startCancellation();
+            }catch(Exception failure){pending.complete(null,failure);synchronized(pending){pending.startCancellation();}}});return true;
         }
         if(request instanceof TLRPC.TL_messages_sendMessage){
             SEND.execute(()->{try{VyrnBridge bridge=forAccount(account);TLRPC.TL_messages_sendMessage in=(TLRPC.TL_messages_sendMessage)request;

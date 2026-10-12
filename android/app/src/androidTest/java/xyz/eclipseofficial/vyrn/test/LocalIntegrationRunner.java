@@ -337,17 +337,28 @@ public final class LocalIntegrationRunner extends Instrumentation {
             // Model a populated schema2 database independently of the schema1 migration.
             upgraded.getWritableDatabase().execSQL("ALTER TABLE outbox DROP COLUMN cancel_requested");
             upgraded.getWritableDatabase().execSQL("DROP TABLE ui_cancellations");
+            for(String column:new String[]{"media_id","upload_body","origin_session"})upgraded.getWritableDatabase().execSQL("ALTER TABLE outbox DROP COLUMN "+column);
             upgraded.getWritableDatabase().setVersion(2);
         }
         try(OutboxStore upgraded=new OutboxStore(context,9009)){
             OutboxStore.Entry legacy=upgraded.get(fixtureUser,legacyClient);
             check(legacy.state==OutboxStore.SENDING && !legacy.cancellation && legacy.text.equals("Legacy pending"),"schema2_upgrade_preserves_claim");
             check(upgraded.requestCancellation(fixtureUser,legacyClient).cancellation,"schema2_cancel_intent_available");
-            upgraded.getWritableDatabase().execSQL("DROP TABLE ui_cancellations");upgraded.getWritableDatabase().setVersion(3);
+            upgraded.getWritableDatabase().execSQL("DROP TABLE ui_cancellations");
+            for(String column:new String[]{"media_id","upload_body","origin_session"})upgraded.getWritableDatabase().execSQL("ALTER TABLE outbox DROP COLUMN "+column);
+            upgraded.getWritableDatabase().setVersion(3);
         }
         passed.put("populated_schema2_cancel_upgrade");
-        try(OutboxStore upgraded=new OutboxStore(context,9009)){check(upgraded.get(fixtureUser,legacyClient).cancellation && upgraded.pendingUi(fixtureUser)==0,"schema3_ui_journal_upgrade");}
+        try(OutboxStore upgraded=new OutboxStore(context,9009)){
+            check(upgraded.get(fixtureUser,legacyClient).cancellation && upgraded.pendingUi(fixtureUser)==0,"schema3_ui_journal_upgrade");
+            for(String column:new String[]{"media_id","upload_body","origin_session"})upgraded.getWritableDatabase().execSQL("ALTER TABLE outbox DROP COLUMN "+column);
+            upgraded.getWritableDatabase().setVersion(4);
+        }
         passed.put("populated_schema3_UI_journal_upgrade");
+        try(OutboxStore upgraded=new OutboxStore(context,9009)){
+            OutboxStore.Entry legacy=upgraded.get(fixtureUser,legacyClient);
+            check(legacy.cancellation&&legacy.text.equals("Legacy pending")&&legacy.upload==null&&upgraded.getReadableDatabase().getVersion()==5,"schema4_media_upgrade_preserves_text_and_cancel");
+        }
         context.deleteDatabase("vyrn_outbox_9009.db");passed.put("populated_outbox_upgrade");
         stage="durable_UI_cancellation_journal";
         long uiRandom=84531;String uiClient=clientId(fixtureUser,uiRandom);

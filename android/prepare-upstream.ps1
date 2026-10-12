@@ -490,6 +490,9 @@ Edit 'TMessagesProj/src/main/java/org/telegram/ui/PrivacyUsersActivity.java' {
 Edit 'TMessagesProj/src/main/java/org/telegram/messenger/SendMessagesHelper.java' {
  param($t)
  $t=(& git -c "safe.directory=$($upstream.Replace('\','/'))" -C $upstream show "${pin}:TMessagesProj/src/main/java/org/telegram/messenger/SendMessagesHelper.java") -join "`n"
+ $mediaConstructor='new TLRPC.TL_messages_sendMedia()'
+ if(!$t.Contains($mediaConstructor)){throw 'Pinned media request constructor missing'}
+ $t=$t.Replace($mediaConstructor,'xyz.eclipseofficial.vyrn.compat.VyrnBridge.mediaRequest(currentAccount)')
  $marker='public void cancelSendingMessage(ArrayList<MessageObject> objects) {'
  if(!$t.Contains($marker)){throw 'Pinned message cancellation marker missing'}
  $t=$t.Replace($marker,$marker+"`n        if (xyz.eclipseofficial.vyrn.compat.VyrnBridge.cancelSendingMessages(currentAccount, objects)) return;")
