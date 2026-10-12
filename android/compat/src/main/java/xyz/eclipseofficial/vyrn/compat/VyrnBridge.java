@@ -214,6 +214,7 @@ public final class VyrnBridge {
     private final IdMap ids;
     private final OutboxSender outbox;
     private final RealtimeSync realtime;
+    public static int connectionState(int account){RealtimeSync.State state=forAccount(account).realtime.state();return state==RealtimeSync.State.CONNECTED?org.telegram.tgnet.ConnectionsManager.ConnectionStateConnected:state==RealtimeSync.State.CONNECTING?org.telegram.tgnet.ConnectionsManager.ConnectionStateConnecting:org.telegram.tgnet.ConnectionsManager.ConnectionStateWaitingForNetwork;}
     private final int account;
     private final AtomicBoolean uiReconciling=new AtomicBoolean();
     private final AtomicBoolean privateRecovering=new AtomicBoolean();
@@ -222,7 +223,7 @@ public final class VyrnBridge {
     private volatile String privateKeysSession;
     private volatile long privateKeysOwner;
     private final Map<Long,String> privateConversations=new HashMap<>();
-    private VyrnBridge(int account){this.account=account;repository=new RestRepository(new TokenVault(ApplicationLoader.applicationContext,account));ids=new IdMap(ApplicationLoader.applicationContext,account);outbox=new OutboxSender(ApplicationLoader.applicationContext,account,repository);realtime=new RealtimeSync(ApplicationLoader.applicationContext,account,repository,this::applyEvent);outbox.setUiListener(this::resolveUi);outbox.setRecoveryListener(this::recoverPrivateSends);}
+    private VyrnBridge(int account){this.account=account;repository=new RestRepository(new TokenVault(ApplicationLoader.applicationContext,account));ids=new IdMap(ApplicationLoader.applicationContext,account);outbox=new OutboxSender(ApplicationLoader.applicationContext,account,repository);realtime=new RealtimeSync(ApplicationLoader.applicationContext,account,repository,this::applyEvent,()->AndroidUtilities.runOnUIThread(()->NotificationCenter.getInstance(account).postNotificationName(NotificationCenter.didUpdateConnectionState)));outbox.setUiListener(this::resolveUi);outbox.setRecoveryListener(this::recoverPrivateSends);}
     public boolean privateKeysReady(){return privateKeysOwner!=0&&privateKeysOwner==UserConfig.getInstance(account).getClientUserId()&&privateKeysSession!=null&&privateKeysSession.equals(repository.vault.cachedSession());}
     public synchronized java.util.concurrent.CompletableFuture<Void> preparePrivateKeys(){
         if(privateKeysReady())return java.util.concurrent.CompletableFuture.completedFuture(null);

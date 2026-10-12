@@ -292,6 +292,9 @@ Edit 'TMessagesProj/src/main/java/org/telegram/ui/SessionBottomSheet.java' {
 Edit 'TMessagesProj/src/main/java/org/telegram/tgnet/ConnectionsManager.java' {
  param($t)
  $t=(& git -c "safe.directory=$($upstream.Replace('\','/'))" -C $upstream show "${pin}:TMessagesProj/src/main/java/org/telegram/tgnet/ConnectionsManager.java") -join "`n"
+ $stateStart=$t.IndexOf('    public int getConnectionState() {');$stateEnd=$t.IndexOf('    public void setUserId(', $stateStart)
+ if($stateStart -lt 0 -or $stateEnd -lt 0){throw 'Pinned connection state getter missing'}
+ $t=$t.Substring(0,$stateStart)+"    public int getConnectionState() { return xyz.eclipseofficial.vyrn.compat.VyrnBridge.connectionState(currentAccount); }`n`n"+$t.Substring($stateEnd)
  $marker='private void sendRequestInternal(TLObject object, RequestDelegate onComplete, RequestDelegateTimestamp onCompleteTimestamp, QuickAckDelegate onQuickAck, WriteToSocketDelegate onWriteToSocket, int flags, int datacenterId, int connectionType, boolean immediate, int requestToken) {'
  if(!$t.Contains($marker)){throw 'Pinned request dispatch marker missing'}
  $t=$t.Replace($marker,$marker+"`n        if (xyz.eclipseofficial.vyrn.compat.VyrnBridge.dispatch(currentAccount, object, onComplete, onCompleteTimestamp, requestToken)) return;")

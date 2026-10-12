@@ -17,27 +17,34 @@ import org.telegram.messenger.BuildConfig;
 
 /** Authenticated active-mode stream. Events and cursor are committed before acknowledgement. */
 public final class RealtimeSync implements AutoCloseable {
+    public enum State { OFFLINE, CONNECTING, CONNECTED }
     public interface Handler { void apply(String user,String kind,JSONObject body) throws Exception; }
     private final RestRepository repository;
     private final InboxStore inbox;
     private final Handler handler;
+    private final Runnable statusListener;
+    private volatile Listener active;
     private final OkHttpClient client=new OkHttpClient.Builder().pingInterval(20,TimeUnit.SECONDS).connectTimeout(15,TimeUnit.SECONDS).readTimeout(0,TimeUnit.MILLISECONDS).build();
     private final ScheduledExecutorService worker=Executors.newSingleThreadScheduledExecutor();
     private final AtomicBoolean connecting=new AtomicBoolean();
     private volatile boolean closed;
     private volatile WebSocket socket;
     private int failures;
-    public RealtimeSync(Context context,int account,RestRepository repository,Handler handler){this.repository=repository;this.handler=handler;inbox=new InboxStore(context,account);worker.execute(this::connect);}
+    public RealtimeSync(Context context,int account,RestRepository repository,Handler handler){this(context,account,repository,handler,()->{});}
+    public RealtimeSync(Context context,int account,RestRepository repository,Handler handler,Runnable statusListener){this.repository=repository;this.handler=handler;this.statusListener=statusListener;inbox=new InboxStore(context,account);worker.execute(this::connect);}
+    private void changed(){statusListener.run();}
+    public State state(){Listener listener=active;return closed||listener==null||!listener.current()?State.OFFLINE:listener.connectionState;}
     private void connect(){
-        if(closed || !connecting.compareAndSet(false,true))return;
+        if(closed || active!=null&&active.current() || !connecting.compareAndSet(false,true))return;
         try{
             JSONObject tokens=repository.vault.load();String user=tokens.optString("user_id"),access=tokens.optString("access_token");
             if(user.isEmpty()||access.isEmpty()){connecting.set(false);schedule(2);return;}
             String url=BuildConfig.VYRN_API_URL.replaceFirst("^https://","wss://")+"/v1/ws?cursor="+inbox.cursor(user);
             if(!url.startsWith("wss://")||url.matches("^wss://[0-9.]+.*"))throw new SecurityException("wss_hostname_required");
             Request request=new Request.Builder().url(url).header("Authorization","Bearer "+access).build();
-            socket=client.newWebSocket(request,new Listener(user));
-        }catch(Exception failure){connecting.set(false);schedule(nextDelay());}
+            Listener next=new Listener(user,tokens.getString("session_id"));WebSocket previous=socket;active=next;if(previous!=null)previous.cancel();changed();
+            socket=client.newWebSocket(request,next);
+        }catch(Exception failure){active=null;changed();connecting.set(false);schedule(nextDelay());}
     }
     private int nextDelay(){failures=Math.min(failures+1,8);return Math.min(60,1<<(Math.min(failures-1,6)))+ThreadLocalRandom.current().nextInt(2);}
     private void schedule(int seconds){if(!closed)worker.schedule(this::connect,seconds,TimeUnit.SECONDS);}
@@ -58,11 +65,14 @@ public final class RealtimeSync implements AutoCloseable {
         }
     }
     private final class Listener extends WebSocketListener {
-        private final String user;
-        Listener(String user){this.user=user;}
-        @Override public void onOpen(WebSocket webSocket,Response response){failures=0;connecting.set(false);process(user);}
+        private final String user,session;
+        private volatile State connectionState=State.CONNECTING;
+        Listener(String user,String session){this.user=user;this.session=session;}
+        boolean current(){return !closed&&active==this&&repository.vault.isUser(user)&&session.equals(repository.vault.cachedSession());}
+        @Override public void onOpen(WebSocket webSocket,Response response){if(!current()){webSocket.cancel();return;}failures=0;connecting.set(false);connectionState=State.CONNECTED;changed();process(user);}
         @Override public void onMessage(WebSocket webSocket,String text){
             try{
+                if(!current()){webSocket.cancel();return;}
                 if(text.length()>524288)throw new IllegalArgumentException("event_frame_too_large");
                 JSONObject frame=new JSONObject(text);if(!"events".equals(frame.optString("type")))return;
                 JSONArray events=frame.getJSONArray("events");long cursor=frame.getLong("cursor");
@@ -72,15 +82,16 @@ public final class RealtimeSync implements AutoCloseable {
             }catch(Exception invalid){webSocket.close(1008,"invalid event batch");}
         }
         @Override public void onClosing(WebSocket webSocket,int code,String reason){webSocket.close(code,"closing");}
-        @Override public void onClosed(WebSocket webSocket,int code,String reason){socket=null;connecting.set(false);schedule(nextDelay());}
+        @Override public void onClosed(WebSocket webSocket,int code,String reason){disconnected();}
+        private void disconnected(){if(active!=this||closed)return;active=null;socket=null;changed();connecting.set(false);schedule(nextDelay());}
         @Override public void onFailure(WebSocket webSocket,Throwable error,Response response){
-            int status=response==null?0:response.code();if(response!=null)response.close();socket=null;connecting.set(false);
-            if(status==401){try{repository.me();}catch(Exception ignored){}}
-            schedule(nextDelay());
+            int status=response==null?0:response.code();if(response!=null)response.close();if(active!=this||closed)return;
+            if(status==401&&current()){try{repository.requestForSession(user,session,"GET","/v1/me",null);}catch(Exception ignored){}}
+            disconnected();
         }
     }
     public long cursor(String user){return inbox.cursor(user);}
     public int pending(String user){return inbox.pending(user);}
     public int dead(String user){return inbox.dead(user);}
-    @Override public void close(){closed=true;WebSocket active=socket;if(active!=null)active.close(1000,"shutdown");client.dispatcher().executorService().shutdown();worker.shutdownNow();inbox.close();}
+    @Override public void close(){closed=true;active=null;changed();WebSocket connection=socket;if(connection!=null)connection.close(1000,"shutdown");client.dispatcher().executorService().shutdown();worker.shutdownNow();inbox.close();}
 }
