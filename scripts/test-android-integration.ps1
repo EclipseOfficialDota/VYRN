@@ -1,5 +1,5 @@
 # Real Android networking/Keystore integration; not a claim of full UI acceptance.
-param([ValidateSet('emulator-5560','emulator-5562')][string]$Serial='emulator-5560',[ValidateSet('first','mutations','profile','offline','restart','media-ui','media-send-ui','media-send-member-ui','media-upload','media-upload-big','media-upload-cancel','auth-ui','registration-ui','sessions-ui','sessions-network','logout-prepare','logout-offline','logout-ui','onboarding-prepare','onboarding-restart','onboarding-gap','onboarding-recover','onboarding-complete')][string[]]$Phases=@('first','mutations','profile','offline','restart'))
+param([ValidateSet('emulator-5560','emulator-5562')][string]$Serial='emulator-5560',[ValidateSet('first','mutations','profile','offline','restart','media-ui','media-send-ui','media-send-member-ui','media-send-offline-ui','media-upload','media-upload-big','media-upload-cancel','auth-ui','registration-ui','sessions-ui','sessions-network','logout-prepare','logout-offline','logout-ui','onboarding-prepare','onboarding-restart','onboarding-gap','onboarding-recover','onboarding-complete')][string[]]$Phases=@('first','mutations','profile','offline','restart'))
 $ErrorActionPreference='Stop'
 $root=Split-Path $PSScriptRoot -Parent
 $adb=Join-Path $root '.tools/android-sdk/platform-tools/adb.exe'
@@ -59,7 +59,7 @@ function Restore-TestProxy {
     [IO.File]::WriteAllText((Join-Path $root '.local/devtls-native.pid'),[string]$proxy.Id)
 }
 function Run-Instrumentation([string]$Phase){
-    if($Phase -ne 'sessions-network'){return ((& $adb -s $Serial shell am instrument -w -e phase $Phase "$package.test/xyz.eclipseofficial.vyrn.test.LocalIntegrationRunner") -join "`n")}
+    if($Phase -notin @('sessions-network','media-send-offline-ui')){return ((& $adb -s $Serial shell am instrument -w -e phase $Phase "$package.test/xyz.eclipseofficial.vyrn.test.LocalIntegrationRunner") -join "`n")}
     if(!$script:liveTestProxy){
         $exe=Join-Path $root '.local/devtls-native.exe';$proxyId=[int][IO.File]::ReadAllText((Join-Path $root '.local/devtls-native.pid'));$proxy=Get-Process -Id $proxyId
         $command=(Get-CimInstance Win32_Process -Filter "ProcessId=$proxyId").CommandLine
@@ -71,7 +71,7 @@ function Run-Instrumentation([string]$Phase){
     foreach($argument in @('-s',$Serial,'shell','am','instrument','-w','-e','phase',$Phase,"$package.test/xyz.eclipseofficial.vyrn.test.LocalIntegrationRunner")){$launch.ArgumentList.Add($argument)}
     $runner=[Diagnostics.Process]::Start($launch);$stdout=$runner.StandardOutput.ReadToEndAsync();$stderr=$runner.StandardError.ReadToEndAsync();$handled='';$deadline=[DateTimeOffset]::UtcNow.AddMinutes(4)
     while(!$runner.WaitForExit(500)){
-        if([DateTimeOffset]::UtcNow -gt $deadline){& $adb -s $Serial shell am force-stop $package; if(!$runner.WaitForExit(10000)){$runner.Kill()};throw 'Session network instrumentation deadline exceeded'}
+        if([DateTimeOffset]::UtcNow -gt $deadline){& $adb -s $Serial shell am force-stop $package; if(!$runner.WaitForExit(10000)){$runner.Kill()};throw 'Network instrumentation deadline exceeded'}
         $step=((& $adb -s $Serial shell run-as $package cat files/vyrn-test-network-request.txt 2>$null) -join '').Trim()
         if(!$step -or $step -eq $handled){continue}
         if($step -notin @('offline-load','online-retry','offline-revoke','online-confirm')){throw 'Unexpected test network step'}
@@ -122,7 +122,7 @@ try {
         $rounds+=@{phase=$phase;checks=$checks;result='passed';startup_attach_retry=$attachRetried}
         Write-Output "PASS: Android integration phase $phase"
     }
-    $report=if(@($Phases | Where-Object {$_ -notlike 'onboarding-*'}).Count -eq 0){'artifacts/android-onboarding-ui.json'}elseif(@($Phases | Where-Object {$_ -notlike 'logout-*'}).Count -eq 0){'artifacts/android-logout-ui.json'}elseif($Phases.Count -eq 1 -and $Phases[0] -in @('media-ui','media-send-ui','media-send-member-ui','media-upload','media-upload-big','media-upload-cancel','auth-ui','registration-ui','sessions-ui','sessions-network')){"artifacts/android-$($Phases[0]).json"}else{'artifacts/android-integration.json'}
+    $report=if(@($Phases | Where-Object {$_ -notlike 'onboarding-*'}).Count -eq 0){'artifacts/android-onboarding-ui.json'}elseif(@($Phases | Where-Object {$_ -notlike 'logout-*'}).Count -eq 0){'artifacts/android-logout-ui.json'}elseif($Phases.Count -eq 1 -and $Phases[0] -in @('media-ui','media-send-ui','media-send-member-ui','media-send-offline-ui','media-upload','media-upload-big','media-upload-cancel','auth-ui','registration-ui','sessions-ui','sessions-network')){"artifacts/android-$($Phases[0]).json"}else{'artifacts/android-integration.json'}
     if($deviceSuffix){$report=$report.Replace('.json',"$deviceSuffix.json")}
     @{date=[DateTimeOffset]::UtcNow.ToString('o');apk=[IO.Path]::GetFileName($apk);sha256=(Get-FileHash $apk).Hash.ToLowerInvariant();device=$avdName;serial=$Serial;api=35;transport='HTTPS with scoped local CA';rounds=$rounds;full_ui_e2e='not tested'} | ConvertTo-Json -Depth 6 | Set-Content (Join-Path $root $report) -Encoding utf8
 } finally {

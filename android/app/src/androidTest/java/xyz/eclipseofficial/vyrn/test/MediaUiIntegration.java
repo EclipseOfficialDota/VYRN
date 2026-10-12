@@ -30,7 +30,7 @@ import xyz.eclipseofficial.vyrn.domain.Models;
 
 /** Native file selection/send and receive/download scenarios; group setup uses API fixtures. */
 final class MediaUiIntegration {
-    static void sendUi(Instrumentation instrumentation,Activity activity,JSONObject fixture,AuthUiIntegration.Check check,boolean member) throws Exception {
+    static void sendUi(Instrumentation instrumentation,Activity activity,JSONObject fixture,AuthUiIntegration.Check check,boolean member,boolean offline) throws Exception {
         AuthUiIntegration.registration(instrumentation,activity,fixture,check);
         int account=UserConfig.selectedAccount;RestRepository repository=VyrnBridge.forAccount(account).repository;String owner=repository.me().id;
         RestRepository creator=repository;String creatorId=owner;
@@ -51,8 +51,8 @@ final class MediaUiIntegration {
         for(String permission:new String[]{"android.permission.READ_MEDIA_IMAGES","android.permission.READ_MEDIA_VIDEO","android.permission.CAMERA"})check.verify(instrumentation.getTargetContext().checkSelfPermission(permission)==android.content.pm.PackageManager.PERMISSION_DENIED,"file_ui_unrelated_permission_initially_denied");
         File external=instrumentation.getTargetContext().getExternalFilesDir(null);check.verify(external!=null,"file_ui_fixture_external_storage");File directory=new File(external,"vyrn-picker-fixture");if(!directory.isDirectory()&&!directory.mkdir())throw new AssertionError("fixture_directory");
         byte[] bytes=new byte[2*1024*1024+113];for(int i=0;i<bytes.length;i++)bytes[i]=(byte)(i*19);File source=new File(directory,"vyrn-picker-file.bin");Files.write(source.toPath(),bytes);
-        java.util.concurrent.atomic.AtomicLong progress=new java.util.concurrent.atomic.AtomicLong();org.telegram.messenger.NotificationCenter.NotificationCenterDelegate observer=(event,selected,args)->{if(selected==account&&args.length>1&&source.getAbsolutePath().equals(args[0]))progress.accumulateAndGet(((Number)args[1]).longValue(),Math::max);};
-        instrumentation.runOnMainSync(()->org.telegram.messenger.NotificationCenter.getInstance(account).addObserver(observer,org.telegram.messenger.NotificationCenter.fileUploadProgressChanged));
+        java.util.concurrent.atomic.AtomicLong progress=new java.util.concurrent.atomic.AtomicLong();java.util.concurrent.atomic.AtomicBoolean failed=new java.util.concurrent.atomic.AtomicBoolean();org.telegram.messenger.NotificationCenter.NotificationCenterDelegate observer=(event,selected,args)->{if(selected==account&&args.length>1&&source.getAbsolutePath().equals(args[0])){if(event==org.telegram.messenger.NotificationCenter.fileUploadFailed)failed.set(true);else progress.accumulateAndGet(((Number)args[1]).longValue(),Math::max);}};
+        instrumentation.runOnMainSync(()->{org.telegram.messenger.NotificationCenter.getInstance(account).addObserver(observer,org.telegram.messenger.NotificationCenter.fileUploadProgressChanged);org.telegram.messenger.NotificationCenter.getInstance(account).addObserver(observer,org.telegram.messenger.NotificationCenter.fileUploadFailed);});
         try{
             tap(instrumentation,(View)field(chat.getChatActivityEnterView(),"attachButton"),check,"file_ui_attach_control");
             awaitUi(instrumentation,()->chat.chatAttachAlert!=null&&chat.chatAttachAlert.isShowing(),check,"file_ui_attach_sheet_visible");Thread.sleep(700);
@@ -64,7 +64,10 @@ final class MediaUiIntegration {
             java.lang.reflect.Method list=picker.getClass().getDeclaredMethod("listFiles",File.class);list.setAccessible(true);Throwable[] listing={null};instrumentation.runOnMainSync(()->{try{if(!Boolean.TRUE.equals(list.invoke(picker,directory)))listing[0]=new AssertionError("fixture_not_listed");}catch(Exception failure){listing[0]=failure;}});if(listing[0]!=null)throw new AssertionError(listing[0]);instrumentation.waitForIdleSync();Thread.sleep(350);
             awaitUi(instrumentation,()->textView(picker,source.getName())!=null,check,"file_ui_filename_visible");View[] row={null};instrumentation.runOnMainSync(()->row[0]=textView(picker,source.getName()));tap(instrumentation,row[0],check,"file_ui_select_visible_file");
             awaitUi(instrumentation,()->picker.getSelectedItemsCount()==1,check,"file_ui_selection_count_one");
-            View send=(View)field(chat.chatAttachAlert,"writeButton");awaitUi(instrumentation,()->send.isShown()&&send.getAlpha()>0.9f,check,"file_ui_send_visible");tap(instrumentation,send,check,"file_ui_original_send_control");
+            View send=(View)field(chat.chatAttachAlert,"writeButton");awaitUi(instrumentation,()->send.isShown()&&send.getAlpha()>0.9f,check,"file_ui_send_visible");
+            if(offline)AuthUiIntegration.networkStep(instrumentation,activity,"offline-load",check);
+            tap(instrumentation,send,check,"file_ui_original_send_control");
+            if(offline){Thread.sleep(3000);check.verify(progress.get()==0&&!failed.get()&&source.isFile(),"file_ui_offline_retains_original_upload_without_failure");awaitUi(instrumentation,()->chat.messages.stream().anyMatch(value->value.getDocument()!=null&&value.messageOwner.send_state==1),check,"file_ui_offline_native_bubble_stays_pending");AuthUiIntegration.networkStep(instrumentation,activity,"online-retry",check);}
             java.util.List<Models.Message> messages=java.util.Collections.emptyList();long deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(60);while(System.nanoTime()<deadline){messages=repository.liveMessages(conversation,null,100);if(!messages.isEmpty())break;Thread.sleep(200);}
             check.verify(messages.size()==1&&messages.get(0).attachment!=null,"file_ui_one_server_message_with_attachment");Models.Message sent=messages.get(0);
             check.verify(sent.attachment.size==bytes.length&&sent.attachment.sha256.equals(hex(MessageDigest.getInstance("SHA-256").digest(bytes))),"file_ui_uploaded_exact_original_bytes");
@@ -72,7 +75,7 @@ final class MediaUiIntegration {
             awaitUi(instrumentation,()->cell(chat.getFragmentView(),sent.ordinal)!=null&&cell(chat.getFragmentView(),sent.ordinal).getMessageObject().messageOwner.send_state==0,check,"file_ui_original_bubble_acknowledged");
             Thread.sleep(1500);check.verify(repository.liveMessages(conversation,null,100).size()==1,"file_ui_no_duplicate_after_ack");
             for(String permission:new String[]{"android.permission.READ_MEDIA_IMAGES","android.permission.READ_MEDIA_VIDEO","android.permission.CAMERA"})check.verify(instrumentation.getTargetContext().checkSelfPermission(permission)==android.content.pm.PackageManager.PERMISSION_DENIED,"file_ui_send_preserves_unrelated_permission_denial");
-        }finally{instrumentation.runOnMainSync(()->org.telegram.messenger.NotificationCenter.getInstance(account).removeObserver(observer,org.telegram.messenger.NotificationCenter.fileUploadProgressChanged));}
+        }finally{instrumentation.runOnMainSync(()->{org.telegram.messenger.NotificationCenter.getInstance(account).removeObserver(observer,org.telegram.messenger.NotificationCenter.fileUploadProgressChanged);org.telegram.messenger.NotificationCenter.getInstance(account).removeObserver(observer,org.telegram.messenger.NotificationCenter.fileUploadFailed);});}
     }
     private static Object field(Object object,String name) throws Exception {Class<?> type=object.getClass();while(type!=null){try{java.lang.reflect.Field value=type.getDeclaredField(name);value.setAccessible(true);return value.get(object);}catch(NoSuchFieldException missing){type=type.getSuperclass();}}throw new NoSuchFieldException(name);}
     private static View textView(View root,String text){if(root.getVisibility()!=View.VISIBLE||root.getAlpha()<0.9f)return null;if(root instanceof android.widget.TextView&&text.contentEquals(((android.widget.TextView)root).getText()))return root;if(root instanceof ViewGroup)for(int i=0;i<((ViewGroup)root).getChildCount();i++){View found=textView(((ViewGroup)root).getChildAt(i),text);if(found!=null)return found;}return null;}

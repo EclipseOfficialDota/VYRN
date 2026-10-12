@@ -42,7 +42,7 @@ import xyz.eclipseofficial.vyrn.domain.Models;
 public final class VyrnBridge {
     private static final ExecutorService IO=Executors.newFixedThreadPool(2);
     private static final ExecutorService SEND=Executors.newSingleThreadExecutor();
-    private static final ExecutorService UPLOAD=Executors.newSingleThreadExecutor();
+    private static final java.util.concurrent.ScheduledExecutorService UPLOAD=Executors.newSingleThreadScheduledExecutor();
     public static final class UploadIdentity {
         public final long origin;public final String owner,session;
         private UploadIdentity(long origin,String owner,String session){this.origin=origin;this.owner=owner;this.session=session;}
@@ -68,6 +68,7 @@ public final class VyrnBridge {
         if(original instanceof TLRPC.TL_upload_saveFilePart){TLRPC.TL_upload_saveFilePart value=(TLRPC.TL_upload_saveFilePart)original;buffer=value.bytes;part=value.file_part;id=value.file_id;}
         else if(original instanceof TLRPC.TL_upload_saveBigFilePart){TLRPC.TL_upload_saveBigFilePart value=(TLRPC.TL_upload_saveBigFilePart)original;buffer=value.bytes;part=value.file_part;id=value.file_id;}
         else throw new UnsupportedOperationException("upload_part_type");
+        if(buffer.limit()<1||buffer.limit()>1024*1024||part<0||part>=8192){original.freeResources();throw new IllegalArgumentException("upload_part");}
         byte[] data=new byte[buffer.limit()];java.nio.ByteBuffer copy=buffer.buffer.duplicate();copy.position(0);copy.get(data);original.freeResources();return new UploadPartRequest(identity,data,part,id,encrypted);
     }
     public static void cancelUpload(int account,UploadIdentity identity,long id){
@@ -675,9 +676,7 @@ public final class VyrnBridge {
         if(token!=0 && REQUESTS.putIfAbsent(requestKey(account,token),pending)!=null)throw new IllegalStateException("duplicate_request_token");
         if(request instanceof UploadPartRequest){
             UploadPartRequest part=(UploadPartRequest)request;pending.bridge=forAccount(account);pending.user=part.identity.owner;pending.sessionOrigin=part.identity.origin;pending.boundSession=part.identity.session;
-            UPLOAD.execute(()->{try{if(!currentUploadIdentity(account,part.identity))throw new SecurityException("account_changed");if(part.encrypted)throw new UnsupportedOperationException("private_media_not_ready");synchronized(pending){if(pending.finished||pending.cancellationRequested)return;}
-                pending.bridge.repository.uploadPartForSession(part.identity.owner,part.identity.session,uploadId(part.identity,part.id),part.part,part.data);pending.complete(new TLRPC.TL_boolTrue(),null);
-            }catch(Exception failure){pending.complete(null,failure);}});return true;
+            UPLOAD.execute(()->uploadPart(account,pending,part,0));return true;
         }
         if(request instanceof TLRPC.TL_photos_uploadProfilePhoto || request instanceof TLRPC.TL_photos_updateProfilePhoto || request instanceof TLRPC.TL_photos_getUserPhotos || request instanceof TLRPC.TL_upload_getFile){
             pending.sessionOrigin=UserConfig.getInstance(account).getClientUserId();
@@ -819,6 +818,19 @@ public final class VyrnBridge {
         execute(()->{try{pending.complete(forAccount(account).handle(request),null);}catch(Exception failure){pending.complete(null,failure);}});return true;
     }
     public static void cancelRequest(int account,int token,Runnable onCancelled){PendingRequest pending=REQUESTS.get(requestKey(account,token));if(pending!=null)pending.cancel(onCancelled);}
+    private static void uploadPart(int account,PendingRequest pending,UploadPartRequest part,int attempt){
+        synchronized(pending){if(pending.finished||pending.cancellationRequested)return;}
+        try{
+            if(!currentUploadIdentity(account,part.identity))throw new SecurityException("account_changed");
+            if(part.encrypted)throw new UnsupportedOperationException("private_media_not_ready");
+            pending.bridge.repository.uploadPartForSession(part.identity.owner,part.identity.session,uploadId(part.identity,part.id),part.part,part.data);
+            pending.complete(new TLRPC.TL_boolTrue(),null);
+        }catch(Exception failure){
+            if(attempt<7&&temporaryRequestFailure(failure)){long delay=Math.min(60000L,1000L<<attempt);UPLOAD.schedule(()->uploadPart(account,pending,part,attempt+1),delay,TimeUnit.MILLISECONDS);}
+            else pending.complete(null,failure);
+        }
+    }
+    private static boolean temporaryRequestFailure(Throwable failure){return failure instanceof RestRepository.NetworkException||failure instanceof java.net.UnknownHostException||failure instanceof java.net.SocketTimeoutException||failure instanceof java.net.SocketException||failure instanceof java.io.EOFException||failure instanceof javax.net.ssl.SSLHandshakeException&&failure.getCause() instanceof java.io.EOFException||failure instanceof RestRepository.ApiException&&(((RestRepository.ApiException)failure).status>=500||((RestRepository.ApiException)failure).status==429);}
     private TLObject sessions(String user,boolean revoke,long hash) throws Exception {
         String kind="session:"+user;
         if(revoke){
@@ -844,7 +856,7 @@ public final class VyrnBridge {
     private static TLRPC.TL_error problem(Throwable failure){
         if(org.telegram.messenger.BuildConfig.DEBUG&&failure!=null){String detail="";if(failure instanceof SecurityException&&java.util.Arrays.asList("account_changed","session_changed","signal_edit_context_changed","signal_edit_intent_changed","signal_message_deleted","signal_edit_revision_conflict").contains(failure.getMessage()))detail=" guard="+failure.getMessage();android.util.Log.w("VyrnBridge","request_failure="+failure.getClass().getName()+" cause_type="+(failure.getCause()==null?"none":failure.getCause().getClass().getName())+detail);}
         TLRPC.TL_error error=null;if(failure!=null){error=new TLRPC.TL_error();error.code=failure instanceof RestRepository.ApiException?((RestRepository.ApiException)failure).status:503;error.text=failure instanceof UnsupportedOperationException?"VYRN_FEATURE_UNAVAILABLE":"VYRN_REQUEST_FAILED";}
-        if(failure instanceof RestRepository.NetworkException||failure instanceof java.net.UnknownHostException||failure instanceof java.net.SocketTimeoutException||failure instanceof java.net.SocketException||failure instanceof java.io.EOFException||failure instanceof javax.net.ssl.SSLHandshakeException&&failure.getCause() instanceof java.io.EOFException||failure instanceof RestRepository.ApiException&&(error.code>=500||error.code==429))error.text="VYRN_RETRYABLE_REQUEST_FAILED";
+        if(temporaryRequestFailure(failure))error.text="VYRN_RETRYABLE_REQUEST_FAILED";
         if(failure instanceof RestRepository.ApiException&&((RestRepository.ApiException)failure).code.equals("revision_conflict"))error.text="VYRN_EDIT_CONFLICT";
         if(failure instanceof SecurityException&&"signal_edit_revision_conflict".equals(failure.getMessage())){error.code=409;error.text="VYRN_EDIT_CONFLICT";}
         if(failure instanceof IllegalStateException&&"edit_snapshot_required".equals(failure.getMessage())){error.code=409;error.text="VYRN_EDIT_RELOAD_REQUIRED";}
