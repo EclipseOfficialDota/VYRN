@@ -87,7 +87,9 @@ public final class LocalIntegrationRunner extends Instrumentation {
             check(foreground!=null,"foreground_activity");
             stage="foreground_idle";
             if(!boundedChatStartup)waitForIdleSync();
-            if(phase.startsWith("chat-")){
+            if(phase.equals("media-ui")){
+                stage="media_ui";MediaUiIntegration.run(this,foreground,read("vyrn-test-fixture.json"),(condition,name)->{check(condition,name);passed.put(name);});
+            }else if(phase.startsWith("chat-")){
                 stage="chat_ui";
                 ChatUiIntegration.run(this,foreground,read("vyrn-test-fixture.json"),phase,(condition,name)->{check(condition,name);passed.put(name);});
             } else if(phase.equals("sessions-network")||phase.equals("sessions-ui")||phase.equals("auth-ui")||phase.equals("registration-ui")||phase.startsWith("logout-")||phase.startsWith("onboarding-")){

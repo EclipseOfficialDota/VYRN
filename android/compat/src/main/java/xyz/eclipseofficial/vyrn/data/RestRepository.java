@@ -101,22 +101,26 @@ public final class RestRepository implements Models.Repository {
         return binaryForUser(owner,"GET","/v1/media/"+id,null,offset,limit);
     }
     private byte[] binaryForUser(String owner,String method,String path,byte[] body,long offset,int limit) throws Exception {synchronized(vault.guard()){
+        return binaryForUser(owner,method,path,body,offset,limit,null);
+    }}
+    private byte[] binaryForUser(String owner,String method,String path,byte[] body,long offset,int limit,String hash) throws Exception {synchronized(vault.guard()){
         JSONObject session=vault.load();if(!owner.equals(session.optString("user_id")))throw new SecurityException("account_changed");
-        try{return exchangeBinary(method,path,body,offset,limit,session.getString("access_token"));}catch(ApiException failure){
+        try{return exchangeBinary(method,path,body,offset,limit,session.getString("access_token"),hash);}catch(ApiException failure){
             if(failure.status!=401)throw failure;
             JSONObject renewed=(JSONObject)exchange("POST","/v1/auth/refresh",new JSONObject().put("refresh_token",session.getString("refresh_token")),"");
-            vault.save(renewed);return exchangeBinary(method,path,body,offset,limit,renewed.getString("access_token"));
+            requireIdentity(renewed,owner,session.getString("session_id"));vault.save(renewed);return exchangeBinary(method,path,body,offset,limit,renewed.getString("access_token"),hash);
         }
     }}
-    private byte[] exchangeBinary(String method,String path,byte[] body,long offset,int limit,String access) throws Exception {
+    private byte[] exchangeBinary(String method,String path,byte[] body,long offset,int limit,String access,String hash) throws Exception {
         URL endpoint=new URL(BuildConfig.VYRN_API_URL+path);if(!"https".equals(endpoint.getProtocol())||endpoint.getHost().matches("[0-9.]+"))throw new SecurityException("https_hostname_required");
         HttpsURLConnection connection=(HttpsURLConnection)endpoint.openConnection();connection.setInstanceFollowRedirects(false);connection.setConnectTimeout(15000);connection.setReadTimeout(20000);connection.setRequestMethod(method);connection.setRequestProperty("Authorization","Bearer "+access);
         try{
             if(body!=null){connection.setRequestProperty("Content-Type","application/octet-stream");connection.setRequestProperty("X-Filename","avatar.jpg");connection.setFixedLengthStreamingMode(body.length);connection.setDoOutput(true);try(java.io.OutputStream output=connection.getOutputStream()){output.write(body);}}
-            else connection.setRequestProperty("Range","bytes="+offset+"-"+(offset+limit-1));
+            else{connection.setRequestProperty("Range","bytes="+offset+"-"+(offset+limit-1));if(hash!=null)connection.setRequestProperty("If-Range","\""+hash+"\"");}
             int status=connection.getResponseCode();String range=connection.getHeaderField("Content-Range");
             if(status==416 && range!=null && range.matches("bytes \\*/[0-9]+") && offset>=Long.parseLong(range.substring(8)))return new byte[0];
             if(body==null && status>=200 && status<300 && status!=206)throw new IllegalStateException("range_response_required");
+            if(hash!=null&&status==206&&(!("\""+hash+"\"").equals(connection.getHeaderField("ETag"))||range==null||!range.startsWith("bytes "+offset+"-")))throw new SecurityException("media_range_changed");
             try(InputStream input=status>=400?connection.getErrorStream():connection.getInputStream();ByteArrayOutputStream output=new ByteArrayOutputStream()){
                 if(input!=null){byte[] buffer=new byte[8192];int n;while((n=input.read(buffer))!=-1){if(output.size()+n>Math.max(limit,65536))throw new IllegalStateException("response_too_large");output.write(buffer,0,n);}}
                 byte[] value=output.toByteArray();if(status<200||status>=300){String code="request_failed";try{code=new JSONObject(new String(value,StandardCharsets.UTF_8)).optString("error",code);}catch(Exception ignored){}throw new ApiException(status,code);}
@@ -125,6 +129,17 @@ public final class RestRepository implements Models.Repository {
         }finally{connection.disconnect();}
     }
     public Models.User updateProfileForUser(String user,JSONObject changes) throws Exception{return user((JSONObject)requestForUser(user,"PATCH","/v1/me",changes,true));}
+    public Models.Attachment attachmentForUser(String user,String id) throws Exception {
+        if(!id.matches("[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"))throw new IllegalArgumentException("media_id");
+        JSONObject value=(JSONObject)requestForUser(user,"GET","/v1/media/"+id+"/metadata",null,true);
+        String name=value.getString("filename"),hash=value.getString("sha256"),kind=value.getString("kind");long size=value.getLong("size");
+        if(!id.equals(value.getString("id"))||!hash.matches("[0-9a-f]{64}")||size<1||size>250L*1024*1024||name.codePointCount(0,name.length())>255||name.isEmpty()||name.indexOf('/')>=0||name.indexOf('\\')>=0||name.indexOf('\0')>=0||name.indexOf('\r')>=0||name.indexOf('\n')>=0||!java.util.Arrays.asList("file","image","voice","video","avatar").contains(kind))throw new SecurityException("media_descriptor_changed");
+        return new Models.Attachment(id,value.isNull("conversation_id")?null:value.getString("conversation_id"),kind,name,value.getString("content_type"),hash,size,value.getBoolean("encrypted"));
+    }
+    public byte[] attachmentBytesForUser(String user,String id,String hash,long offset,int limit) throws Exception {
+        if(offset<0||limit<1||limit>1024*1024)throw new IllegalArgumentException("media_range");
+        synchronized(vault.guard()){Models.Attachment value=attachmentForUser(user,id);if(value.encrypted||!value.sha256.equals(hash)||value.conversation==null)throw new SecurityException("media_descriptor_changed");if(offset>=value.size)return new byte[0];return binaryForUser(user,"GET","/v1/media/"+id,null,offset,limit,hash);}
+    }
     public Models.Profile profileForUser(String expected,String target) throws Exception{JSONObject data=(JSONObject)requestForUser(expected,"GET",target.equals(expected)?"/v1/me":"/v1/users/"+target,null,true);return new Models.Profile(user(data),data.getBoolean("blocked"),data.getInt("common_group_count"));}
     public void setBlockedForUser(String owner,String target,boolean blocked) throws Exception{requestForUser(owner,blocked?"PUT":"DELETE","/v1/blocks/"+target,null,true);}
     public boolean blockedForUser(String owner,String target) throws Exception{return ((JSONObject)requestForUser(owner,"GET","/v1/blocks/"+target,null,true)).getBoolean("blocked");}
@@ -150,7 +165,9 @@ public final class RestRepository implements Models.Repository {
     private Models.Message message(JSONObject m) throws Exception {
         boolean encrypted=m.getBoolean("encrypted");int ordinal=m.getInt("ordinal");if(ordinal<=0)throw new IllegalStateException("invalid_message_order");
         int revision=m.getInt("revision");if(revision<1)throw new IllegalStateException("invalid_message_revision");
-        return new Models.Message(m.getString("id"),m.getString("sender_id"),encrypted?"":m.getJSONObject("payload").optString("text"),(int)Timestamps.parse(m.getString("created_at")).getEpochSecond(),ordinal,encrypted,!m.isNull("deleted_at"),m.getString("conversation_id"),revision,m.isNull("edited_at")?0:(int)Timestamps.parse(m.getString("edited_at")).getEpochSecond());
+        Models.Attachment attachment=null;
+        if(!encrypted&&m.isNull("deleted_at")&&!m.isNull("media_id")){attachment=attachmentForUser(vault.load().getString("user_id"),m.getString("media_id"));if(attachment.encrypted||!m.getString("conversation_id").equals(attachment.conversation))throw new SecurityException("media_message_changed");}
+        return new Models.Message(m.getString("id"),m.getString("sender_id"),encrypted?"":m.getJSONObject("payload").optString("text",m.getJSONObject("payload").optString("caption")),(int)Timestamps.parse(m.getString("created_at")).getEpochSecond(),ordinal,encrypted,!m.isNull("deleted_at"),m.getString("conversation_id"),revision,m.isNull("edited_at")?0:(int)Timestamps.parse(m.getString("edited_at")).getEpochSecond(),attachment);
     }
     public Models.Message message(String id) throws Exception {return message((JSONObject)request("GET","/v1/messages/"+id,null,true));}
     public Models.Message editText(String user,String id,int revision,String text) throws Exception { synchronized(vault.guard()) {

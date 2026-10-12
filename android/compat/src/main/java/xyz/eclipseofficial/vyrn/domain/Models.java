@@ -32,11 +32,17 @@ public final class Models {
         public Conversation(String id,String kind,String title,String role,int members,int disappearingSeconds) { this.id=id;this.kind=kind;this.title=title;this.role=role;this.members=members;this.disappearingSeconds=disappearingSeconds; }
     }
     public static final class Message {
+        public final Attachment attachment;
         public final String id, sender, text, conversation;
         public final int date, ordinal, revision, editedDate;
         public final boolean encrypted, deleted;
         public Message(String id,String sender,String text,int date,int ordinal,boolean encrypted,boolean deleted){this(id,sender,text,date,ordinal,encrypted,deleted,null,0,0);}
-        public Message(String id,String sender,String text,int date,int ordinal,boolean encrypted,boolean deleted,String conversation,int revision,int editedDate){this.id=id;this.sender=sender;this.text=text;this.date=date;this.ordinal=ordinal;this.encrypted=encrypted;this.deleted=deleted;this.conversation=conversation;this.revision=revision;this.editedDate=editedDate;}
+        public Message(String id,String sender,String text,int date,int ordinal,boolean encrypted,boolean deleted,String conversation,int revision,int editedDate){this(id,sender,text,date,ordinal,encrypted,deleted,conversation,revision,editedDate,null);}
+        public Message(String id,String sender,String text,int date,int ordinal,boolean encrypted,boolean deleted,String conversation,int revision,int editedDate,Attachment attachment){this.id=id;this.sender=sender;this.text=text;this.date=date;this.ordinal=ordinal;this.encrypted=encrypted;this.deleted=deleted;this.conversation=conversation;this.revision=revision;this.editedDate=editedDate;this.attachment=attachment;}
+    }
+    public static final class Attachment {
+        public final String id,conversation,kind,filename,contentType,sha256;public final long size;public final boolean encrypted;
+        public Attachment(String id,String conversation,String kind,String filename,String contentType,String sha256,long size,boolean encrypted){this.id=id;this.conversation=conversation;this.kind=kind;this.filename=filename;this.contentType=contentType;this.sha256=sha256;this.size=size;this.encrypted=encrypted;}
     }
     public static final class Member {
         public final User user;public final String role;public final int joinedDate;

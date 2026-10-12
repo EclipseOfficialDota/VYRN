@@ -1,3 +1,9 @@
+## Native incoming group file receive — 2026-10-12
+
+media-ui16801 exits0/37 checks, report2026-10-12T07:25:12.1931289+03:30, APK13aa3915b991c5d02d7db63af3eadde22b58bf8a1bf5b7c6354e178dc0f4d990, no attach retry. Incoming bubble from a distinct API-fixture sender, actual download control/original worker,2MiB+113 exact bytes/hash, descriptor/native document hash, delete/revocation and shared completion-guard altered-copy/unbound-ID/account checks pass. v4→5 IdMap migration preserves native user7/next chat8, long media IDs stable across reopen/fresh DB and separate owners. Build88365 exits0/1m55s; final26780 exits0/40s.
+
+One emulator/API upload-send fixture/programmatic chat entry; not native Upload/Send or two physical phones. Altered-copy guard test is not a real corrupted partial-download restart. Upload progress/cancel/resume, image/voice/private encrypted media and background remain incomplete. Local Core changed to backendc9851f2/binaryf926d87b; VPSa00a123 and normal98c88ff phone APKs unchanged. Earlier failure was missing test dialog-controller setup; no accepted pass attributed to those failed runs. Final Signal component report on same APK passes35 checks; broader old suites retain their original hashes.
+
 ## Media descriptor access and download ranges — 2026-10-11
 
 Pinned Go1.26.8 compiles Linux API tests; actual Ubuntu-24.04/PostgreSQL isolated-schema run97e3d1 exits0 with TestIntegrationMedia, TestIntegrationExpiryAndMediaCollection and TestAvatarImagesMetadataAndAccess passing. Existing media test now verifies descriptor fields/no storage-key exposure, authentication and unpublished/outsider denial, live referenced-message access, SHA256 ETag/If-Range byte range, expiry/deletion recipient revocation, retained owner access and truncated-file rejection. Existing disk-reserve and text-message survival checks remain.

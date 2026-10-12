@@ -247,6 +247,23 @@ Edit 'TMessagesProj/src/main/java/org/telegram/ui/Components/CodepointsLengthInp
  $end+='            return source.subSequence(start, keep);'.Length
  $t.Substring(0,$start)+'            return source.subSequence(start, Character.offsetByCodePoints(source, start, keep));'+$t.Substring($end)
 }
+Edit 'TMessagesProj/src/main/java/org/telegram/messenger/FileLoadOperation.java' {
+ param($t)
+ $t=(& git -c "safe.directory=$($upstream.Replace('\','/'))" -C $upstream show "${pin}:TMessagesProj/src/main/java/org/telegram/messenger/FileLoadOperation.java") -join "`n"
+ $marker="        state = stateFinished;`n        notifyStreamListeners();"
+ if(!$t.Contains($marker)){throw 'Pinned file completion marker missing'}
+ $guard=@'
+        if (!preload && !isPreloadVideoOperation && !xyz.eclipseofficial.vyrn.compat.VyrnBridge.verifyAttachment(currentAccount, location, finishCode == FINISH_CODE_FILE_ALREADY_EXIST ? cacheFileFinal : cacheFileTemp)) {
+            onFail(false, 0);
+            if (finishCode != FINISH_CODE_FILE_ALREADY_EXIST) {
+                if (cacheFileTemp != null && !cacheFileTemp.equals(cacheFileFinal)) cacheFileTemp.delete();
+                if (cacheFileParts != null) cacheFileParts.delete();
+            }
+            return;
+        }
+'@
+ $t.Replace($marker,$guard+"`n"+$marker)
+}
 Edit 'TMessagesProj/src/main/java/org/telegram/ui/SessionBottomSheet.java' {
  param($t)
  $t=(& git -c "safe.directory=$($upstream.Replace('\','/'))" -C $upstream show "${pin}:TMessagesProj/src/main/java/org/telegram/ui/SessionBottomSheet.java") -join "`n"

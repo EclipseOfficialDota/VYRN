@@ -12,11 +12,22 @@ import xyz.eclipseofficial.vyrn.domain.Models;
 
 /** Local stable IDs isolate the Telegram UI's integer identifiers from VYRN UUIDs. */
 public final class IdMap extends SQLiteOpenHelper {
-    public IdMap(Context context,int account){super(context,"vyrn_ids_"+account+".db",null,4);}
-    public void onCreate(SQLiteDatabase db){db.execSQL("CREATE TABLE ids(id INTEGER PRIMARY KEY AUTOINCREMENT,kind TEXT NOT NULL,uuid TEXT NOT NULL,UNIQUE(kind,uuid))");createMessageMap(db);createObservedMessages(db);}
+    public IdMap(Context context,int account){super(context,"vyrn_ids_"+account+".db",null,5);}
+    public void onCreate(SQLiteDatabase db){db.execSQL("CREATE TABLE ids(id INTEGER PRIMARY KEY AUTOINCREMENT,kind TEXT NOT NULL,uuid TEXT NOT NULL,UNIQUE(kind,uuid))");createMessageMap(db);createObservedMessages(db);createMediaMap(db);}
     private void createMessageMap(SQLiteDatabase db){db.execSQL("CREATE TABLE message_ids(id INTEGER PRIMARY KEY CHECK(id>0),uuid TEXT NOT NULL UNIQUE)");}
     private void createObservedMessages(SQLiteDatabase db){db.execSQL("CREATE TABLE observed_messages(uuid TEXT PRIMARY KEY,conversation TEXT NOT NULL,sender TEXT NOT NULL,revision INTEGER NOT NULL CHECK(revision>0),body_hash BLOB,encrypted INTEGER NOT NULL DEFAULT 0,deleted INTEGER NOT NULL DEFAULT 0,date INTEGER NOT NULL DEFAULT 0,edited INTEGER NOT NULL DEFAULT 0)");}
-    public void onUpgrade(SQLiteDatabase db,int oldVersion,int newVersion){if(oldVersion<1||oldVersion>3||newVersion!=4)throw new IllegalStateException("id_map_migration_required");if(oldVersion==1)createMessageMap(db);if(oldVersion<3)createObservedMessages(db);else{db.execSQL("ALTER TABLE observed_messages ADD COLUMN encrypted INTEGER NOT NULL DEFAULT 0");db.execSQL("ALTER TABLE observed_messages ADD COLUMN deleted INTEGER NOT NULL DEFAULT 0");db.execSQL("ALTER TABLE observed_messages ADD COLUMN date INTEGER NOT NULL DEFAULT 0");db.execSQL("ALTER TABLE observed_messages ADD COLUMN edited INTEGER NOT NULL DEFAULT 0");}}
+    private void createMediaMap(SQLiteDatabase db){db.execSQL("CREATE TABLE media_ids(id INTEGER PRIMARY KEY CHECK(id>0),owner TEXT NOT NULL,uuid TEXT NOT NULL,UNIQUE(owner,uuid))");}
+    public void onUpgrade(SQLiteDatabase db,int oldVersion,int newVersion){if(oldVersion<1||oldVersion>4||newVersion!=5)throw new IllegalStateException("id_map_migration_required");if(oldVersion==1)createMessageMap(db);if(oldVersion<3)createObservedMessages(db);else if(oldVersion<4){db.execSQL("ALTER TABLE observed_messages ADD COLUMN encrypted INTEGER NOT NULL DEFAULT 0");db.execSQL("ALTER TABLE observed_messages ADD COLUMN deleted INTEGER NOT NULL DEFAULT 0");db.execSQL("ALTER TABLE observed_messages ADD COLUMN date INTEGER NOT NULL DEFAULT 0");db.execSQL("ALTER TABLE observed_messages ADD COLUMN edited INTEGER NOT NULL DEFAULT 0");}createMediaMap(db);}
+    /** Stable across app-data reset without consuming the native user/chat integer sequence. */
+    public synchronized long media(String owner,String uuid){
+        if(!java.util.UUID.fromString(owner).toString().equals(owner)||!java.util.UUID.fromString(uuid).toString().equals(uuid))throw new IllegalArgumentException("media_identity");
+        long id=java.nio.ByteBuffer.wrap(bodyHash(owner+":"+uuid)).getLong()&Long.MAX_VALUE;if(id==0)throw new SecurityException("media_identity_collision");
+        ContentValues value=new ContentValues();value.put("id",id);value.put("owner",owner);value.put("uuid",uuid);getWritableDatabase().insertWithOnConflict("media_ids",null,value,SQLiteDatabase.CONFLICT_IGNORE);
+        if(!uuid.equals(mediaRemote(owner,id)))throw new SecurityException("media_identity_collision");return id;
+    }
+    public synchronized String mediaRemote(String owner,long id){
+        try(Cursor row=getReadableDatabase().rawQuery("SELECT uuid FROM media_ids WHERE owner=? AND id=?",new String[]{owner,Long.toString(id)})){if(!row.moveToFirst())throw new SecurityException("media_identity_unbound");return row.getString(0);}
+    }
     private static byte[] bodyHash(String text){try{return MessageDigest.getInstance("SHA-256").digest(text.getBytes(StandardCharsets.UTF_8));}catch(java.security.NoSuchAlgorithmException impossible){throw new AssertionError(impossible);}}
     public synchronized void observe(Models.Message message){
         if(message.revision<1||message.conversation==null)return;
