@@ -42,6 +42,32 @@ import xyz.eclipseofficial.vyrn.domain.Models;
 public final class VyrnBridge {
     private static final ExecutorService IO=Executors.newFixedThreadPool(2);
     private static final ExecutorService SEND=Executors.newSingleThreadExecutor();
+    private static final ExecutorService UPLOAD=Executors.newSingleThreadExecutor();
+    public static final class UploadIdentity {
+        public final long origin;public final String owner,session;
+        private UploadIdentity(long origin,String owner,String session){this.origin=origin;this.owner=owner;this.session=session;}
+    }
+    public static UploadIdentity captureUploadIdentity(int account){
+        long origin=UserConfig.getInstance(account).getClientUserId();try{VyrnBridge bridge=forAccount(account);String owner=bridge.ids.remote("user",origin);return new UploadIdentity(origin,owner,bridge.repository.vault.cachedSession());}catch(Exception unavailable){return new UploadIdentity(origin,"",null);}
+    }
+    public static boolean currentUploadIdentity(int account,UploadIdentity identity){return identity!=null&&identity.origin!=0&&identity.owner!=null&&!identity.owner.isEmpty()&&identity.session!=null&&UserConfig.getInstance(account).getClientUserId()==identity.origin&&forAccount(account).repository.vault.isUser(identity.owner)&&identity.session.equals(forAccount(account).repository.vault.cachedSession());}
+    public static String uploadPreferenceKey(UploadIdentity identity,String original){return UUID.nameUUIDFromBytes(("vyrn-upload:"+identity.owner+":"+identity.session).getBytes(StandardCharsets.UTF_8))+":"+original;}
+    public static String uploadId(UploadIdentity identity,long id){return UUID.nameUUIDFromBytes(("vyrn-upload:"+identity.owner+":"+identity.session+":"+id).getBytes(StandardCharsets.UTF_8)).toString();}
+    private static final class UploadPartRequest extends TLObject {
+        final UploadIdentity identity;final byte[] data;final int part;final long id;final boolean encrypted;
+        UploadPartRequest(UploadIdentity identity,byte[] data,int part,long id,boolean encrypted){this.identity=identity;this.data=data;this.part=part;this.id=id;this.encrypted=encrypted;}
+        public void serializeToStream(org.telegram.tgnet.OutputSerializedData stream){throw new UnsupportedOperationException("upload_requires_vyrn_transport");}
+    }
+    public static TLObject uploadRequest(int account,TLObject original,UploadIdentity identity,boolean encrypted){
+        org.telegram.tgnet.NativeByteBuffer buffer;int part;long id;
+        if(original instanceof TLRPC.TL_upload_saveFilePart){TLRPC.TL_upload_saveFilePart value=(TLRPC.TL_upload_saveFilePart)original;buffer=value.bytes;part=value.file_part;id=value.file_id;}
+        else if(original instanceof TLRPC.TL_upload_saveBigFilePart){TLRPC.TL_upload_saveBigFilePart value=(TLRPC.TL_upload_saveBigFilePart)original;buffer=value.bytes;part=value.file_part;id=value.file_id;}
+        else throw new UnsupportedOperationException("upload_part_type");
+        byte[] data=new byte[buffer.limit()];java.nio.ByteBuffer copy=buffer.buffer.duplicate();copy.position(0);copy.get(data);original.freeResources();return new UploadPartRequest(identity,data,part,id,encrypted);
+    }
+    public static void cancelUpload(int account,UploadIdentity identity,long id){
+        if(id==0)return;UPLOAD.execute(()->{if(!currentUploadIdentity(account,identity))return;try{forAccount(account).repository.requestForSession(identity.owner,identity.session,"DELETE","/v1/media-uploads/"+uploadId(identity,id),null);}catch(Exception failure){android.util.Log.w("VyrnBridge","upload_cancel_failure="+failure.getClass().getName());}});
+    }
     private static final ExecutorService LOCAL=Executors.newSingleThreadExecutor();
     private static final Map<Integer,VyrnBridge> INSTANCES=new HashMap<>();
     private static final java.util.Set<Integer> LOGGING_OUT=ConcurrentHashMap.newKeySet();
@@ -145,7 +171,7 @@ public final class VyrnBridge {
         final int account,token;final boolean send;final RequestDelegate callback;final RequestDelegateTimestamp timestamp;
         int guid;boolean cancellationRequested,cancellationStarted,resultReady,finished,ready;
         Boolean cancellationResult;TLObject result;Throwable failure;VyrnBridge bridge;String user,client;
-        long sessionOrigin;
+        long sessionOrigin;String boundSession;
         final ArrayList<Runnable> cancelledCallbacks=new ArrayList<>();
         PendingRequest(int account,int token,boolean send,RequestDelegate callback,RequestDelegateTimestamp timestamp){this.account=account;this.token=token;this.send=send;this.callback=callback;this.timestamp=timestamp;}
         synchronized void complete(TLObject result,Throwable failure){
@@ -174,7 +200,7 @@ public final class VyrnBridge {
                 finished=true;if(token!=0)REQUESTS.remove(requestKey(account,token),this);
             }
             if(cancelled!=null){if(result instanceof TLRPC.TL_upload_file)result.freeResources();for(Runnable task:cancelled)task.run();return;}
-            if(sessionOrigin!=0 && (bridge==null || !bridge.repository.vault.isUser(user) || UserConfig.getInstance(account).getClientUserId()!=sessionOrigin)){if(response instanceof TLRPC.TL_upload_file)response.freeResources();response=null;error=new SecurityException("account_changed");}
+            if(sessionOrigin!=0 && (bridge==null || !bridge.repository.vault.isUser(user) || UserConfig.getInstance(account).getClientUserId()!=sessionOrigin||boundSession!=null&&!boundSession.equals(bridge.repository.vault.cachedSession()))){if(response instanceof TLRPC.TL_upload_file)response.freeResources();response=null;error=new SecurityException("account_changed");}
             TLRPC.TL_error problem=problem(error);try{if(callback!=null)callback.run(response,problem);if(timestamp!=null)timestamp.run(response,problem,System.currentTimeMillis());}finally{if(response instanceof TLRPC.TL_upload_file)response.freeResources();}
         }
     }
@@ -642,6 +668,12 @@ public final class VyrnBridge {
     public static boolean dispatch(int account,TLObject request,RequestDelegate callback,RequestDelegateTimestamp timestamp,int token){
         PendingRequest pending=new PendingRequest(account,token,request instanceof TLRPC.TL_messages_sendMessage,callback,timestamp);
         if(token!=0 && REQUESTS.putIfAbsent(requestKey(account,token),pending)!=null)throw new IllegalStateException("duplicate_request_token");
+        if(request instanceof UploadPartRequest){
+            UploadPartRequest part=(UploadPartRequest)request;pending.bridge=forAccount(account);pending.user=part.identity.owner;pending.sessionOrigin=part.identity.origin;pending.boundSession=part.identity.session;
+            UPLOAD.execute(()->{try{if(!currentUploadIdentity(account,part.identity))throw new SecurityException("account_changed");if(part.encrypted)throw new UnsupportedOperationException("private_media_not_ready");synchronized(pending){if(pending.finished||pending.cancellationRequested)return;}
+                pending.bridge.repository.uploadPartForSession(part.identity.owner,part.identity.session,uploadId(part.identity,part.id),part.part,part.data);pending.complete(new TLRPC.TL_boolTrue(),null);
+            }catch(Exception failure){pending.complete(null,failure);}});return true;
+        }
         if(request instanceof TLRPC.TL_photos_uploadProfilePhoto || request instanceof TLRPC.TL_photos_updateProfilePhoto || request instanceof TLRPC.TL_photos_getUserPhotos || request instanceof TLRPC.TL_upload_getFile){
             pending.sessionOrigin=UserConfig.getInstance(account).getClientUserId();
             final boolean upload=request instanceof TLRPC.TL_photos_uploadProfilePhoto,change=request instanceof TLRPC.TL_photos_updateProfilePhoto,list=request instanceof TLRPC.TL_photos_getUserPhotos;

@@ -1,3 +1,9 @@
+## Native upload transport/progress/cancel — 2026-10-12
+
+Same local APKafce9eb96099e93d3d9de6df002569ec741c30fc6272638acd1fa32f08f344de passes67 native upload checks: small24 (08:39:17), big24 (08:44:31), cancel19 (08:35:25), all2026-10-12+03:30, independent scripts exit0. Original small/big part producers and progress full-size, persisted chunks, exact completed-file SHA/replay, actual FileLoader cancellation after progress, late-write fence, part cleanup and source preservation pass. Small had one pre-runner attach retry. Final independent Signal35 also passes on same APK.
+
+One emulator/direct FileLoader workers/API completion fixture, not chat Send publication, process-death/offline resume or private encrypted media. Big80742/Signal overlap discarded; only identified instrument11528 stopped before independent retests. Native constructor scope/preferences/late response guards wired. Local Corea7fc1e7/binary68e835d8/migration008 active; productiona00a123 and normalphone98c88ff unchanged. Earlier13aa receive and3aae upload reports retain their original hashes.
+
 ## Resumable upload backend — 2026-10-12
 
 Final real PostgreSQL/WSL run00aca3 exits0: TestResumableMediaTransfers, TestUploadCancellationExpiryAndReserve and three existing media/avatar/collection regressions PASS. Linux test binary SHA256da6900fd382dc1c4febfc03c0c7d866e33aa6a4df2616fcc9281216c51ff64b0, pinned Go1.26.8. Temporary schema migration008, no main DB modification. Service-handler replacement preserves partial upload; out-of-order/exact retries, changed/session/owner denial, corrupted-part repair, final checksum/content freeze/idempotent completion, group-specific media binding, recipient access, cancellation/late-write fence, quotas/reserve and expiry/revocation cleanup pass.

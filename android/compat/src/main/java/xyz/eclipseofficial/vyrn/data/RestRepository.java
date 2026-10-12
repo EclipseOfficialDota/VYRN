@@ -100,6 +100,10 @@ public final class RestRepository implements Models.Repository {
         if(offset<0||offset>10*1024*1024||limit<1||limit>1024*1024)throw new IllegalArgumentException("avatar_range");
         return binaryForUser(owner,"GET","/v1/media/"+id,null,offset,limit);
     }
+    public void uploadPartForSession(String user,String session,String id,int part,byte[] bytes) throws Exception {
+        if(part<0||part>=8192||bytes.length<1||bytes.length>1024*1024||!java.util.UUID.fromString(id).toString().equals(id))throw new IllegalArgumentException("upload_part");
+        synchronized(vault.guard()){requireIdentity(vault.load(),user,session);binaryForUser(user,"PUT","/v1/media-uploads/"+id+"/parts/"+part,bytes,0,65536);}
+    }
     private byte[] binaryForUser(String owner,String method,String path,byte[] body,long offset,int limit) throws Exception {synchronized(vault.guard()){
         return binaryForUser(owner,method,path,body,offset,limit,null);
     }}

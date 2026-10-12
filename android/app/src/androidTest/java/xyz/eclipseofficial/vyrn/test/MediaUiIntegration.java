@@ -30,6 +30,57 @@ import xyz.eclipseofficial.vyrn.domain.Models;
 
 /** Real native file bubble/action/download; upload is an API fixture, not native Send. */
 final class MediaUiIntegration {
+    static void cancelUpload(Instrumentation instrumentation,Activity activity,JSONObject fixture,AuthUiIntegration.Check check) throws Exception {
+        AuthUiIntegration.registration(instrumentation,activity,fixture,check);int account=UserConfig.selectedAccount;VyrnBridge bridge=VyrnBridge.forAccount(account);VyrnBridge.UploadIdentity identity=VyrnBridge.captureUploadIdentity(account);
+        File source=new File(instrumentation.getTargetContext().getCacheDir(),"vyrn-native-cancel-upload.bin");byte[] bytes=new byte[16*1024*1024+113];for(int i=0;i<bytes.length;i++)bytes[i]=(byte)i;Files.write(source.toPath(),bytes);String path=source.getAbsolutePath();
+        CompletableFuture<Long> cancelled=new CompletableFuture<>();java.util.concurrent.atomic.AtomicLong captured=new java.util.concurrent.atomic.AtomicLong();java.util.concurrent.atomic.AtomicBoolean completed=new java.util.concurrent.atomic.AtomicBoolean();
+        org.telegram.messenger.NotificationCenter.NotificationCenterDelegate observer=(event,selected,args)->{
+            if(selected!=account||args.length==0||!path.equals(args[0]))return;
+            if(event==org.telegram.messenger.NotificationCenter.fileUploaded)completed.set(true);
+            else if(event==org.telegram.messenger.NotificationCenter.fileUploadFailed)cancelled.complete(captured.get());
+            else if(event==org.telegram.messenger.NotificationCenter.fileUploadProgressChanged&&((Number)args[1]).longValue()>0&&captured.get()==0){
+                try{java.lang.reflect.Field mapField=FileLoader.class.getDeclaredField("uploadOperationPaths");mapField.setAccessible(true);Object operation=((java.util.Map<?,?>)mapField.get(FileLoader.getInstance(account))).get(path);if(operation==null)return;java.lang.reflect.Field idField=org.telegram.messenger.FileUploadOperation.class.getDeclaredField("currentFileId");idField.setAccessible(true);long id=idField.getLong(operation);if(id!=0&&captured.compareAndSet(0,id))FileLoader.getInstance(account).cancelFileUpload(path,false);}catch(Exception failure){cancelled.completeExceptionally(new AssertionError(failure));}
+            }
+        };
+        instrumentation.runOnMainSync(()->{org.telegram.messenger.NotificationCenter center=org.telegram.messenger.NotificationCenter.getInstance(account);center.addObserver(observer,org.telegram.messenger.NotificationCenter.fileUploaded);center.addObserver(observer,org.telegram.messenger.NotificationCenter.fileUploadFailed);center.addObserver(observer,org.telegram.messenger.NotificationCenter.fileUploadProgressChanged);});
+        long id;try{FileLoader.getInstance(account).uploadFile(path,false,false,ConnectionsManager.FileTypeFile);id=cancelled.get(60,TimeUnit.SECONDS);}finally{instrumentation.runOnMainSync(()->{org.telegram.messenger.NotificationCenter center=org.telegram.messenger.NotificationCenter.getInstance(account);center.removeObserver(observer,org.telegram.messenger.NotificationCenter.fileUploaded);center.removeObserver(observer,org.telegram.messenger.NotificationCenter.fileUploadFailed);center.removeObserver(observer,org.telegram.messenger.NotificationCenter.fileUploadProgressChanged);});}
+        check.verify(id!=0&&!completed.get(),"upload_actual_native_cancel_after_progress_before_completion");String upload=VyrnBridge.uploadId(identity,id);long deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(30);boolean fenced=false;
+        while(System.nanoTime()<deadline){JSONObject status=(JSONObject)bridge.repository.requestForSession(identity.owner,identity.session,"GET","/v1/media-uploads/"+upload,null);if(status.getString("state").equals("cancelled")&&status.getJSONArray("parts").length()==0){fenced=true;break;}Thread.sleep(100);}
+        check.verify(fenced,"upload_actual_native_cancel_hook_fences_and_cleans_server");boolean rejected=false;try{bridge.repository.uploadPartForSession(identity.owner,identity.session,upload,0,new byte[]{1});}catch(RestRepository.ApiException failure){rejected=failure.status==409;}check.verify(rejected,"upload_cancelled_native_id_rejects_late_part");check.verify(source.isFile()&&source.length()==bytes.length,"upload_native_cancel_preserves_original_source");Files.deleteIfExists(source.toPath());
+    }
+    static void upload(Instrumentation instrumentation,Activity activity,JSONObject fixture,AuthUiIntegration.Check check,boolean big) throws Exception {
+        AuthUiIntegration.registration(instrumentation,activity,fixture,check);
+        int account=UserConfig.selectedAccount;VyrnBridge bridge=VyrnBridge.forAccount(account);String owner=bridge.repository.me().id;
+        VyrnBridge.UploadIdentity identity=VyrnBridge.captureUploadIdentity(account);check.verify(VyrnBridge.currentUploadIdentity(account,identity),"upload_native_origin_captured");
+        byte[] bytes=new byte[(big?12:2)*1024*1024+113];for(int i=0;i<bytes.length;i++)bytes[i]=(byte)(i*17);
+        File source=new File(instrumentation.getTargetContext().getCacheDir(),big?"vyrn-native-big-upload.bin":"vyrn-native-upload.bin");Files.write(source.toPath(),bytes);String path=source.getAbsolutePath();
+        CompletableFuture<TLRPC.InputFile> done=new CompletableFuture<>();java.util.concurrent.atomic.AtomicLong progress=new java.util.concurrent.atomic.AtomicLong();
+        org.telegram.messenger.NotificationCenter.NotificationCenterDelegate observer=(event,selected,args)->{
+            if(selected!=account||args.length==0||!path.equals(args[0]))return;
+            if(event==org.telegram.messenger.NotificationCenter.fileUploaded){if(args[1] instanceof TLRPC.InputFile)done.complete((TLRPC.InputFile)args[1]);else done.completeExceptionally(new AssertionError("upload_not_plain_file"));}
+            else if(event==org.telegram.messenger.NotificationCenter.fileUploadFailed)done.completeExceptionally(new AssertionError("native_upload_failed"));
+            else if(event==org.telegram.messenger.NotificationCenter.fileUploadProgressChanged)progress.accumulateAndGet(((Number)args[1]).longValue(),Math::max);
+        };
+        instrumentation.runOnMainSync(()->{org.telegram.messenger.NotificationCenter center=org.telegram.messenger.NotificationCenter.getInstance(account);center.addObserver(observer,org.telegram.messenger.NotificationCenter.fileUploaded);center.addObserver(observer,org.telegram.messenger.NotificationCenter.fileUploadFailed);center.addObserver(observer,org.telegram.messenger.NotificationCenter.fileUploadProgressChanged);});
+        TLRPC.InputFile input;
+        try{FileLoader.getInstance(account).uploadFile(path,false,false,ConnectionsManager.FileTypeFile);input=done.get(120,TimeUnit.SECONDS);}finally{instrumentation.runOnMainSync(()->{org.telegram.messenger.NotificationCenter center=org.telegram.messenger.NotificationCenter.getInstance(account);center.removeObserver(observer,org.telegram.messenger.NotificationCenter.fileUploaded);center.removeObserver(observer,org.telegram.messenger.NotificationCenter.fileUploadFailed);center.removeObserver(observer,org.telegram.messenger.NotificationCenter.fileUploadProgressChanged);});}
+        check.verify(input.id!=0&&input.parts>0&&(big?input instanceof TLRPC.TL_inputFileBig:input instanceof TLRPC.TL_inputFile),big?"upload_original_big_worker_complete":"upload_original_small_worker_complete");
+        check.verify(progress.get()==bytes.length,"upload_original_progress_reaches_full_size");
+        String id=VyrnBridge.uploadId(identity,input.id);JSONObject status=(JSONObject)bridge.repository.requestForSession(owner,identity.session,"GET","/v1/media-uploads/"+id,null);
+        check.verify(status.getString("state").equals("open")&&status.getJSONArray("parts").length()==input.parts,"upload_original_all_native_parts_persisted");
+        JSONObject group=(JSONObject)bridge.repository.requestForSession(owner,identity.session,"POST","/v1/conversations",new JSONObject().put("kind","group").put("title","Native uploaded file").put("members",new org.json.JSONArray()));
+        JSONObject request=new JSONObject().put("conversation_id",group.getString("id")).put("kind","file").put("filename",input.name).put("part_count",input.parts).put("md5",input.md5_checksum==null?"":input.md5_checksum);
+        JSONObject complete=(JSONObject)bridge.repository.requestForSession(owner,identity.session,"POST","/v1/media-uploads/"+id+"/complete",request);
+        check.verify(complete.getLong("size")==bytes.length&&complete.getString("sha256").equals(hex(MessageDigest.getInstance("SHA-256").digest(bytes))),"upload_original_worker_final_bytes_and_hash");
+        JSONObject repeat=(JSONObject)bridge.repository.requestForSession(owner,identity.session,"POST","/v1/media-uploads/"+id+"/complete",request);check.verify(repeat.getString("id").equals(complete.getString("id")),"upload_completion_replay_same_media_id");
+        VyrnBridge.cancelUpload(account,identity,input.id);long deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(30);boolean cancelled=false;
+        while(System.nanoTime()<deadline){JSONObject value=(JSONObject)bridge.repository.requestForSession(owner,identity.session,"GET","/v1/media-uploads/"+id,null);if(value.getString("state").equals("cancelled")&&value.getJSONArray("parts").length()==0){cancelled=true;break;}Thread.sleep(100);}
+        check.verify(cancelled,"upload_adapter_cancel_fence_and_part_cleanup");check.verify(bridge.repository.attachmentForUser(owner,complete.getString("id")).size==bytes.length,"upload_cancel_preserves_completed_media");
+        check.verify(!VyrnBridge.uploadPreferenceKey(identity,"same-file").equals(VyrnBridge.uploadPreferenceKey(newIdentityForTest(identity),"same-file")),"upload_saved_preferences_separate_session");
+        Files.deleteIfExists(source.toPath());
+    }
+    private static String hex(byte[] value){StringBuilder result=new StringBuilder();for(byte b:value)result.append(String.format(java.util.Locale.ROOT,"%02x",b&255));return result.toString();}
+    private static VyrnBridge.UploadIdentity newIdentityForTest(VyrnBridge.UploadIdentity identity) throws Exception {java.lang.reflect.Constructor<VyrnBridge.UploadIdentity> constructor=VyrnBridge.UploadIdentity.class.getDeclaredConstructor(long.class,String.class,String.class);constructor.setAccessible(true);return constructor.newInstance(identity.origin,identity.owner,UUID.randomUUID().toString());}
     private static void mediaIds(Instrumentation instrumentation,AuthUiIntegration.Check check) throws Exception {
         android.content.Context context=instrumentation.getTargetContext();String owner=UUID.randomUUID().toString(),id=UUID.randomUUID().toString();
         File legacy=context.getDatabasePath("vyrn_ids_9006.db");check.verify(!legacy.exists(),"media_legacy_fixture_is_disposable");

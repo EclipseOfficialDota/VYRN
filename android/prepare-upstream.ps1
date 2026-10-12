@@ -247,6 +247,22 @@ Edit 'TMessagesProj/src/main/java/org/telegram/ui/Components/CodepointsLengthInp
  $end+='            return source.subSequence(start, keep);'.Length
  $t.Substring(0,$start)+'            return source.subSequence(start, Character.offsetByCodePoints(source, start, keep));'+$t.Substring($end)
 }
+Edit 'TMessagesProj/src/main/java/org/telegram/messenger/FileUploadOperation.java' {
+ param($t)
+ $t=(& git -c "safe.directory=$($upstream.Replace('\','/'))" -C $upstream show "${pin}:TMessagesProj/src/main/java/org/telegram/messenger/FileUploadOperation.java") -join "`n"
+ $field='    private long currentFileId;'
+ $constructor='        currentAccount = instance;'
+ $key='fileKey = Utilities.MD5(uploadingFilePath + (isEncrypted ? "enc" : ""));'
+ $send='sendRequest(finalRequest, (response, error) -> {'
+ foreach($marker in @($field,$constructor,$key,$send,'        state = 2;')){if(!$t.Contains($marker)){throw 'Pinned native upload marker missing'}}
+ $t=$t.Replace($field,$field+"`n    private final xyz.eclipseofficial.vyrn.compat.VyrnBridge.UploadIdentity vyrnUploadIdentity;")
+ $t=$t.Replace($constructor,$constructor+"`n        vyrnUploadIdentity = xyz.eclipseofficial.vyrn.compat.VyrnBridge.captureUploadIdentity(instance);")
+ $t=$t.Replace($key,'fileKey = xyz.eclipseofficial.vyrn.compat.VyrnBridge.uploadPreferenceKey(vyrnUploadIdentity, Utilities.MD5(uploadingFilePath + (isEncrypted ? "enc" : "")));')
+ $t=$t.Replace($send,'sendRequest(xyz.eclipseofficial.vyrn.compat.VyrnBridge.uploadRequest(currentAccount, finalRequest, vyrnUploadIdentity, isEncrypted), (response, error) -> {'+"`n            if (!xyz.eclipseofficial.vyrn.compat.VyrnBridge.currentUploadIdentity(currentAccount, vyrnUploadIdentity)) { state = 4; cleanup(); return; }")
+ $t=$t.Replace('        state = 2;',"        state = 2;`n        xyz.eclipseofficial.vyrn.compat.VyrnBridge.cancelUpload(currentAccount, vyrnUploadIdentity, currentFileId);")
+ $t=$t.Replace('delegate.didFailedUploadingFile(this);','if (xyz.eclipseofficial.vyrn.compat.VyrnBridge.currentUploadIdentity(currentAccount, vyrnUploadIdentity)) delegate.didFailedUploadingFile(this);')
+ $t
+}
 Edit 'TMessagesProj/src/main/java/org/telegram/messenger/FileLoadOperation.java' {
  param($t)
  $t=(& git -c "safe.directory=$($upstream.Replace('\','/'))" -C $upstream show "${pin}:TMessagesProj/src/main/java/org/telegram/messenger/FileLoadOperation.java") -join "`n"
