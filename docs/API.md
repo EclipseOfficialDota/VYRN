@@ -1,5 +1,18 @@
 # VYRN Core API v1
 
+## Resumable media uploads
+
+All four `/v1/media-uploads` endpoints require authentication. Upload UUIDs belong to the creating user and session; refresh of that session is allowed, another session returns409. This version completes only into group conversations; private completion returns422 `e2ee_required`.
+
+| Endpoint | Contract |
+|---|---|
+| PUT `/v1/media-uploads/{id}/parts/{part}` | Raw bytes with exact Content-Length,1–1048576 bytes, index0–8191. Out-of-order parts supported.204 means persisted; exact replay is idempotent, changed bytes409. |
+| GET `/v1/media-uploads/{id}` | Owner-session status: state, final_parts and ordered part/size/SHA256 list; never storage keys. |
+| POST `/v1/media-uploads/{id}/complete` | JSON conversation_id, kind, filename, part_count and optional MD5 transport checksum. Requires every part0..count−1, verifies stored part SHA256, assembles/fsyncs final bytes and returns media id/size/SHA256. First201; exact repeat200 with the same media UUID. Finalized content cannot be extended. Each group gets its own bound media UUID. |
+| DELETE `/v1/media-uploads/{id}` | Durable cancellation fence, including cancellation before first part.204; rejects late writes/finalization. Deletes staged parts but preserves already completed/published media. |
+
+Completed and staged bytes count toward the same owner quota. Disk reserve is shared with raw uploads. At most32 open uploads per owner; total file≤250MiB, voice≤100MiB. Workers cancel and release parts after24 hours or session revocation; cancellation records remain so old clients cannot resurrect them. Exact part replays can repair missing/damaged staged files. Image completion uses the existing image validator. A lost database COMMIT response retains potentially referenced bytes; unreferenced files from an ambiguous commit still need filesystem reconciliation before full operations acceptance. Android upload/send/progress/cancel/restart integration and encrypted private media remain unfinished.
+
 ## Device public keys
 
 `PUT /v1/me/device-keys` accepts only the authenticated session's device. Body: `expected_version` (required,0 for first publication), `registration_id` (1–16380), `identity_key` (canonical base64,33-byte Signal EC key), `signed_prekey`, `kyber_prekey` and up to100 `prekeys`. Each record contains `id` (0–16777215) and `public_key`; signed EC and last-resort Kyber1024 records also require a64-byte base64 `signature`. Kyber public serialization is1569 bytes with type8. The server validates wire shape and ownership; **libsignal on the receiver verifies signatures**. No private material is accepted.

@@ -22,6 +22,9 @@ func (s *Server) RunWorkers(ctx context.Context) {
 	}
 }
 func (s *Server) maintenance(ctx context.Context) error {
+	if err := s.expireUploads(ctx); err != nil {
+		return err
+	}
 	tx, err := s.db.Begin(ctx)
 	if err != nil {
 		return err

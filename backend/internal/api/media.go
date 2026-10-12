@@ -94,7 +94,7 @@ func (s *Server) upload(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	var used int64
-	if tx.QueryRow(ctx, `SELECT COALESCE(sum(size),0) FROM media WHERE owner_id=$1`, p.UserID).Scan(&used) != nil {
+	if used, err = mediaUsage(ctx, tx, p.UserID); err != nil {
 		s.internal(w)
 		return
 	}
@@ -102,27 +102,16 @@ func (s *Server) upload(w http.ResponseWriter, r *http.Request) {
 		fail(w, 507, "quota_exceeded")
 		return
 	}
-	s.storageMu.Lock()
-	free, err := storage.FreeBytes(s.cfg.MediaDir)
-	if err != nil {
-		s.storageMu.Unlock()
-		s.internal(w)
-		return
-	}
-	// Reserve the full upload before writing; simultaneous requests must not each
-	// spend the same free disk space. Subtraction avoids uint64 overflow.
-	if free < s.cfg.MinFreeBytes || free-s.cfg.MinFreeBytes < s.reservedBytes || free-s.cfg.MinFreeBytes-s.reservedBytes < uint64(r.ContentLength) {
-		s.storageMu.Unlock()
+	release, err := s.reserveMediaBytes(r.ContentLength)
+	if errors.Is(err, errStorageReserve) {
 		fail(w, 507, "storage_reserve")
 		return
 	}
-	s.reservedBytes += uint64(r.ContentLength)
-	s.storageMu.Unlock()
-	defer func() {
-		s.storageMu.Lock()
-		s.reservedBytes -= uint64(r.ContentLength)
-		s.storageMu.Unlock()
-	}()
+	if err != nil {
+		s.internal(w)
+		return
+	}
+	defer release()
 	id := uuid.NewString()
 	path := filepath.Join(s.cfg.MediaDir, id)
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
@@ -262,6 +251,22 @@ func (s *Server) deleteAvatar(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(204)
+}
+
+var errStorageReserve = errors.New("storage_reserve")
+
+func (s *Server) reserveMediaBytes(size int64) (func(), error) {
+	s.storageMu.Lock()
+	defer s.storageMu.Unlock()
+	free, err := storage.FreeBytes(s.cfg.MediaDir)
+	if err != nil {
+		return nil, err
+	}
+	if size < 1 || free < s.cfg.MinFreeBytes || free-s.cfg.MinFreeBytes < s.reservedBytes || free-s.cfg.MinFreeBytes-s.reservedBytes < uint64(size) {
+		return nil, errStorageReserve
+	}
+	s.reservedBytes += uint64(size)
+	return func() { s.storageMu.Lock(); s.reservedBytes -= uint64(size); s.storageMu.Unlock() }, nil
 }
 
 type mediaDetails struct {

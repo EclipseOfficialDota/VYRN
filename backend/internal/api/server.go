@@ -128,6 +128,10 @@ func (s *Server) Handler() http.Handler {
 	secure("POST /v1/media", s.upload)
 	secure("GET /v1/media/{id}", s.download)
 	secure("GET /v1/media/{id}/metadata", s.mediaMetadata)
+	secure("PUT /v1/media-uploads/{id}/parts/{part}", s.uploadPart)
+	secure("GET /v1/media-uploads/{id}", s.uploadStatus)
+	secure("POST /v1/media-uploads/{id}/complete", s.completeUpload)
+	secure("DELETE /v1/media-uploads/{id}", s.cancelUpload)
 	secure("POST /v1/admin/unlock", s.adminUnlock)
 	admin := func(pattern string, fn http.HandlerFunc) { mux.Handle(pattern, s.requireAuth(s.requireAdmin(fn))) }
 	admin("GET /v1/admin/dashboard", s.adminDashboard)

@@ -1,3 +1,9 @@
+## Resumable upload backend — 2026-10-12
+
+Final real PostgreSQL/WSL run00aca3 exits0: TestResumableMediaTransfers, TestUploadCancellationExpiryAndReserve and three existing media/avatar/collection regressions PASS. Linux test binary SHA256da6900fd382dc1c4febfc03c0c7d866e33aa6a4df2616fcc9281216c51ff64b0, pinned Go1.26.8. Temporary schema migration008, no main DB modification. Service-handler replacement preserves partial upload; out-of-order/exact retries, changed/session/owner denial, corrupted-part repair, final checksum/content freeze/idempotent completion, group-specific media binding, recipient access, cancellation/late-write fence, quotas/reserve and expiry/revocation cleanup pass.
+
+Native upload/send/progress/cancel/restart, private encrypted files and actual server process/power-loss windows remain unverified. Ambiguous COMMIT preserves potentially referenced files; unreferenced filesystem orphan reconciliation remains. No deployment/local running-Core/normal APK change; old evidence retains original hashes.
+
 ## Native incoming group file receive — 2026-10-12
 
 media-ui16801 exits0/37 checks, report2026-10-12T07:25:12.1931289+03:30, APK13aa3915b991c5d02d7db63af3eadde22b58bf8a1bf5b7c6354e178dc0f4d990, no attach retry. Incoming bubble from a distinct API-fixture sender, actual download control/original worker,2MiB+113 exact bytes/hash, descriptor/native document hash, delete/revocation and shared completion-guard altered-copy/unbound-ID/account checks pass. v4→5 IdMap migration preserves native user7/next chat8, long media IDs stable across reopen/fresh DB and separate owners. Build88365 exits0/1m55s; final26780 exits0/40s.
