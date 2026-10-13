@@ -107,3 +107,7 @@ Group/private batch deletion accepts `{"ids":["message-uuid", "another-uuid"]}`.
 `POST /v1/admin/unlock` with a TOTP `code` returns a five-minute `admin_token`. Subsequent administrator routes require `X-VYRN-Admin-Token` as well as the normal access token. Routes: dashboard, users, groups, invites, audit; user disable, password reset, session revocation and invite creation/revocation. Public API virtual hosts block all `/v1/admin/*`; use the restricted administrator hostname.
 
 List pagination currently caps conversations at 500 and administrator lists at 250. Complete cursor pagination for these collections remains an acceptance gap; do not infer full production API coverage from this table.
+
+### Static group image metadata
+
+For unencrypted kind=image, GET /v1/media/{id}/metadata also returns actual width and height (1..4096) and image/jpeg or image/png. Direct uploads and resumable completion fully validate the image before publication; malformed/truncated input returns400 invalid_image. Encrypted image bytes stay opaque and have no dimension fields. The existing owner/live-message member access boundary is unchanged. Native photo UI integration and production deployment of this contract remain pending.

@@ -459,7 +459,7 @@ func (s *Server) completeUpload(w http.ResponseWriter, r *http.Request) {
 	}
 	contentType := "application/octet-stream"
 	if in.Kind == "image" {
-		config, format, e := avatarImage(path, false)
+		config, format, e := avatarImage(path, true)
 		if e != nil || config.Width < 1 {
 			fail(w, 400, "invalid_image")
 			return

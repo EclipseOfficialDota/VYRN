@@ -954,3 +954,9 @@ Report artifacts/android-registration-ui.json, local app SHA256bd9c246063ff6d3fd
 Next concrete gap from source inspection: native MessagesController.performLogout(1) sends TL_auth_logOut and clears native config unconditionally, while VyrnBridge has no matching logout endpoint mapping. This does not prove VYRN vault/session revocation. Implement account/session-bound logout and verify its actual UI/error/offline behavior, then session-management and two-device flows. Overall objective remains incomplete.
 
 Final normal ARM64/ARMv7/Universal Debug builds completed2m36s; all three signature/package/minAPI/ABI/native-library/TLS-policy checks pass. ARM64 SHA256f35adbb65ad269c9de8299b7c4ab5066e3c9cba571f6d90b04124998ec98a84f. No local CA included; physical installation/release and complete lifecycle remain pending.
+
+## Group image descriptor and validation — 2026-10-13
+
+Both direct unencrypted image uploads and resumable image completion fully decode JPEG/PNG after the existing 4096-by-4096 dimension bound. Truncated images whose headers still decode are rejected before publishing media. Authenticated image metadata now reports actual width/height and detected MIME, preserving live-message membership and hash-bound download rules. Encrypted uploads remain opaque.
+
+PostgreSQL integration passed TestImageMediaDimensionsAndValidation (PNG/JPEG, direct/resumable: four subtests), TestAvatarImagesMetadataAndAccess and TestResumableMediaTransfers. New checks cover truncated-body rejection, exact dimensions/MIME/SHA/bytes, no published row for invalid images, unpublished and outsider denial, and loss of recipient metadata/byte access after message deletion. Tests used isolated schemas on local WSL PostgreSQL, cleaned by the fixture. No production rollout or native photo UI acceptance is claimed; native photo send/render/download integration remains pending.

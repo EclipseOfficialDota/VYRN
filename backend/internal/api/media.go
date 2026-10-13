@@ -142,10 +142,14 @@ func (s *Server) upload(w http.ResponseWriter, r *http.Request) {
 		conv = conversation
 	}
 	contentType := "application/octet-stream"
-	if kind == "avatar" {
+	if kind == "avatar" || kind == "image" && !encrypted {
 		config, format, imageErr := avatarImage(path, true)
 		if imageErr != nil || config.Width < 1 {
-			fail(w, 400, "invalid_avatar_image")
+			if kind == "avatar" {
+				fail(w, 400, "invalid_avatar_image")
+			} else {
+				fail(w, 400, "invalid_image")
+			}
 			return
 		}
 		contentType = "image/" + format
@@ -159,7 +163,7 @@ func (s *Server) upload(w http.ResponseWriter, r *http.Request) {
 	respond(w, 201, map[string]any{"id": id, "size": size, "sha256": hex.EncodeToString(hash.Sum(nil))})
 }
 
-// Bound decoded memory before fully validating a static profile image.
+// Bound decoded memory before fully validating a static image.
 func avatarImage(path string, validate bool) (image.Config, string, error) {
 	f, err := os.Open(path)
 	if err != nil {
@@ -277,6 +281,8 @@ type mediaDetails struct {
 	Size         int64     `json:"size"`
 	SHA256       string    `json:"sha256"`
 	Encrypted    bool      `json:"encrypted"`
+	Width        int       `json:"width,omitempty"`
+	Height       int       `json:"height,omitempty"`
 	CreatedAt    time.Time `json:"created_at"`
 	Conversation *string   `json:"conversation_id"`
 	storageKey   string
@@ -313,6 +319,14 @@ func (s *Server) mediaMetadata(w http.ResponseWriter, r *http.Request) {
 	if err != nil || !info.Mode().IsRegular() || info.Size() != value.Size {
 		fail(w, 404, "not_found")
 		return
+	}
+	if value.Kind == "image" && !value.Encrypted {
+		config, format, imageErr := avatarImage(path, false)
+		if imageErr != nil || value.ContentType != "image/"+format {
+			fail(w, 404, "not_found")
+			return
+		}
+		value.Width, value.Height = config.Width, config.Height
 	}
 	respond(w, 200, value)
 }
