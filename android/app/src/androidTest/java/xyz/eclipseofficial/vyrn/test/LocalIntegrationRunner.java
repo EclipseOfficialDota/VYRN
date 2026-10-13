@@ -89,8 +89,8 @@ public final class LocalIntegrationRunner extends Instrumentation {
             if(!boundedChatStartup)waitForIdleSync();
             if(phase.equals("media-cancel-prepare")||phase.equals("media-cancel-recover")){
                 stage="media_durable_cancel";MediaUiIntegration.durableCancel(this,foreground,read("vyrn-test-fixture.json"),(condition,name)->{check(condition,name);passed.put(name);},phase.equals("media-cancel-recover"));
-            }else if(phase.equals("media-send-ui")||phase.equals("media-send-member-ui")||phase.equals("media-send-offline-ui")||phase.equals("media-send-part-ack-ui")){
-                stage="media_send_ui";MediaUiIntegration.sendUi(this,foreground,read("vyrn-test-fixture.json"),(condition,name)->{check(condition,name);passed.put(name);},phase.equals("media-send-member-ui"),phase.equals("media-send-offline-ui"),phase.equals("media-send-part-ack-ui"));
+            }else if(phase.equals("media-send-ui")||phase.equals("media-send-member-ui")||phase.equals("media-send-offline-ui")||phase.equals("media-send-part-ack-ui")||phase.equals("media-cancel-chat-ui")){
+                stage="media_send_ui";MediaUiIntegration.sendUi(this,foreground,read("vyrn-test-fixture.json"),(condition,name)->{check(condition,name);passed.put(name);},phase.equals("media-send-member-ui"),phase.equals("media-send-offline-ui")||phase.equals("media-cancel-chat-ui"),phase.equals("media-send-part-ack-ui"),phase.equals("media-cancel-chat-ui"));
             }else if(phase.equals("media-upload-cancel")){
                 stage="media_upload_cancel";MediaUiIntegration.cancelUpload(this,foreground,read("vyrn-test-fixture.json"),(condition,name)->{check(condition,name);passed.put(name);});
             }else if(phase.equals("media-upload")||phase.equals("media-upload-big")){

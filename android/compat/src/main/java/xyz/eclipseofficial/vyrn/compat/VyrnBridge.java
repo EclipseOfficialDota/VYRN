@@ -19,6 +19,7 @@ import org.telegram.messenger.NotificationCenter;
 import org.telegram.messenger.MessagesStorage;
 import org.telegram.messenger.MessageObject;
 import org.telegram.messenger.SendMessagesHelper;
+import org.telegram.messenger.FileLoader;
 import org.telegram.messenger.AndroidUtilities;
 import org.telegram.messenger.UserConfig;
 import org.telegram.messenger.Utilities;
@@ -254,10 +255,12 @@ public final class VyrnBridge {
                 if(object.currentAccount!=account||owner==0||session==null||device==null||!session.equals(device[1])||isLoggingOut(account)||!samePrivatePending(object,object.messageOwner,local,dialog,owner,date,random)){bridge.privateCancelFailure(owner,session);continue;}
                 execute(()->{try{String peer=bridge.ids.remote("user",dialog);bridge.requirePrivateOrigin(device[0],session,owner,peer,dialog);if(isLoggingOut(account))throw new SecurityException("private_origin_changed");SignalMessages.requestNativeCancellation(ApplicationLoader.applicationContext,bridge.repository,device[0],session,device[2],account,local,dialog,random,date,peer);}catch(Exception unavailable){bridge.privateCancelFailure(owner,session);}});continue;
             }
-            if(object==null || object.messageOwner==null || object.getId()>=0 || object.getDialogId()>=0 || object.messageOwner.random_id==0 || object.type!=MessageObject.TYPE_TEXT || object.scheduled || object.isQuickReply() || MessageObject.isWelcomeMessage(object.messageOwner)){other.add(object);continue;}
+            if(object==null || object.messageOwner==null || object.getId()>=0 || object.getDialogId()>=0 || object.messageOwner.random_id==0 || object.type!=MessageObject.TYPE_TEXT&&object.type!=MessageObject.TYPE_FILE || object.scheduled || object.isQuickReply() || MessageObject.isWelcomeMessage(object.messageOwner)){other.add(object);continue;}
             handled=true;final int localId=object.getId(),token=object.messageOwner.reqId;final long dialog=object.getDialogId(),random=object.messageOwner.random_id;final String text=object.messageOwner.message;
-            execute(()->{try{VyrnBridge bridge=forAccount(account);String user=bridge.repository.vault.load().getString("user_id");String client=UUID.nameUUIDFromBytes((user+":"+random).getBytes(StandardCharsets.UTF_8)).toString();
+            final boolean document=object.type==MessageObject.TYPE_FILE;final String path=object.messageOwner.attachPath;final UploadIdentity origin=captureUploadIdentity(account);
+            execute(()->{try{VyrnBridge bridge=forAccount(account);if(!currentUploadIdentity(account,origin))throw new SecurityException("account_changed");String user=origin.owner;String client=UUID.nameUUIDFromBytes((user+":"+random).getBytes(StandardCharsets.UTF_8)).toString();
                 bridge.outbox.cancelFromUi(user,client,bridge.ids.remote("conversation",-dialog),text,localId,dialog,random);
+                if(document&&path!=null&&!path.isEmpty())FileLoader.getInstance(account).cancelFileUpload(path,false);
                 cancelRequest(account,token,null);
             }catch(Exception unavailable){/* Preserve the visible message unless cancellation is proved. */}});
         }
