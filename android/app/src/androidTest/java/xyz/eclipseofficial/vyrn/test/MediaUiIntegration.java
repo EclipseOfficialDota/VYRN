@@ -30,6 +30,29 @@ import xyz.eclipseofficial.vyrn.domain.Models;
 
 /** Native file selection/send and receive/download scenarios; group setup uses API fixtures. */
 final class MediaUiIntegration {
+    static void durableCancel(Instrumentation instrumentation,Activity activity,JSONObject fixture,AuthUiIntegration.Check check,boolean recover) throws Exception {
+        android.content.Context context=instrumentation.getTargetContext();File evidence=new File(context.getFilesDir(),"vyrn-test-transfer-cancel.json");
+        if(!recover){
+            AuthUiIntegration.registration(instrumentation,activity,fixture,check);int account=UserConfig.selectedAccount;VyrnBridge bridge=VyrnBridge.forAccount(account);VyrnBridge.UploadIdentity origin=VyrnBridge.captureUploadIdentity(account);
+            long nativeId=java.util.concurrent.ThreadLocalRandom.current().nextLong(1,Long.MAX_VALUE);String upload=VyrnBridge.uploadId(origin,nativeId);
+            bridge.repository.uploadPartForSession(origin.owner,origin.session,upload,0,new byte[]{1,2,3});
+            JSONObject initial=(JSONObject)bridge.repository.requestForSession(origin.owner,origin.session,"GET","/v1/media-uploads/"+upload,null);check.verify(initial.getJSONArray("parts").length()==1,"cancel_fixture_real_staged_part_exists");
+            AuthUiIntegration.networkStep(instrumentation,activity,"offline-load",check);VyrnBridge.cancelUpload(account,origin,nativeId);
+            xyz.eclipseofficial.vyrn.data.UploadCancellations journal=new xyz.eclipseofficial.vyrn.data.UploadCancellations(context,account);
+            check.verify(journal.contains(origin.owner,origin.session,upload),"cancel_offline_persisted_before_network_ack");
+            check.verify(!journal.contains(origin.owner,UUID.randomUUID().toString(),upload),"cancel_journal_separates_origin_session");
+            Files.write(evidence.toPath(),new JSONObject().put("account",account).put("owner",origin.owner).put("session",origin.session).put("upload",upload).toString().getBytes(StandardCharsets.UTF_8));
+            Thread.sleep(2000);check.verify(journal.contains(origin.owner,origin.session,upload),"cancel_network_failure_keeps_durable_intent");
+        }else{
+            JSONObject saved=new JSONObject(new String(Files.readAllBytes(evidence.toPath()),StandardCharsets.UTF_8));int account=saved.getInt("account");VyrnBridge bridge=VyrnBridge.forAccount(account);String owner=saved.getString("owner"),session=saved.getString("session"),upload=saved.getString("upload");
+            check.verify(owner.equals(bridge.repository.vault.load().getString("user_id"))&&session.equals(bridge.repository.vault.cachedSession()),"cancel_cold_restores_original_user_and_session");
+            xyz.eclipseofficial.vyrn.data.UploadCancellations journal=new xyz.eclipseofficial.vyrn.data.UploadCancellations(context,account);check.verify(journal.contains(owner,session,upload),"cancel_intent_survives_actual_process_restart");
+            AuthUiIntegration.networkStep(instrumentation,activity,"online-retry",check);
+            long deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(40);boolean fenced=false;while(System.nanoTime()<deadline){JSONObject state=(JSONObject)bridge.repository.requestForSession(owner,session,"GET","/v1/media-uploads/"+upload,null);if(state.getString("state").equals("cancelled")&&state.getJSONArray("parts").length()==0&&!journal.contains(owner,session,upload)){fenced=true;break;}Thread.sleep(200);}
+            check.verify(fenced,"cancel_cold_worker_fences_transfer_and_removes_parts_after_ack");
+            boolean denied=false;try{bridge.repository.uploadPartForSession(owner,session,upload,0,new byte[]{1,2,3});}catch(RestRepository.ApiException failure){denied=failure.status==409;}check.verify(denied,"cancel_cold_fence_rejects_late_replay");Files.delete(evidence.toPath());
+        }
+    }
     static void sendUi(Instrumentation instrumentation,Activity activity,JSONObject fixture,AuthUiIntegration.Check check,boolean member,boolean offline,boolean ackLoss) throws Exception {
         AuthUiIntegration.registration(instrumentation,activity,fixture,check);
         int account=UserConfig.selectedAccount;RestRepository repository=VyrnBridge.forAccount(account).repository;String owner=repository.me().id;

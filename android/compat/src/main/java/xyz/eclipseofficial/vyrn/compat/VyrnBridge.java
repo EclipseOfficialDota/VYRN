@@ -72,7 +72,10 @@ public final class VyrnBridge {
         byte[] data=new byte[buffer.limit()];java.nio.ByteBuffer copy=buffer.buffer.duplicate();copy.position(0);copy.get(data);original.freeResources();return new UploadPartRequest(identity,data,part,id,encrypted);
     }
     public static void cancelUpload(int account,UploadIdentity identity,long id){
-        if(id==0)return;UPLOAD.execute(()->{if(!currentUploadIdentity(account,identity))return;try{forAccount(account).repository.requestForSession(identity.owner,identity.session,"DELETE","/v1/media-uploads/"+uploadId(identity,id),null);}catch(Exception failure){android.util.Log.w("VyrnBridge","upload_cancel_failure="+failure.getClass().getName());}});
+        if(id==0)return;VyrnBridge bridge=forAccount(account);
+        try{bridge.uploadCancellations.enqueue(identity.owner,identity.session,uploadId(identity,id));}
+        catch(Exception failure){android.util.Log.w("VyrnBridge","upload_cancel_storage_failure="+failure.getClass().getName());AndroidUtilities.runOnUIThread(()->{if(currentUploadIdentity(account,identity))android.widget.Toast.makeText(ApplicationLoader.applicationContext,"ذخیرهٔ درخواست لغو ممکن نشد؛ فضای دستگاه را بررسی کنید.",android.widget.Toast.LENGTH_LONG).show();});return;}
+        UPLOAD.execute(()->{try{bridge.uploadCancellations.drain(bridge.repository);}catch(Exception unavailable){/* Durable record remains for the account recovery worker. */}});
     }
     private static final ExecutorService LOCAL=Executors.newSingleThreadExecutor();
     private static final Map<Integer,VyrnBridge> INSTANCES=new HashMap<>();
@@ -214,6 +217,7 @@ public final class VyrnBridge {
     private final IdMap ids;
     private final OutboxSender outbox;
     private final RealtimeSync realtime;
+    private final xyz.eclipseofficial.vyrn.data.UploadCancellations uploadCancellations;
     public static int connectionState(int account){RealtimeSync.State state=forAccount(account).realtime.state();return state==RealtimeSync.State.CONNECTED?org.telegram.tgnet.ConnectionsManager.ConnectionStateConnected:state==RealtimeSync.State.CONNECTING?org.telegram.tgnet.ConnectionsManager.ConnectionStateConnecting:org.telegram.tgnet.ConnectionsManager.ConnectionStateWaitingForNetwork;}
     private final int account;
     private final AtomicBoolean uiReconciling=new AtomicBoolean();
@@ -223,7 +227,7 @@ public final class VyrnBridge {
     private volatile String privateKeysSession;
     private volatile long privateKeysOwner;
     private final Map<Long,String> privateConversations=new HashMap<>();
-    private VyrnBridge(int account){this.account=account;repository=new RestRepository(new TokenVault(ApplicationLoader.applicationContext,account));ids=new IdMap(ApplicationLoader.applicationContext,account);outbox=new OutboxSender(ApplicationLoader.applicationContext,account,repository);realtime=new RealtimeSync(ApplicationLoader.applicationContext,account,repository,this::applyEvent,()->AndroidUtilities.runOnUIThread(()->NotificationCenter.getInstance(account).postNotificationName(NotificationCenter.didUpdateConnectionState)));outbox.setUiListener(this::resolveUi);outbox.setRecoveryListener(this::recoverPrivateSends);}
+    private VyrnBridge(int account){this.account=account;repository=new RestRepository(new TokenVault(ApplicationLoader.applicationContext,account));ids=new IdMap(ApplicationLoader.applicationContext,account);uploadCancellations=new xyz.eclipseofficial.vyrn.data.UploadCancellations(ApplicationLoader.applicationContext,account);outbox=new OutboxSender(ApplicationLoader.applicationContext,account,repository);realtime=new RealtimeSync(ApplicationLoader.applicationContext,account,repository,this::applyEvent,()->AndroidUtilities.runOnUIThread(()->NotificationCenter.getInstance(account).postNotificationName(NotificationCenter.didUpdateConnectionState)));outbox.setUiListener(this::resolveUi);outbox.setRecoveryListener(()->{recoverPrivateSends();try{uploadCancellations.drain(repository);}catch(Exception unavailable){/* Preserve transfer cancellation until acknowledged. */}});}
     public boolean privateKeysReady(){return privateKeysOwner!=0&&privateKeysOwner==UserConfig.getInstance(account).getClientUserId()&&privateKeysSession!=null&&privateKeysSession.equals(repository.vault.cachedSession());}
     public synchronized java.util.concurrent.CompletableFuture<Void> preparePrivateKeys(){
         if(privateKeysReady())return java.util.concurrent.CompletableFuture.completedFuture(null);
