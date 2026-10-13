@@ -628,7 +628,7 @@ if (dialog_id != 0 && !DialogObject.isEncryptedDialog(dialog_id) && !editingMess
                 }
 '@)
 }
-foreach($aiFile in @('Components/CaptionPhotoViewer.java','Components/ChatAttachAlert.java','iv/RichEditor.java','iv/RichEditorToolbar.java','Components/AIEditorAlert.java','iv/RichAIComposeSheet.java')){
+foreach($aiFile in @('Components/CaptionPhotoViewer.java','Components/ChatAttachAlert.java','Components/ChatAttachAlertPhotoLayout.java','iv/RichEditor.java','iv/RichEditorToolbar.java','Components/AIEditorAlert.java','iv/RichAIComposeSheet.java')){
  $relative="TMessagesProj/src/main/java/org/telegram/ui/$aiFile"
  Edit $relative {
   param($t)
@@ -640,20 +640,49 @@ foreach($aiFile in @('Components/CaptionPhotoViewer.java','Components/ChatAttach
    $rows='            attachBotsEndRow = -1;'
    $photoInit='        photoLayout.onInit(videosEnabled, photosEnabled, documentsEnabled);'
    foreach($marker in @($init,$counts,$rows,$photoInit)){if(!$t.Contains($marker)){throw 'Pinned attachment capability marker missing'}}
-   $helper='    private boolean vyrnFilesOnly() { return baseFragment instanceof ChatActivity && ((ChatActivity) baseFragment).getCurrentChat() != null && avatarPicker == 0 && !storyMediaPicker && !isPollAttach && editingMessageObject == null; }'
+   $helper='    public boolean vyrnGroupAttachments() { return baseFragment instanceof ChatActivity && ((ChatActivity) baseFragment).getCurrentChat() != null && avatarPicker == 0 && !storyMediaPicker && !isPollAttach && editingMessageObject == null; }'
    $t=$t.Replace($init,$helper+"`n"+$init)
-   $t=$t.Replace($counts,$counts+"`n            if (vyrnFilesOnly()) return count;")
-   $t=$t.Replace($rows,$rows+"`n            if (vyrnFilesOnly()) { if (documentsEnabled) documentButton = buttonsCount++; super.notifyDataSetChanged(); return; }")
-   $t=$t.Replace($photoInit,'        if (vyrnFilesOnly()) { photosEnabled = videosEnabled = musicEnabled = pollsEnabled = todoEnabled = false; } else photoLayout.onInit(videosEnabled, photosEnabled, documentsEnabled);')
+   $t=$t.Replace($counts,$counts+"`n            if (vyrnGroupAttachments()) return count;")
+   $t=$t.Replace($rows,$rows+"`n            if (vyrnGroupAttachments()) { if (photosEnabled) galleryButton = buttonsCount++; if (documentsEnabled) documentButton = buttonsCount++; super.notifyDataSetChanged(); return; }")
+   $t=$t.Replace($photoInit,"        if (vyrnGroupAttachments()) { videosEnabled = musicEnabled = pollsEnabled = todoEnabled = false; /* ponytail: one photo until native album sends have a backend contract. */ setMaxSelectedPhotos(1, false); }`n"+$photoInit)
+   $maxPhotos='    public void setMaxSelectedPhotos(int value, boolean order) {'
+   if(!$t.Contains($maxPhotos)){throw 'Pinned photo selection limit marker missing'}
+   $t=$t.Replace($maxPhotos,$maxPhotos+"`n        if (vyrnGroupAttachments()) { value = 1; order = false; }")
    $layout='        if (isStoryLocationPicker || isBizLocationPicker || isLocationPicker) {'
    if(!$t.Contains($layout)){throw 'Pinned attachment initial layout marker missing'}
-   $t=$t.Replace($layout,"        if (vyrnFilesOnly()) { openDocumentsLayout(false); layoutToSet = documentLayout; selectedId = 4; typeButtonsAvailable = true; } else if (isStoryLocationPicker || isBizLocationPicker || isLocationPicker) {")
+   $t=$t.Replace($layout,"        if (vyrnGroupAttachments()) { openDocumentsLayout(false); layoutToSet = documentLayout; selectedId = 4; typeButtonsAvailable = true; } else if (isStoryLocationPicker || isBizLocationPicker || isLocationPicker) {")
    $docStart=$t.IndexOf('                } else if (num == 4) {')
    $docEnd=$t.IndexOf('                } else if (num == 5) {',$docStart)
    if($docStart -lt 0 -or $docEnd -lt 0){throw 'Pinned document permission markers missing'}
-   $section=$t.Substring($docStart,$docEnd-$docStart).Replace('if (Build.VERSION.SDK_INT >= 33) {','if (!vyrnFilesOnly() && Build.VERSION.SDK_INT >= 33) {').Replace('} else if (Build.VERSION.SDK_INT >= 23 &&','} else if (!vyrnFilesOnly() && Build.VERSION.SDK_INT >= 23 &&')
+   $section=$t.Substring($docStart,$docEnd-$docStart).Replace('if (Build.VERSION.SDK_INT >= 33) {','if (!vyrnGroupAttachments() && Build.VERSION.SDK_INT >= 33) {').Replace('} else if (Build.VERSION.SDK_INT >= 23 &&','} else if (!vyrnGroupAttachments() && Build.VERSION.SDK_INT >= 23 &&')
    $t=$t.Substring(0,$docStart)+$section+$t.Substring($docEnd)
-   $t=$t.Replace('err = !checkPhotoAndDocumentsPermission(mContext);','err = !vyrnFilesOnly() && !checkPhotoAndDocumentsPermission(mContext);')
+   $t=$t.Replace('err = !checkPhotoAndDocumentsPermission(mContext);','err = !vyrnGroupAttachments() && !checkPhotoAndDocumentsPermission(mContext);')
+   $t=$t.Replace('err = !checkPhotoAndCameraPermission(mContext);','err = vyrnGroupAttachments() ? ContextCompat.checkSelfPermission(mContext, Build.VERSION.SDK_INT >= 33 ? Manifest.permission.READ_MEDIA_IMAGES : Manifest.permission.READ_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED : !checkPhotoAndCameraPermission(mContext);')
+   $t=$t.Replace('allowLivePhotos = true;','allowLivePhotos = !vyrnGroupAttachments();')
+   $schedule='if (editingMessageObject == null && (chatActivity == null || !ChatObject.isMonoForum(chatActivity.getCurrentChat())) && ((chatActivity != null && chatActivity.canScheduleMessage()) || currentAttachLayout.canScheduleMessages())) {'
+   if(!$t.Contains($schedule)){throw 'Pinned attachment schedule marker missing'}
+   $t=$t.Replace($schedule,$schedule.Replace('if (editingMessageObject','if (!vyrnGroupAttachments() && editingMessageObject'))
+  }
+  if($aiFile -eq 'Components/ChatAttachAlertPhotoLayout.java'){
+   $cameraRequest='                            parentAlert.baseFragment.getParentActivity().requestPermissions(new String[]{Manifest.permission.CAMERA, Manifest.permission.READ_EXTERNAL_STORAGE}, 17);'
+   if(!$t.Contains($cameraRequest)){throw 'Pinned automatic camera permission marker missing'}
+   $t=$t.Replace($cameraRequest,$cameraRequest.Replace('parentAlert.baseFragment','if (!parentAlert.vyrnGroupAttachments()) parentAlert.baseFragment'))
+   $t=$t.Replace('new String[]{Manifest.permission.READ_MEDIA_VIDEO, Manifest.permission.READ_MEDIA_IMAGES}','parentAlert.vyrnGroupAttachments() ? new String[]{Manifest.permission.READ_MEDIA_IMAGES} : new String[]{Manifest.permission.READ_MEDIA_VIDEO, Manifest.permission.READ_MEDIA_IMAGES}')
+   $permissions='        return Build.VERSION.SDK_INT >= 23 && ('
+   $allMedia='    private boolean shouldLoadAllMedia() {'
+   foreach($marker in @($permissions,$allMedia)){if(!$t.Contains($marker)){throw 'Pinned gallery permission marker missing'}}
+   $t=$t.Replace($permissions,"        if (parentAlert.vyrnGroupAttachments() && Build.VERSION.SDK_INT >= 33) return activity == null || activity.checkSelfPermission(Manifest.permission.READ_MEDIA_IMAGES) != PackageManager.PERMISSION_GRANTED;`n"+$permissions)
+   $t=$t.Replace($allMedia,$allMedia+"`n        if (parentAlert.vyrnGroupAttachments()) return false;")
+   $schedulePhotos='    public boolean canScheduleMessages() {'
+   if(!$t.Contains($schedulePhotos)){throw 'Pinned photo schedule marker missing'}
+   $t=$t.Replace($schedulePhotos,$schedulePhotos+"`n        if (parentAlert.vyrnGroupAttachments()) return false;")
+   $t=$t.Replace('galleryAlbumEntry = MediaController.allMediaAlbumEntry;','galleryAlbumEntry = parentAlert.vyrnGroupAttachments() ? MediaController.allPhotosAlbumEntry : MediaController.allMediaAlbumEntry;')
+   $t=$t.Replace('} else if (shouldLoadAllMedia()) {','} else if (shouldLoadAllMedia() || parentAlert.vyrnGroupAttachments()) {')
+   $t=$t.Replace('MediaController.allMediaAlbums','(parentAlert.vyrnGroupAttachments() ? MediaController.allPhotoAlbums : MediaController.allMediaAlbums)')
+   $menuEnd="    }`n`n    private void updateStarsItem() {"
+   if(!$t.Contains($menuEnd)){throw 'Pinned photo menu marker missing'}
+   $guard='        if (parentAlert.vyrnGroupAttachments()) { for (int item : new int[]{compress, group, spoiler, quality, stars, caption, media_gap}) parentAlert.selectedMenuItem.hideSubItem(item); captionItem.setVisibility(View.GONE); }'
+   $t=$t.Replace($menuEnd,$guard+"`n"+$menuEnd)
   }
   if($aiFile -eq 'iv/RichEditor.java'){
    $enabled='        public void setEnabled(boolean enabled) {'
