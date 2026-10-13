@@ -1,5 +1,5 @@
 # Real Android networking/Keystore integration; not a claim of full UI acceptance.
-param([ValidateSet('emulator-5560','emulator-5562')][string]$Serial='emulator-5560',[ValidateSet('first','mutations','profile','offline','restart','media-ui','media-photo-ui','media-send-ui','media-photo-send-ui','media-photo-send-member-ui','media-photo-send-offline-ui','media-photo-cancel-chat-ui','media-send-member-ui','media-send-offline-ui','media-send-part-ack-ui','media-cancel-prepare','media-cancel-recover','media-cancel-chat-ui','media-upload','media-photo-upload','media-upload-big','media-upload-cancel','auth-ui','registration-ui','sessions-ui','sessions-network','logout-prepare','logout-offline','logout-ui','onboarding-prepare','onboarding-restart','onboarding-gap','onboarding-recover','onboarding-complete')][string[]]$Phases=@('first','mutations','profile','offline','restart'))
+param([ValidateSet('emulator-5560','emulator-5562')][string]$Serial='emulator-5560',[ValidateSet('first','mutations','profile','offline','restart','media-ui','media-photo-ui','media-send-ui','media-photo-send-ui','media-photo-send-part-ack-ui','media-photo-send-member-ui','media-photo-send-offline-ui','media-photo-cancel-chat-ui','media-send-member-ui','media-send-offline-ui','media-send-part-ack-ui','media-cancel-prepare','media-cancel-recover','media-cancel-chat-ui','media-upload','media-photo-upload','media-upload-big','media-upload-cancel','auth-ui','registration-ui','sessions-ui','sessions-network','logout-prepare','logout-offline','logout-ui','onboarding-prepare','onboarding-restart','onboarding-gap','onboarding-recover','onboarding-complete')][string[]]$Phases=@('first','mutations','profile','offline','restart'))
 $ErrorActionPreference='Stop'
 $root=Split-Path $PSScriptRoot -Parent
 $adb=Join-Path $root '.tools/android-sdk/platform-tools/adb.exe'
@@ -86,7 +86,7 @@ $rounds=@()
 $script:liveTestProxy=$null
 $partFault=$null
 $partState=$null
-if($Phases -contains 'media-send-part-ack-ui'){
+if(@($Phases | Where-Object {$_ -in @('media-send-part-ack-ui','media-photo-send-part-ack-ui')}).Count){
     if($Phases.Count -ne 1){throw 'Upload acknowledgement fault must be an isolated phase'}
     $env:GOTOOLCHAIN='local';$env:GOCACHE=Join-Path $root '.local/go-build'
     $taskGo=Join-Path $root '.local/go-mod/golang.org/toolchain@v0.0.1-go1.26.8.windows-amd64/bin/go.exe'
@@ -138,7 +138,7 @@ try {
         if($phase -in @('mutations','profile','restart')){Write-Output "Waiting 60 seconds for the API rate-limit window before $phase tests.";Start-Sleep -Seconds 60}
         if($phase -in @('offline','logout-offline','onboarding-restart')){& $adb -s $Serial reverse --remove tcp:18443}else{& $adb -s $Serial reverse tcp:18443 tcp:18443}
         if($LASTEXITCODE -ne 0){throw 'Test network transition failed'}
-        if($phase -eq 'media-send-part-ack-ui'){
+        if($phase -in @('media-send-part-ack-ui','media-photo-send-part-ack-ui')){
             if(Get-NetTCPConnection -State Listen -LocalPort 18444 -ErrorAction SilentlyContinue){throw 'Local fault port already occupied'}
             $partState=Join-Path $root ('.local/upload-ack-'+[guid]::NewGuid().ToString('N')+'.json')
             $partInput=Join-Path $root '.local/upload-ack-input.txt';[IO.File]::WriteAllText($partInput,'')
@@ -172,7 +172,7 @@ try {
         }
         if($result -notmatch 'checks=(\[[^\r\n]*\])'){throw 'Instrumentation report missing'}
         $checks=$Matches[1] | ConvertFrom-Json
-        if($phase -eq 'media-send-part-ack-ui'){
+        if($phase -in @('media-send-part-ack-ui','media-photo-send-part-ack-ui')){
             $proof=[IO.File]::ReadAllText($partState)|ConvertFrom-Json
             $upload=((& $adb -s $Serial shell run-as $package cat files/vyrn-test-media-upload-id.txt)-join '').Trim()
             if($LASTEXITCODE -ne 0 -or $upload -notmatch '^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$' -or $proof.server_id -ne $upload -or $proof.status -ne 204 -or $proof.replays -lt 1){throw 'Missing exact native upload commit/drop/replay evidence'}
@@ -181,7 +181,7 @@ try {
         $rounds+=@{phase=$phase;checks=$checks;result='passed';startup_attach_retry=$attachRetried}
         Write-Output "PASS: Android integration phase $phase"
     }
-    $report=if($Phases.Count -eq 1 -and $Phases[0] -eq 'media-cancel-chat-ui'){'artifacts/android-media-cancel-chat-ui.json'}elseif(@($Phases | Where-Object {$_ -notlike 'media-cancel-*'}).Count -eq 0){'artifacts/android-media-cancel.json'}elseif(@($Phases | Where-Object {$_ -notlike 'onboarding-*'}).Count -eq 0){'artifacts/android-onboarding-ui.json'}elseif(@($Phases | Where-Object {$_ -notlike 'logout-*'}).Count -eq 0){'artifacts/android-logout-ui.json'}elseif($Phases.Count -eq 1 -and $Phases[0] -in @('media-ui','media-photo-ui','media-send-ui','media-photo-send-ui','media-photo-send-member-ui','media-photo-send-offline-ui','media-photo-cancel-chat-ui','media-send-member-ui','media-send-offline-ui','media-send-part-ack-ui','media-cancel-prepare','media-cancel-recover','media-cancel-chat-ui','media-upload','media-photo-upload','media-upload-big','media-upload-cancel','auth-ui','registration-ui','sessions-ui','sessions-network')){"artifacts/android-$($Phases[0]).json"}else{'artifacts/android-integration.json'}
+    $report=if($Phases.Count -eq 1 -and $Phases[0] -eq 'media-cancel-chat-ui'){'artifacts/android-media-cancel-chat-ui.json'}elseif(@($Phases | Where-Object {$_ -notlike 'media-cancel-*'}).Count -eq 0){'artifacts/android-media-cancel.json'}elseif(@($Phases | Where-Object {$_ -notlike 'onboarding-*'}).Count -eq 0){'artifacts/android-onboarding-ui.json'}elseif(@($Phases | Where-Object {$_ -notlike 'logout-*'}).Count -eq 0){'artifacts/android-logout-ui.json'}elseif($Phases.Count -eq 1 -and $Phases[0] -in @('media-ui','media-photo-ui','media-send-ui','media-photo-send-ui','media-photo-send-part-ack-ui','media-photo-send-member-ui','media-photo-send-offline-ui','media-photo-cancel-chat-ui','media-send-member-ui','media-send-offline-ui','media-send-part-ack-ui','media-cancel-prepare','media-cancel-recover','media-cancel-chat-ui','media-upload','media-photo-upload','media-upload-big','media-upload-cancel','auth-ui','registration-ui','sessions-ui','sessions-network')){"artifacts/android-$($Phases[0]).json"}else{'artifacts/android-integration.json'}
     if($deviceSuffix){$report=$report.Replace('.json',"$deviceSuffix.json")}
     @{date=[DateTimeOffset]::UtcNow.ToString('o');apk=[IO.Path]::GetFileName($apk);sha256=(Get-FileHash $apk).Hash.ToLowerInvariant();device=$avdName;serial=$Serial;api=35;transport='HTTPS with scoped local CA';rounds=$rounds;full_ui_e2e='not tested'} | ConvertTo-Json -Depth 6 | Set-Content (Join-Path $root $report) -Encoding utf8
 } finally {
