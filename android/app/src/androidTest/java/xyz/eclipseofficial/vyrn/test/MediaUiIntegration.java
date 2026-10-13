@@ -30,6 +30,38 @@ import xyz.eclipseofficial.vyrn.domain.Models;
 
 /** Native file selection/send and receive/download scenarios; group setup uses API fixtures. */
 final class MediaUiIntegration {
+    static void uploadCold(Instrumentation instrumentation,Activity activity,JSONObject fixture,AuthUiIntegration.Check check,boolean recover) throws Exception {
+        android.content.Context context=instrumentation.getTargetContext();File evidence=new File(context.getFilesDir(),"vyrn-test-cold-upload.json");
+        if(!recover)AuthUiIntegration.registration(instrumentation,activity,fixture,check);
+        int account=UserConfig.selectedAccount;VyrnBridge bridge=VyrnBridge.forAccount(account);VyrnBridge.UploadIdentity origin=VyrnBridge.captureUploadIdentity(account);
+        JSONObject saved=recover?new JSONObject(new String(Files.readAllBytes(evidence.toPath()),StandardCharsets.UTF_8)):null;
+        File source=recover?new File(saved.getString("path")):new File(context.getCacheDir(),"vyrn-cold-photo.png");
+        if(!recover)Files.write(source.toPath(),testPhoto(1024,768));
+        String hash=hex(MessageDigest.getInstance("SHA-256").digest(Files.readAllBytes(source.toPath())));
+        if(recover)check.verify(origin.owner.equals(saved.getString("owner"))&&origin.session.equals(saved.getString("session"))&&hash.equals(saved.getString("hash")),"cold_upload_original_account_session_and_file_restored");
+        CompletableFuture<TLRPC.InputFile> done=new CompletableFuture<>();java.util.concurrent.atomic.AtomicLong progress=new java.util.concurrent.atomic.AtomicLong();
+        org.telegram.messenger.NotificationCenter.NotificationCenterDelegate observer=(event,selected,args)->{if(selected!=account||args.length<2||!source.getAbsolutePath().equals(args[0]))return;if(event==org.telegram.messenger.NotificationCenter.fileUploaded)done.complete((TLRPC.InputFile)args[1]);else if(event==org.telegram.messenger.NotificationCenter.fileUploadFailed)done.completeExceptionally(new AssertionError("cold_native_upload_failed"));else progress.accumulateAndGet(((Number)args[1]).longValue(),Math::max);};
+        instrumentation.runOnMainSync(()->{org.telegram.messenger.NotificationCenter center=org.telegram.messenger.NotificationCenter.getInstance(account);center.addObserver(observer,org.telegram.messenger.NotificationCenter.fileUploaded);center.addObserver(observer,org.telegram.messenger.NotificationCenter.fileUploadFailed);center.addObserver(observer,org.telegram.messenger.NotificationCenter.fileUploadProgressChanged);});
+        try{
+            FileLoader.getInstance(account).uploadFile(source.getAbsolutePath(),false,false,ConnectionsManager.FileTypePhoto);
+            if(!recover){
+                long deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(10),nativeId=0;
+                while(nativeId==0&&System.nanoTime()<deadline){CompletableFuture<Long> identity=new CompletableFuture<>();org.telegram.messenger.Utilities.stageQueue.postRunnable(()->{try{Object operation=((java.util.Map<?,?>)field(FileLoader.getInstance(account),"uploadOperationPaths")).get(source.getAbsolutePath());identity.complete(operation==null?0:(Long)field(operation,"currentFileId"));}catch(Exception failure){identity.completeExceptionally(failure);}});nativeId=identity.get(3,TimeUnit.SECONDS);if(nativeId==0)Thread.sleep(100);}
+                check.verify(nativeId!=0,"cold_upload_original_native_identity_created");String upload=VyrnBridge.uploadId(origin,nativeId);boolean committed=false;
+                while(System.nanoTime()<deadline){try{JSONObject state=(JSONObject)bridge.repository.requestForSession(origin.owner,origin.session,"GET","/v1/media-uploads/"+upload,null);if(state.getJSONArray("parts").length()>0){committed=true;break;}}catch(RestRepository.ApiException missing){if(missing.status!=404)throw missing;}Thread.sleep(100);}
+                check.verify(committed&&!done.isDone()&&progress.get()==0,"cold_upload_server_part_committed_without_native_acknowledgement");
+                saved=new JSONObject().put("owner",origin.owner).put("session",origin.session).put("native_id",nativeId).put("upload",upload).put("path",source.getAbsolutePath()).put("hash",hash).put("process",android.os.Process.myPid());Files.write(evidence.toPath(),saved.toString().getBytes(StandardCharsets.UTF_8));
+                Files.write(new File(context.getFilesDir(),"vyrn-test-media-upload-id.txt").toPath(),upload.getBytes(StandardCharsets.UTF_8));
+            }else{
+                check.verify(android.os.Process.myPid()!=saved.getInt("process"),"cold_upload_actual_android_process_changed");
+                TLRPC.InputFile input=done.get(120,TimeUnit.SECONDS);check.verify(input.id==saved.getLong("native_id")&&VyrnBridge.uploadId(origin,input.id).equals(saved.getString("upload")),"cold_upload_original_upload_id_reused_after_process_death");
+                check.verify(progress.get()==source.length()&&input.parts>1,"cold_upload_original_worker_finishes_all_parts");
+                JSONObject group=(JSONObject)bridge.repository.requestForSession(origin.owner,origin.session,"POST","/v1/conversations",new JSONObject().put("kind","group").put("title","Cold upload fixture").put("members",new org.json.JSONArray()));
+                JSONObject complete=(JSONObject)bridge.repository.requestForSession(origin.owner,origin.session,"POST","/v1/media-uploads/"+saved.getString("upload")+"/complete",new JSONObject().put("conversation_id",group.getString("id")).put("kind","image").put("filename",input.name).put("part_count",input.parts).put("md5",input.md5_checksum));
+                check.verify(complete.getString("sha256").equals(hash)&&complete.getLong("size")==source.length(),"cold_upload_completed_exact_original_image_bytes");Files.delete(evidence.toPath());
+            }
+        }finally{instrumentation.runOnMainSync(()->{org.telegram.messenger.NotificationCenter center=org.telegram.messenger.NotificationCenter.getInstance(account);center.removeObserver(observer,org.telegram.messenger.NotificationCenter.fileUploaded);center.removeObserver(observer,org.telegram.messenger.NotificationCenter.fileUploadFailed);center.removeObserver(observer,org.telegram.messenger.NotificationCenter.fileUploadProgressChanged);});}
+    }
     static void durableCancel(Instrumentation instrumentation,Activity activity,JSONObject fixture,AuthUiIntegration.Check check,boolean recover) throws Exception {
         android.content.Context context=instrumentation.getTargetContext();File evidence=new File(context.getFilesDir(),"vyrn-test-transfer-cancel.json");
         if(!recover){

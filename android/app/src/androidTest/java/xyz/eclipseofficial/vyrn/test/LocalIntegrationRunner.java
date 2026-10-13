@@ -87,7 +87,9 @@ public final class LocalIntegrationRunner extends Instrumentation {
             check(foreground!=null,"foreground_activity");
             stage="foreground_idle";
             if(!boundedChatStartup)waitForIdleSync();
-            if(phase.equals("media-cancel-prepare")||phase.equals("media-cancel-recover")){
+            if(phase.equals("media-photo-upload-cold-prepare")||phase.equals("media-photo-upload-cold-recover")){
+                stage="media_cold_upload";MediaUiIntegration.uploadCold(this,foreground,read("vyrn-test-fixture.json"),(condition,name)->{check(condition,name);passed.put(name);},phase.endsWith("recover"));
+            }else if(phase.equals("media-cancel-prepare")||phase.equals("media-cancel-recover")){
                 stage="media_durable_cancel";MediaUiIntegration.durableCancel(this,foreground,read("vyrn-test-fixture.json"),(condition,name)->{check(condition,name);passed.put(name);},phase.equals("media-cancel-recover"));
             }else if(phase.equals("media-send-ui")||phase.equals("media-send-member-ui")||phase.equals("media-send-offline-ui")||phase.equals("media-send-part-ack-ui")||phase.equals("media-cancel-chat-ui")||phase.equals("media-photo-send-ui")||phase.equals("media-photo-send-part-ack-ui")||phase.equals("media-photo-send-member-ui")||phase.equals("media-photo-send-offline-ui")||phase.equals("media-photo-cancel-chat-ui")){
                 boolean cancel=phase.equals("media-cancel-chat-ui")||phase.equals("media-photo-cancel-chat-ui");

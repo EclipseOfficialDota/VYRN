@@ -258,6 +258,14 @@ Edit 'TMessagesProj/src/main/java/org/telegram/messenger/FileUploadOperation.jav
  $t=$t.Replace($field,$field+"`n    private final xyz.eclipseofficial.vyrn.compat.VyrnBridge.UploadIdentity vyrnUploadIdentity;")
  $t=$t.Replace($constructor,$constructor+"`n        vyrnUploadIdentity = xyz.eclipseofficial.vyrn.compat.VyrnBridge.captureUploadIdentity(instance);")
  $t=$t.Replace($key,'fileKey = xyz.eclipseofficial.vyrn.compat.VyrnBridge.uploadPreferenceKey(vyrnUploadIdentity, Utilities.MD5(uploadingFilePath + (isEncrypted ? "enc" : "")));')
+ $zeroResume="                            } else {`n                                rewrite = true;`n                            }"
+ $resumeStart=$t.IndexOf('                            if (uploadedSize > 0) {')
+ $resumeEnd=$t.IndexOf("                    } else {`n                        rewrite = true;",$resumeStart)
+ if($resumeStart -lt 0 -or $resumeEnd -lt 0){throw 'Pinned upload resume region changed'}
+ $resume=$t.Substring($resumeStart,$resumeEnd-$resumeStart)
+ if([regex]::Matches($resume,[regex]::Escape($zeroResume)).Count -ne 1){throw 'Pinned zero-acknowledgement upload resume marker changed'}
+ $resume=$resume.Replace($zeroResume,"                            } else {`n                                // Replay unacknowledged plaintext parts under the original session-bound upload ID.`n                                rewrite = isEncrypted || currentFileId == 0;`n                            }")
+ $t=$t.Substring(0,$resumeStart)+$resume+$t.Substring($resumeEnd)
  $t=$t.Replace($send,'sendRequest(xyz.eclipseofficial.vyrn.compat.VyrnBridge.uploadRequest(currentAccount, finalRequest, vyrnUploadIdentity, isEncrypted), (response, error) -> {'+"`n            if (!xyz.eclipseofficial.vyrn.compat.VyrnBridge.currentUploadIdentity(currentAccount, vyrnUploadIdentity)) { state = 4; cleanup(); return; }")
  $t=$t.Replace('        state = 2;',"        state = 2;`n        xyz.eclipseofficial.vyrn.compat.VyrnBridge.cancelUpload(currentAccount, vyrnUploadIdentity, currentFileId);")
  $t=$t.Replace('delegate.didFailedUploadingFile(this);','if (xyz.eclipseofficial.vyrn.compat.VyrnBridge.currentUploadIdentity(currentAccount, vyrnUploadIdentity)) delegate.didFailedUploadingFile(this);')

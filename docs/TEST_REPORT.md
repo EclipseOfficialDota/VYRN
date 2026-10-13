@@ -1016,3 +1016,20 @@ media-photo-send-part-ack-ui passed62 checks and media-send-part-ack-ui59 on the
 Local TLS APK SHA-256 61b1758be17d3c2c36af570093bffb6a262058eaaf6fc38300ff43eae232ecb0. Reports: artifacts/android-media-photo-send-part-ack-ui.json and artifacts/android-media-send-part-ack-ui.json.
 
 This proves recovery from an ambiguous committed upload-part acknowledgement over a real closed TLS connection. It does not prove a prolonged whole-network outage mid-transfer or cold process-death upload recovery. Those, low-storage behavior, physical devices, background delivery, voice, private encrypted media and the remaining full goal stay pending. No production service, normal phone APK or release-signing change was made.
+
+## Native zero-ack upload identity after process death — 2026-10-13
+
+A new paired native-worker scenario reproduced a real resume defect before the fix. The original FileUploadOperation persisted its file ID/size/time, but when no successful part acknowledgement had reached the client it treated uploaded_size=0 as a fresh transfer and replaced the saved ID after restart. The local Core had already committed part zero, so the restart created a second transfer identity. The pre-fix prepare phase passed, then recover failed specifically at cold_upload_original_upload_id_reused_after_process_death.
+
+The pinned overlay now preserves a nonzero saved ID for an unencrypted zero-acknowledgement resume inside the existing path/user/session/size/time checks. It replays unacknowledged plaintext parts under that same identity. Encrypted uploads retain the previous rewrite rule; no time/size/session boundary was removed. The patch is restricted to the uploaded-size resume region and fails if its pinned marker changes.
+
+The new upload-part-hold fault commits the real first part and withholds its response until request cancellation. A stdlib Go test proves commit evidence exists, success cannot escape before interruption, and the hold terminates on context cancellation. Existing discard/replay and group mutation hold tests also passed.
+
+On the fixed APK, media-photo-upload-cold-prepare/recover passed23 checks: actual UI registration in prepare; original FileLoader/FileUploadOperation photo transfer; a committed server part with no client acknowledgement/progress; persistent account/session/path/file hash and original transfer identity; an actual changed Android PID between phases; re-created original worker reusing the same native ID and canonical upload UUID; all original parts completed; and final image bytes/size/SHA matching the original file. The runner requires this exact ordered pair in one invocation, clears app data only before prepare and force-stops the app between phases. No preference or native ID is injected by the test.
+
+Recovery explicitly invokes the original FileLoader worker on the preserved app-private source path. This is a component-level cold-resume proof, not automatic restoration of an outgoing ChatActivity bubble or pending send-helper queue. Automatic full-gallery message recovery, prolonged mid-transfer offline behavior, changed-source handling, low-storage acceptance, physical devices and the remaining full goal stay pending.
+
+Regression on the same APK: media-photo-send-part-ack-ui passed62 checks and media-upload-big28 (113 total with cold pair). All scripts exited0; no startup attach retries. Owned fault helpers were stopped and local TLS forwarding restored.
+Local TLS APK SHA-256 4e5f71f8d729b9aef371cb0c21e9ccab8e5803cb1d6d52ac28ebcea9c946301e. Reports: artifacts/android-media-photo-upload-cold.json, artifacts/android-media-photo-send-part-ack-ui.json, artifacts/android-media-upload-big.json.
+
+No normal phone APK, VPS rollout, production DNS, release signing, TURN or offsite backup change was made.

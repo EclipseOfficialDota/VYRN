@@ -30,8 +30,8 @@ type heldSend struct {
 
 var discardedPart = errors.New("discarded committed upload acknowledgement")
 
-// Isolated local fixture: discard only the first committed part-zero response.
-func partFaultProxy(target *url.URL, transport http.RoundTripper, state string) http.Handler {
+// Isolated local fixture: discard or hold only the first committed part-zero response.
+func partFaultProxy(target *url.URL, transport http.RoundTripper, state string, hold bool) http.Handler {
 	proxy := httputil.NewSingleHostReverseProxy(target)
 	proxy.Transport = transport
 	var mu sync.Mutex
@@ -60,6 +60,14 @@ func partFaultProxy(target *url.URL, transport http.RoundTripper, state string) 
 		}
 		if first {
 			response.Body.Close()
+			if hold {
+				select {
+				case <-response.Request.Context().Done():
+					return response.Request.Context().Err()
+				case <-time.After(120 * time.Second):
+					return errors.New("held upload part deadline exceeded")
+				}
+			}
 			return discardedPart
 		}
 		return nil
@@ -146,7 +154,7 @@ func faultProxy(target *url.URL, transport http.RoundTripper, group, operation, 
 
 func main() {
 	group := flag.String("group", "", "disposable local group UUID")
-	operation := flag.String("operation", "send", "send, edit, delete or isolated upload-part")
+	operation := flag.String("operation", "send", "send, edit, delete, upload-part or upload-part-hold")
 	message := flag.String("message", "", "existing mutation message UUID")
 	client := flag.String("client", "", "exact staged send client UUID when conversation is unresolved")
 	state := flag.String("state", "", "private local evidence file")
@@ -155,10 +163,10 @@ func main() {
 	if (!validID.MatchString(*group) && !(*group == "" && *operation == "send" && validID.MatchString(*client))) || (*client != "" && (*operation != "send" || !validID.MatchString(*client))) || *state == "" {
 		log.Fatal("local group and evidence path required")
 	}
-	if *operation != "send" && *operation != "edit" && *operation != "delete" && *operation != "upload-part" {
+	if *operation != "send" && *operation != "edit" && *operation != "delete" && *operation != "upload-part" && *operation != "upload-part-hold" {
 		log.Fatal("invalid local operation")
 	}
-	if *operation != "send" && *operation != "upload-part" && !regexp.MustCompile(`^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$`).MatchString(*message) {
+	if *operation != "send" && *operation != "upload-part" && *operation != "upload-part-hold" && !regexp.MustCompile(`^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$`).MatchString(*message) {
 		log.Fatal("mutation message UUID required")
 	}
 	ca, err := os.ReadFile(".local/dev-ca.crt")
@@ -173,8 +181,8 @@ func main() {
 	transport.TLSClientConfig = &tls.Config{RootCAs: roots, MinVersion: tls.VersionTLS12}
 	target, _ := url.Parse("https://localhost:18443")
 	var handler http.Handler = faultProxy(target, transport, *group, *operation, *message, *client, *state)
-	if *operation == "upload-part" {
-		handler = partFaultProxy(target, transport, *state)
+	if *operation == "upload-part" || *operation == "upload-part-hold" {
+		handler = partFaultProxy(target, transport, *state, *operation == "upload-part-hold")
 	}
 	server := &http.Server{Addr: "127.0.0.1:18444", Handler: handler, ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 90 * time.Second}
 	log.Fatal(server.ListenAndServeTLS(".local/devtls-server.crt", ".local/devtls-server.key"))
