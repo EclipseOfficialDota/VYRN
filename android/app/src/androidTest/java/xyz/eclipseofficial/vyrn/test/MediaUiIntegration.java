@@ -218,7 +218,11 @@ final class MediaUiIntegration {
         if(view instanceof ViewGroup){ViewGroup group=(ViewGroup)view;for(int i=0;i<group.getChildCount();i++){ChatMessageCell value=cell(group.getChildAt(i),id);if(value!=null)return value;}}
         return null;
     }
-    static void run(Instrumentation instrumentation,Activity activity,JSONObject fixture,AuthUiIntegration.Check check) throws Exception {
+    private static byte[] testPhoto(){
+        android.graphics.Bitmap image=android.graphics.Bitmap.createBitmap(256,192,android.graphics.Bitmap.Config.ARGB_8888);
+        try{int[] pixels=new int[256*192];java.util.Random random=new java.util.Random(71);for(int i=0;i<pixels.length;i++)pixels[i]=0xff000000|random.nextInt(0x1000000);image.setPixels(pixels,0,256,0,0,256,192);java.io.ByteArrayOutputStream output=new java.io.ByteArrayOutputStream();if(!image.compress(android.graphics.Bitmap.CompressFormat.PNG,100,output))throw new AssertionError("photo_fixture_encode");return output.toByteArray();}finally{image.recycle();}
+    }
+    static void run(Instrumentation instrumentation,Activity activity,JSONObject fixture,AuthUiIntegration.Check check,boolean photo) throws Exception {
         AuthUiIntegration.registration(instrumentation,activity,fixture,check);
         mediaIds(instrumentation,check);
         int account=UserConfig.selectedAccount;VyrnBridge bridge=VyrnBridge.forAccount(account);RestRepository repository=bridge.repository;
@@ -227,8 +231,8 @@ final class MediaUiIntegration {
         JSONObject tokens=(JSONObject)sender.request("POST","/v1/auth/register",new JSONObject().put("email","media-sender-"+UUID.randomUUID()+"@vyrn.local").put("password",fixture.getString("password")).put("invite_code",fixture.getString("invite")).put("display_name","Media sender").put("device_id",UUID.randomUUID().toString()).put("device_name","Media API fixture"),false);
         sender.vault.save(tokens);String senderId=tokens.getString("user_id");
         JSONObject group=(JSONObject)sender.requestForUser(senderId,"POST","/v1/conversations",new JSONObject().put("kind","group").put("title","Native file test").put("members",new org.json.JSONArray().put(owner)),true);
-        String conversation=group.getString("id");byte[] bytes=new byte[2*1024*1024+113];for(int i=0;i<bytes.length;i++)bytes[i]=(byte)(i*31);
-        HttpsURLConnection connection=(HttpsURLConnection)new java.net.URL(org.telegram.messenger.BuildConfig.VYRN_API_URL+"/v1/media?kind=file&conversation_id="+conversation).openConnection();
+        String conversation=group.getString("id");byte[] bytes=photo?testPhoto():new byte[2*1024*1024+113];if(!photo)for(int i=0;i<bytes.length;i++)bytes[i]=(byte)(i*31);
+        HttpsURLConnection connection=(HttpsURLConnection)new java.net.URL(org.telegram.messenger.BuildConfig.VYRN_API_URL+"/v1/media?kind="+(photo?"image":"file")+"&conversation_id="+conversation).openConnection();
         JSONObject upload;
         try{connection.setInstanceFollowRedirects(false);connection.setConnectTimeout(15000);connection.setReadTimeout(20000);connection.setRequestMethod("POST");connection.setRequestProperty("Authorization","Bearer "+sender.vault.load().getString("access_token"));connection.setRequestProperty("X-Filename","vyrn-native-file.bin");connection.setDoOutput(true);connection.setFixedLengthStreamingMode(bytes.length);try(java.io.OutputStream output=connection.getOutputStream()){output.write(bytes);}check.verify(connection.getResponseCode()==201,"media_fixture_upload");try(java.io.InputStream input=connection.getInputStream();java.io.ByteArrayOutputStream output=new java.io.ByteArrayOutputStream()){byte[] buffer=new byte[4096];int count;while((count=input.read(buffer))!=-1){if(output.size()+count>65536)throw new AssertionError("media_fixture_response_limit");output.write(buffer,0,count);}upload=new JSONObject(output.toString("UTF-8"));}}finally{connection.disconnect();}
         JSONObject posted=(JSONObject)sender.requestForUser(senderId,"POST","/v1/conversations/"+conversation+"/messages",new JSONObject().put("client_id",UUID.randomUUID().toString()).put("encrypted",false).put("media_id",upload.getString("id")).put("payload",new JSONObject().put("text","VYRN native file")),true);
@@ -245,16 +249,34 @@ final class MediaUiIntegration {
         ChatMessageCell[] rendered={null};long deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(40);
         while(System.nanoTime()<deadline){instrumentation.runOnMainSync(()->rendered[0]=cell(LaunchActivity.getLastFragment().getFragmentView(),message.ordinal));if(rendered[0]!=null&&rendered[0].isShown())break;Thread.sleep(100);}
         if(rendered[0]==null){JSONObject diagnostic=new JSONObject();instrumentation.runOnMainSync(()->{try{org.telegram.ui.ActionBar.BaseFragment fragment=LaunchActivity.getLastFragment();diagnostic.put("fragment",fragment.getClass().getSimpleName());if(fragment instanceof ChatActivity){ChatActivity active=(ChatActivity)fragment;diagnostic.put("native_message_count",active.messages.size()).put("target_in_model",active.messages.stream().anyMatch(value->value.getId()==message.ordinal)).put("document_in_model",active.messages.stream().anyMatch(value->value.getId()==message.ordinal&&value.getDocument()!=null));}}catch(Exception failure){throw new AssertionError(failure);}});Files.write(new File(instrumentation.getTargetContext().getFilesDir(),"vyrn-test-media-diagnostic.json").toPath(),diagnostic.toString().getBytes(StandardCharsets.UTF_8));}
-        check.verify(rendered[0]!=null,"media_actual_native_file_bubble");
+        check.verify(rendered[0]!=null,photo?"media_actual_native_photo_bubble":"media_actual_native_file_bubble");
         instrumentation.runOnMainSync(()->check.verify(!rendered[0].getMessageObject().isOutOwner(),"media_actual_recipient_bubble_from_distinct_sender"));
-        TLRPC.Document[] document={null};instrumentation.runOnMainSync(()->document[0]=rendered[0].getMessageObject().getDocument());
-        check.verify(document[0]!=null&&document[0].size==bytes.length&&Arrays.equals(document[0].file_reference,upload.getString("sha256").getBytes(StandardCharsets.US_ASCII)),"media_native_document_hash_and_size");
-        File file=FileLoader.getInstance(account).getPathToAttach(document[0]);
+        TLRPC.InputFileLocation location;
+        File file;
+        if(photo){
+            TLRPC.Photo[] nativePhoto={null};instrumentation.runOnMainSync(()->nativePhoto[0]=rendered[0].getMessageObject().getPhoto());
+            check.verify(nativePhoto[0]!=null&&nativePhoto[0].sizes.size()==1&&rendered[0].getMessageObject().type==org.telegram.messenger.MessageObject.TYPE_PHOTO,"media_native_photo_type");
+            TLRPC.PhotoSize size=nativePhoto[0].sizes.get(0);
+            check.verify(size.w==256&&size.h==192&&size.size==bytes.length&&Arrays.equals(nativePhoto[0].file_reference,upload.getString("sha256").getBytes(StandardCharsets.US_ASCII)),"media_native_photo_dimensions_hash_and_size");
+            file=FileLoader.getInstance(account).getPathToAttach(size);
+            location=new TLRPC.TL_inputPhotoFileLocation();location.id=nativePhoto[0].id;location.access_hash=nativePhoto[0].access_hash;location.file_reference=nativePhoto[0].file_reference;location.thumb_size="x";
+        }else{
+            TLRPC.Document[] document={null};instrumentation.runOnMainSync(()->document[0]=rendered[0].getMessageObject().getDocument());
+            check.verify(document[0]!=null&&document[0].size==bytes.length&&Arrays.equals(document[0].file_reference,upload.getString("sha256").getBytes(StandardCharsets.US_ASCII)),"media_native_document_hash_and_size");
+            file=FileLoader.getInstance(account).getPathToAttach(document[0]);
+            location=new TLRPC.TL_inputDocumentFileLocation();location.id=document[0].id;location.file_reference=document[0].file_reference;location.thumb_size="";
+        }
         if(!file.isFile())instrumentation.runOnMainSync(()->check.verify(rendered[0].performAccessibilityAction(AccessibilityNodeInfo.ACTION_CLICK,new Bundle()),"media_actual_download_action"));
         deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(60);while(System.nanoTime()<deadline&&(!file.isFile()||file.length()!=bytes.length))Thread.sleep(100);
         check.verify(file.isFile()&&Arrays.equals(MessageDigest.getInstance("SHA-256").digest(Files.readAllBytes(file.toPath())),MessageDigest.getInstance("SHA-256").digest(bytes)),"media_original_worker_complete_verified_file");
-        TLRPC.TL_inputDocumentFileLocation location=new TLRPC.TL_inputDocumentFileLocation();location.id=document[0].id;location.file_reference=document[0].file_reference;location.thumb_size="";
         check.verify(VyrnBridge.verifyAttachment(account,location,file),"media_completion_guard_accepts_exact_file");
+        if(photo){
+            android.graphics.Bitmap decoded=android.graphics.BitmapFactory.decodeFile(file.getAbsolutePath());try{check.verify(decoded!=null&&decoded.getWidth()==256&&decoded.getHeight()==192,"media_native_photo_download_decodes");}finally{if(decoded!=null)decoded.recycle();}
+            boolean[] displayed={false};deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(20);
+            while(System.nanoTime()<deadline){instrumentation.runOnMainSync(()->{org.telegram.messenger.ImageReceiver receiver=rendered[0].getPhotoImage();android.graphics.Bitmap bitmap=receiver.getBitmap();displayed[0]=rendered[0].isShown()&&receiver.hasNotThumb()&&bitmap!=null&&bitmap.getWidth()>0&&bitmap.getHeight()>0;});if(displayed[0])break;Thread.sleep(100);}
+            check.verify(displayed[0],"media_actual_photo_bitmap_visible_in_native_bubble");
+            byte[] reference=location.file_reference;location.file_reference=new byte[0];check.verify(!VyrnBridge.verifyAttachment(account,location,file),"media_photo_empty_reference_cannot_bypass_hash_guard");location.file_reference=reference;
+        }
         File corrupt=new File(instrumentation.getTargetContext().getCacheDir(),"vyrn-test-corrupt-media");byte[] changed=bytes.clone();changed[0]^=1;Files.write(corrupt.toPath(),changed);
         try{check.verify(!VyrnBridge.verifyAttachment(account,location,corrupt),"media_completion_guard_rejects_tampered_cache");}finally{Files.deleteIfExists(corrupt.toPath());}
         location.id=Long.MAX_VALUE;check.verify(!VyrnBridge.verifyAttachment(account,location,file),"media_completion_guard_rejects_unbound_native_id");

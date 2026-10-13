@@ -42,7 +42,9 @@ public final class Models {
     }
     public static final class Attachment {
         public final String id,conversation,kind,filename,contentType,sha256;public final long size;public final boolean encrypted;
-        public Attachment(String id,String conversation,String kind,String filename,String contentType,String sha256,long size,boolean encrypted){this.id=id;this.conversation=conversation;this.kind=kind;this.filename=filename;this.contentType=contentType;this.sha256=sha256;this.size=size;this.encrypted=encrypted;}
+        public final int width,height;
+        public Attachment(String id,String conversation,String kind,String filename,String contentType,String sha256,long size,boolean encrypted){this(id,conversation,kind,filename,contentType,sha256,size,encrypted,0,0);}
+        public Attachment(String id,String conversation,String kind,String filename,String contentType,String sha256,long size,boolean encrypted,int width,int height){this.id=id;this.conversation=conversation;this.kind=kind;this.filename=filename;this.contentType=contentType;this.sha256=sha256;this.size=size;this.encrypted=encrypted;this.width=width;this.height=height;}
     }
     public static final class Member {
         public final User user;public final String role;public final int joinedDate;

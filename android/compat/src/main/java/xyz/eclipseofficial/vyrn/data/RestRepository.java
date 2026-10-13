@@ -140,7 +140,9 @@ public final class RestRepository implements Models.Repository {
         JSONObject value=(JSONObject)requestForUser(user,"GET","/v1/media/"+id+"/metadata",null,true);
         String name=value.getString("filename"),hash=value.getString("sha256"),kind=value.getString("kind");long size=value.getLong("size");
         if(!id.equals(value.getString("id"))||!hash.matches("[0-9a-f]{64}")||size<1||size>250L*1024*1024||name.codePointCount(0,name.length())>255||name.isEmpty()||name.indexOf('/')>=0||name.indexOf('\\')>=0||name.indexOf('\0')>=0||name.indexOf('\r')>=0||name.indexOf('\n')>=0||!java.util.Arrays.asList("file","image","voice","video","avatar").contains(kind))throw new SecurityException("media_descriptor_changed");
-        return new Models.Attachment(id,value.isNull("conversation_id")?null:value.getString("conversation_id"),kind,name,value.getString("content_type"),hash,size,value.getBoolean("encrypted"));
+        int width=value.optInt("width"),height=value.optInt("height");boolean encrypted=value.getBoolean("encrypted");
+        if(!encrypted&&kind.equals("image")&&(width<1||height<1||width>4096||height>4096||!java.util.Arrays.asList("image/jpeg","image/png").contains(value.getString("content_type"))))throw new SecurityException("image_descriptor_changed");
+        return new Models.Attachment(id,value.isNull("conversation_id")?null:value.getString("conversation_id"),kind,name,value.getString("content_type"),hash,size,encrypted,width,height);
     }
     public byte[] attachmentBytesForUser(String user,String id,String hash,long offset,int limit) throws Exception {
         if(offset<0||limit<1||limit>1024*1024)throw new IllegalArgumentException("media_range");

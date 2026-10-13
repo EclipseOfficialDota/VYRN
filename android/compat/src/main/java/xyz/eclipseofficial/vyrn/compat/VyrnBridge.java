@@ -701,7 +701,8 @@ public final class VyrnBridge {
             final int offset=photos!=null?photos.offset:0,limit=photos!=null?photos.limit:file!=null?file.limit:0;
             final long max=photos!=null?photos.max_id:0,start=file!=null?file.offset:0;
             final long image=file!=null&&file.location instanceof TLRPC.TL_inputPeerPhotoFileLocation?((TLRPC.TL_inputPeerPhotoFileLocation)file.location).photo_id:file!=null&&file.location instanceof TLRPC.TL_inputPhotoFileLocation?file.location.id:0;
-            final boolean attachment=file!=null&&file.location instanceof TLRPC.TL_inputDocumentFileLocation;
+            final boolean photoAttachment=file!=null&&file.location instanceof TLRPC.TL_inputPhotoFileLocation&&file.location.file_reference!=null&&file.location.file_reference.length>0;
+            final boolean attachment=file!=null&&file.location instanceof TLRPC.TL_inputDocumentFileLocation||photoAttachment;
             execute(()->{try{
                 VyrnBridge bridge=forAccount(account);pending.bridge=bridge;
                 synchronized(bridge.repository.vault.guard()){
@@ -710,7 +711,7 @@ public final class VyrnBridge {
                     if(unsupported)throw new UnsupportedOperationException("avatar_variant_unavailable");
                     if(file!=null){
                         byte[] bytes;
-                        if(attachment){if(file.location.id<=0||file.location.thumb_size!=null&&!file.location.thumb_size.isEmpty()||file.location.file_reference==null)throw new UnsupportedOperationException("file_location_unavailable");String hash=new String(file.location.file_reference,StandardCharsets.US_ASCII);if(!hash.matches("[0-9a-f]{64}"))throw new SecurityException("media_reference_changed");bytes=bridge.repository.attachmentBytesForUser(owner,bridge.ids.mediaRemote(owner,file.location.id),hash,start,limit);}
+                        if(attachment){if(file.location.id<=0||(photoAttachment?!"x".equals(file.location.thumb_size):file.location.thumb_size!=null&&!file.location.thumb_size.isEmpty()))throw new UnsupportedOperationException("file_location_unavailable");if(file.location.file_reference==null)throw new SecurityException("media_reference_changed");String hash=new String(file.location.file_reference,StandardCharsets.US_ASCII);if(!hash.matches("[0-9a-f]{64}"))throw new SecurityException("media_reference_changed");bytes=bridge.repository.attachmentBytesForUser(owner,bridge.ids.mediaRemote(owner,file.location.id),hash,start,limit);}
                         else{if(image<=0)throw new UnsupportedOperationException("file_location_unavailable");bytes=bridge.repository.avatarBytesForUser(owner,avatarIds().remote("avatar",image),start,limit);}
                         TLRPC.TL_upload_file result=new TLRPC.TL_upload_file();result.type=new TLRPC.TL_storage_fileUnknown();result.bytes=new org.telegram.tgnet.NativeByteBuffer(Math.max(1,bytes.length));result.bytes.writeBytes(bytes);result.bytes.limit(bytes.length);result.bytes.position(0);pending.complete(result,null);
                     }else if(list){
@@ -926,11 +927,28 @@ public final class VyrnBridge {
         if(m.deleted)throw new IllegalStateException("tombstone_is_not_a_live_message");
         ids.observe(m);
         TLRPC.TL_message out=new TLRPC.TL_message();String snapshot=editSnapshot(m);if(snapshot!=null){out.params=new HashMap<>();out.params.put(EDIT_SNAPSHOT,snapshot);}out.id=ids.message(m.id,m.ordinal);out.peer_id=peer;TLRPC.TL_peerUser sender=new TLRPC.TL_peerUser();sender.user_id=ids.local("user",m.sender);out.from_id=sender;out.flags|=256;out.date=m.date;out.message=m.deleted?"":m.encrypted?(org.telegram.messenger.LocaleController.isRTL?"این پیام در این دستگاه قابل نمایش نیست.":"This message cannot be displayed on this device."):m.text;out.out=sender.user_id==UserConfig.getInstance(account).getClientUserId();out.media=new TLRPC.TL_messageMediaEmpty();out.edit_date=m.editedDate;if(m.editedDate>0)out.flags|=TLRPC.MESSAGE_FLAG_EDITED;
-        if(m.attachment!=null){Models.Attachment value=m.attachment;if(m.encrypted||value.encrypted||!m.conversation.equals(value.conversation))throw new SecurityException("media_message_changed");String owner=ids.remote("user",UserConfig.getInstance(account).getClientUserId());TLRPC.TL_document document=new TLRPC.TL_document();document.id=ids.media(owner,value.id);document.access_hash=document.id;document.file_reference=value.sha256.getBytes(StandardCharsets.US_ASCII);document.date=m.date;document.size=value.size;document.mime_type=value.contentType;document.dc_id=1;TLRPC.TL_documentAttributeFilename name=new TLRPC.TL_documentAttributeFilename();name.file_name=value.filename;document.attributes.add(name);TLRPC.TL_messageMediaDocument media=new TLRPC.TL_messageMediaDocument();media.flags=1;media.document=document;out.media=media;out.flags|=TLRPC.MESSAGE_FLAG_HAS_MEDIA;}
+        if(m.attachment!=null){
+            Models.Attachment value=m.attachment;
+            if(m.encrypted||value.encrypted||!m.conversation.equals(value.conversation))throw new SecurityException("media_message_changed");
+            String owner=ids.remote("user",UserConfig.getInstance(account).getClientUserId());
+            long mediaId=ids.media(owner,value.id);
+            if("image".equals(value.kind)){
+                if(value.width<1||value.width>4096||value.height<1||value.height>4096||value.size<1||value.size>Integer.MAX_VALUE)throw new SecurityException("image_descriptor_changed");
+                TLRPC.TL_photo photo=new TLRPC.TL_photo();photo.id=mediaId;photo.access_hash=mediaId;photo.file_reference=value.sha256.getBytes(StandardCharsets.US_ASCII);photo.date=m.date;photo.dc_id=1;
+                TLRPC.TL_photoSize size=new TLRPC.TL_photoSize();size.type="x";size.w=value.width;size.h=value.height;size.size=(int)value.size;size.location=avatarLocation(photo.id,'x');photo.sizes.add(size);
+                TLRPC.TL_messageMediaPhoto media=new TLRPC.TL_messageMediaPhoto();media.flags=1;media.photo=photo;out.media=media;
+            }else{
+                TLRPC.TL_document document=new TLRPC.TL_document();document.id=mediaId;document.access_hash=document.id;document.file_reference=value.sha256.getBytes(StandardCharsets.US_ASCII);document.date=m.date;document.size=value.size;document.mime_type=value.contentType;document.dc_id=1;TLRPC.TL_documentAttributeFilename name=new TLRPC.TL_documentAttributeFilename();name.file_name=value.filename;document.attributes.add(name);TLRPC.TL_messageMediaDocument media=new TLRPC.TL_messageMediaDocument();media.flags=1;media.document=document;out.media=media;
+            }
+            out.flags|=TLRPC.MESSAGE_FLAG_HAS_MEDIA;
+        }
         return out;
     }
     public static boolean verifyAttachment(int account,TLRPC.InputFileLocation location,java.io.File file){
-        if(!(location instanceof TLRPC.TL_inputDocumentFileLocation))return true;
+        if(location instanceof TLRPC.TL_inputPhotoFileLocation){
+            if(location.file_reference==null||location.file_reference.length==0){try{avatarIds().remote("avatar",location.id);return true;}catch(Exception failure){return false;}}
+            if(!"x".equals(location.thumb_size))return false;
+        }else if(!(location instanceof TLRPC.TL_inputDocumentFileLocation))return true;
         try{VyrnBridge bridge=forAccount(account);long self=UserConfig.getInstance(account).getClientUserId();String owner=bridge.ids.remote("user",self);bridge.ids.mediaRemote(owner,location.id);if(!bridge.repository.vault.isUser(owner)||location.file_reference==null||file==null||!file.isFile())return false;String hash=new String(location.file_reference,StandardCharsets.US_ASCII);if(!hash.matches("[0-9a-f]{64}"))return false;java.security.MessageDigest digest=java.security.MessageDigest.getInstance("SHA-256");try(java.io.InputStream input=new java.io.FileInputStream(file)){byte[] buffer=new byte[8192];int length;while((length=input.read(buffer))!=-1)digest.update(buffer,0,length);}StringBuilder actual=new StringBuilder();for(byte value:digest.digest())actual.append(String.format(java.util.Locale.ROOT,"%02x",value&255));return hash.contentEquals(actual)&&UserConfig.getInstance(account).getClientUserId()==self&&bridge.repository.vault.isUser(owner);}catch(Exception failure){return false;}
     }
     private TLRPC.TL_messages_dialogs dialogs() throws Exception {
