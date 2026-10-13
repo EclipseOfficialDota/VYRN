@@ -93,8 +93,8 @@ public final class LocalIntegrationRunner extends Instrumentation {
                 stage="media_send_ui";MediaUiIntegration.sendUi(this,foreground,read("vyrn-test-fixture.json"),(condition,name)->{check(condition,name);passed.put(name);},phase.equals("media-send-member-ui"),phase.equals("media-send-offline-ui")||phase.equals("media-cancel-chat-ui"),phase.equals("media-send-part-ack-ui"),phase.equals("media-cancel-chat-ui"));
             }else if(phase.equals("media-upload-cancel")){
                 stage="media_upload_cancel";MediaUiIntegration.cancelUpload(this,foreground,read("vyrn-test-fixture.json"),(condition,name)->{check(condition,name);passed.put(name);});
-            }else if(phase.equals("media-upload")||phase.equals("media-upload-big")){
-                stage="media_upload";MediaUiIntegration.upload(this,foreground,read("vyrn-test-fixture.json"),(condition,name)->{check(condition,name);passed.put(name);},phase.equals("media-upload-big"));
+            }else if(phase.equals("media-upload")||phase.equals("media-upload-big")||phase.equals("media-photo-upload")){
+                stage="media_upload";MediaUiIntegration.upload(this,foreground,read("vyrn-test-fixture.json"),(condition,name)->{check(condition,name);passed.put(name);},phase.equals("media-upload-big"),phase.equals("media-photo-upload"));
             }else if(phase.equals("media-ui")||phase.equals("media-photo-ui")){
                 stage="media_ui";MediaUiIntegration.run(this,foreground,read("vyrn-test-fixture.json"),(condition,name)->{check(condition,name);passed.put(name);},phase.equals("media-photo-ui"));
             }else if(phase.startsWith("chat-")){

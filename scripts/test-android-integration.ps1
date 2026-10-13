@@ -1,5 +1,5 @@
 # Real Android networking/Keystore integration; not a claim of full UI acceptance.
-param([ValidateSet('emulator-5560','emulator-5562')][string]$Serial='emulator-5560',[ValidateSet('first','mutations','profile','offline','restart','media-ui','media-photo-ui','media-send-ui','media-send-member-ui','media-send-offline-ui','media-send-part-ack-ui','media-cancel-prepare','media-cancel-recover','media-cancel-chat-ui','media-upload','media-upload-big','media-upload-cancel','auth-ui','registration-ui','sessions-ui','sessions-network','logout-prepare','logout-offline','logout-ui','onboarding-prepare','onboarding-restart','onboarding-gap','onboarding-recover','onboarding-complete')][string[]]$Phases=@('first','mutations','profile','offline','restart'))
+param([ValidateSet('emulator-5560','emulator-5562')][string]$Serial='emulator-5560',[ValidateSet('first','mutations','profile','offline','restart','media-ui','media-photo-ui','media-send-ui','media-send-member-ui','media-send-offline-ui','media-send-part-ack-ui','media-cancel-prepare','media-cancel-recover','media-cancel-chat-ui','media-upload','media-photo-upload','media-upload-big','media-upload-cancel','auth-ui','registration-ui','sessions-ui','sessions-network','logout-prepare','logout-offline','logout-ui','onboarding-prepare','onboarding-restart','onboarding-gap','onboarding-recover','onboarding-complete')][string[]]$Phases=@('first','mutations','profile','offline','restart'))
 $ErrorActionPreference='Stop'
 $root=Split-Path $PSScriptRoot -Parent
 $adb=Join-Path $root '.tools/android-sdk/platform-tools/adb.exe'
@@ -24,6 +24,21 @@ foreach($path in @($apk,$testApk)){
 }
 # Each suite models a fresh install. Reused emulator state can contain identifier
 # mappings from a different disposable database and would invalidate the fixture.
+# Finish the old chat/permission task before clearing app data. A late task removal
+# can otherwise kill the next instrumentation process before it attaches.
+$vyrnLauncherResult=(& $adb -s $Serial shell am start -W -a android.intent.action.MAIN -c android.intent.category.HOME) -join "`n"
+if($LASTEXITCODE -ne 0 -or $vyrnLauncherResult -notmatch 'Status: ok'){throw 'Test launcher did not become ready'}
+& $adb -s $Serial shell am force-stop $package
+if($LASTEXITCODE -ne 0){throw 'Old test app could not stop'}
+$taskDeadline=[DateTimeOffset]::UtcNow.AddSeconds(20)
+do {
+    $oldActivities=(& $adb -s $Serial shell dumpsys activity activities) -join "`n"
+    if($LASTEXITCODE -ne 0){throw 'Cannot inspect old test tasks'}
+    $taskGone=$oldActivities -notmatch ('(?m)^\s*(?:\* Task\{|[^\r\n]*Hist #)[^\r\n]*'+[regex]::Escape($package))
+    if($taskGone){break}
+    Start-Sleep -Milliseconds 200
+} while([DateTimeOffset]::UtcNow -lt $taskDeadline)
+if(!$taskGone){throw 'Old test task still exists; fresh instrumentation refused'}
 $cleared=(& $adb -s $Serial shell pm clear $package) -join "`n"
 if($LASTEXITCODE -ne 0 -or $cleared -notmatch 'Success'){throw 'Test app data reset failed'}
 & $adb -s $Serial reverse tcp:18443 tcp:18443
@@ -148,7 +163,7 @@ try {
         $rounds+=@{phase=$phase;checks=$checks;result='passed';startup_attach_retry=$attachRetried}
         Write-Output "PASS: Android integration phase $phase"
     }
-    $report=if($Phases.Count -eq 1 -and $Phases[0] -eq 'media-cancel-chat-ui'){'artifacts/android-media-cancel-chat-ui.json'}elseif(@($Phases | Where-Object {$_ -notlike 'media-cancel-*'}).Count -eq 0){'artifacts/android-media-cancel.json'}elseif(@($Phases | Where-Object {$_ -notlike 'onboarding-*'}).Count -eq 0){'artifacts/android-onboarding-ui.json'}elseif(@($Phases | Where-Object {$_ -notlike 'logout-*'}).Count -eq 0){'artifacts/android-logout-ui.json'}elseif($Phases.Count -eq 1 -and $Phases[0] -in @('media-ui','media-photo-ui','media-send-ui','media-send-member-ui','media-send-offline-ui','media-send-part-ack-ui','media-cancel-prepare','media-cancel-recover','media-cancel-chat-ui','media-upload','media-upload-big','media-upload-cancel','auth-ui','registration-ui','sessions-ui','sessions-network')){"artifacts/android-$($Phases[0]).json"}else{'artifacts/android-integration.json'}
+    $report=if($Phases.Count -eq 1 -and $Phases[0] -eq 'media-cancel-chat-ui'){'artifacts/android-media-cancel-chat-ui.json'}elseif(@($Phases | Where-Object {$_ -notlike 'media-cancel-*'}).Count -eq 0){'artifacts/android-media-cancel.json'}elseif(@($Phases | Where-Object {$_ -notlike 'onboarding-*'}).Count -eq 0){'artifacts/android-onboarding-ui.json'}elseif(@($Phases | Where-Object {$_ -notlike 'logout-*'}).Count -eq 0){'artifacts/android-logout-ui.json'}elseif($Phases.Count -eq 1 -and $Phases[0] -in @('media-ui','media-photo-ui','media-send-ui','media-send-member-ui','media-send-offline-ui','media-send-part-ack-ui','media-cancel-prepare','media-cancel-recover','media-cancel-chat-ui','media-upload','media-photo-upload','media-upload-big','media-upload-cancel','auth-ui','registration-ui','sessions-ui','sessions-network')){"artifacts/android-$($Phases[0]).json"}else{'artifacts/android-integration.json'}
     if($deviceSuffix){$report=$report.Replace('.json',"$deviceSuffix.json")}
     @{date=[DateTimeOffset]::UtcNow.ToString('o');apk=[IO.Path]::GetFileName($apk);sha256=(Get-FileHash $apk).Hash.ToLowerInvariant();device=$avdName;serial=$Serial;api=35;transport='HTTPS with scoped local CA';rounds=$rounds;full_ui_e2e='not tested'} | ConvertTo-Json -Depth 6 | Set-Content (Join-Path $root $report) -Encoding utf8
 } finally {

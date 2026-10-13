@@ -143,12 +143,12 @@ final class MediaUiIntegration {
         while(System.nanoTime()<deadline){JSONObject status=(JSONObject)bridge.repository.requestForSession(identity.owner,identity.session,"GET","/v1/media-uploads/"+upload,null);if(status.getString("state").equals("cancelled")&&status.getJSONArray("parts").length()==0){fenced=true;break;}Thread.sleep(100);}
         check.verify(fenced,"upload_actual_native_cancel_hook_fences_and_cleans_server");boolean rejected=false;try{bridge.repository.uploadPartForSession(identity.owner,identity.session,upload,0,new byte[]{1});}catch(RestRepository.ApiException failure){rejected=failure.status==409;}check.verify(rejected,"upload_cancelled_native_id_rejects_late_part");check.verify(source.isFile()&&source.length()==bytes.length,"upload_native_cancel_preserves_original_source");Files.deleteIfExists(source.toPath());
     }
-    static void upload(Instrumentation instrumentation,Activity activity,JSONObject fixture,AuthUiIntegration.Check check,boolean big) throws Exception {
+    static void upload(Instrumentation instrumentation,Activity activity,JSONObject fixture,AuthUiIntegration.Check check,boolean big,boolean photo) throws Exception {
         AuthUiIntegration.registration(instrumentation,activity,fixture,check);
         int account=UserConfig.selectedAccount;VyrnBridge bridge=VyrnBridge.forAccount(account);String owner=bridge.repository.me().id;
         VyrnBridge.UploadIdentity identity=VyrnBridge.captureUploadIdentity(account);check.verify(VyrnBridge.currentUploadIdentity(account,identity),"upload_native_origin_captured");
-        byte[] bytes=new byte[(big?12:2)*1024*1024+113];for(int i=0;i<bytes.length;i++)bytes[i]=(byte)(i*17);
-        File source=new File(instrumentation.getTargetContext().getCacheDir(),big?"vyrn-native-big-upload.bin":"vyrn-native-upload.bin");Files.write(source.toPath(),bytes);String path=source.getAbsolutePath();
+        byte[] bytes=photo?testPhoto():new byte[(big?12:2)*1024*1024+113];if(!photo)for(int i=0;i<bytes.length;i++)bytes[i]=(byte)(i*17);
+        File source=new File(instrumentation.getTargetContext().getCacheDir(),photo?"vyrn-native-photo.png":big?"vyrn-native-big-upload.bin":"vyrn-native-upload.bin");Files.write(source.toPath(),bytes);String path=source.getAbsolutePath();
         CompletableFuture<TLRPC.InputFile> done=new CompletableFuture<>();java.util.concurrent.atomic.AtomicLong progress=new java.util.concurrent.atomic.AtomicLong();
         org.telegram.messenger.NotificationCenter.NotificationCenterDelegate observer=(event,selected,args)->{
             if(selected!=account||args.length==0||!path.equals(args[0]))return;
@@ -158,24 +158,32 @@ final class MediaUiIntegration {
         };
         instrumentation.runOnMainSync(()->{org.telegram.messenger.NotificationCenter center=org.telegram.messenger.NotificationCenter.getInstance(account);center.addObserver(observer,org.telegram.messenger.NotificationCenter.fileUploaded);center.addObserver(observer,org.telegram.messenger.NotificationCenter.fileUploadFailed);center.addObserver(observer,org.telegram.messenger.NotificationCenter.fileUploadProgressChanged);});
         TLRPC.InputFile input;
-        try{FileLoader.getInstance(account).uploadFile(path,false,false,ConnectionsManager.FileTypeFile);input=done.get(120,TimeUnit.SECONDS);}finally{instrumentation.runOnMainSync(()->{org.telegram.messenger.NotificationCenter center=org.telegram.messenger.NotificationCenter.getInstance(account);center.removeObserver(observer,org.telegram.messenger.NotificationCenter.fileUploaded);center.removeObserver(observer,org.telegram.messenger.NotificationCenter.fileUploadFailed);center.removeObserver(observer,org.telegram.messenger.NotificationCenter.fileUploadProgressChanged);});}
+        try{FileLoader.getInstance(account).uploadFile(path,false,false,photo?ConnectionsManager.FileTypePhoto:ConnectionsManager.FileTypeFile);input=done.get(120,TimeUnit.SECONDS);}finally{instrumentation.runOnMainSync(()->{org.telegram.messenger.NotificationCenter center=org.telegram.messenger.NotificationCenter.getInstance(account);center.removeObserver(observer,org.telegram.messenger.NotificationCenter.fileUploaded);center.removeObserver(observer,org.telegram.messenger.NotificationCenter.fileUploadFailed);center.removeObserver(observer,org.telegram.messenger.NotificationCenter.fileUploadProgressChanged);});}
         check.verify(input.id!=0&&input.parts>0&&(big?input instanceof TLRPC.TL_inputFileBig:input instanceof TLRPC.TL_inputFile),big?"upload_original_big_worker_complete":"upload_original_small_worker_complete");
         check.verify(progress.get()==bytes.length,"upload_original_progress_reaches_full_size");
         String id=VyrnBridge.uploadId(identity,input.id);JSONObject status=(JSONObject)bridge.repository.requestForSession(owner,identity.session,"GET","/v1/media-uploads/"+id,null);
         check.verify(status.getString("state").equals("open")&&status.getJSONArray("parts").length()==input.parts,"upload_original_all_native_parts_persisted");
         JSONObject group=(JSONObject)bridge.repository.requestForSession(owner,identity.session,"POST","/v1/conversations",new JSONObject().put("kind","group").put("title","Native uploaded file").put("members",new org.json.JSONArray()));
-        JSONObject request=new JSONObject().put("conversation_id",group.getString("id")).put("kind","file").put("filename",input.name).put("part_count",input.parts).put("md5",input.md5_checksum==null?"":input.md5_checksum);
-        JSONObject complete=(JSONObject)bridge.repository.requestForSession(owner,identity.session,"POST","/v1/media-uploads/"+id+"/complete",request);
-        check.verify(complete.getLong("size")==bytes.length&&complete.getString("sha256").equals(hex(MessageDigest.getInstance("SHA-256").digest(bytes))),"upload_original_worker_final_bytes_and_hash");
-        JSONObject repeat=(JSONObject)bridge.repository.requestForSession(owner,identity.session,"POST","/v1/media-uploads/"+id+"/complete",request);check.verify(repeat.getString("id").equals(complete.getString("id")),"upload_completion_replay_same_media_id");
+        String kind=photo?"image":"file";
+        JSONObject request=new JSONObject().put("conversation_id",group.getString("id")).put("kind",kind).put("filename",input.name).put("part_count",input.parts).put("md5",input.md5_checksum==null?"":input.md5_checksum);
+        JSONObject complete=null;
+        if(!photo){
+            complete=(JSONObject)bridge.repository.requestForSession(owner,identity.session,"POST","/v1/media-uploads/"+id+"/complete",request);
+            check.verify(complete.getLong("size")==bytes.length&&complete.getString("sha256").equals(hex(MessageDigest.getInstance("SHA-256").digest(bytes))),"upload_original_worker_final_bytes_and_hash");
+            JSONObject repeat=(JSONObject)bridge.repository.requestForSession(owner,identity.session,"POST","/v1/media-uploads/"+id+"/complete",request);check.verify(repeat.getString("id").equals(complete.getString("id")),"upload_completion_replay_same_media_id");
+        }
         TLRPC.TL_messages_sendMedia send=VyrnBridge.mediaRequest(account);TLRPC.TL_inputPeerChat destination=new TLRPC.TL_inputPeerChat();
         try(IdMap map=new IdMap(instrumentation.getTargetContext(),account)){destination.chat_id=map.local("conversation",group.getString("id"));}
         send.peer=destination;send.random_id=java.util.concurrent.ThreadLocalRandom.current().nextLong(1,Long.MAX_VALUE);send.message="Native file caption";
         TLRPC.TL_inputPeerUser self=new TLRPC.TL_inputPeerUser();self.user_id=identity.origin;send.send_as=self;
-        TLRPC.TL_inputMediaUploadedDocument payload=new TLRPC.TL_inputMediaUploadedDocument();payload.file=input;payload.mime_type="application/octet-stream";
-        TLRPC.TL_documentAttributeFilename name=new TLRPC.TL_documentAttributeFilename();name.file_name=input.name;payload.attributes.add(name);send.media=payload;
+        if(photo){TLRPC.TL_inputMediaUploadedPhoto payload=new TLRPC.TL_inputMediaUploadedPhoto();payload.file=input;send.media=payload;}
+        else{TLRPC.TL_inputMediaUploadedDocument payload=new TLRPC.TL_inputMediaUploadedDocument();payload.file=input;payload.mime_type="application/octet-stream";TLRPC.TL_documentAttributeFilename name=new TLRPC.TL_documentAttributeFilename();name.file_name=input.name;payload.attributes.add(name);send.media=payload;}
         TLRPC.TL_updateShortSentMessage first=sendFile(account,send);send.send_as=new TLRPC.TL_inputPeerSelf();TLRPC.TL_updateShortSentMessage replayed=sendFile(account,send);
-        check.verify(first.id==replayed.id&&first.media instanceof TLRPC.TL_messageMediaDocument&&first.media.document.size==bytes.length,"upload_native_send_replay_same_message_and_document");
+        if(photo){
+            check.verify(first.id==replayed.id&&first.media instanceof TLRPC.TL_messageMediaPhoto&&first.media.photo.sizes.size()==1&&first.media.photo.sizes.get(0).size==bytes.length&&first.media.photo.sizes.get(0).w==256&&first.media.photo.sizes.get(0).h==192,"upload_native_photo_send_replay_same_message_and_dimensions");
+            complete=(JSONObject)bridge.repository.requestForSession(owner,identity.session,"POST","/v1/media-uploads/"+id+"/complete",request);
+            check.verify(complete.getLong("size")==bytes.length&&complete.getString("sha256").equals(hex(MessageDigest.getInstance("SHA-256").digest(bytes)))&&Arrays.equals(first.media.photo.file_reference,complete.getString("sha256").getBytes(StandardCharsets.US_ASCII)),"upload_native_photo_send_completed_original_parts_with_exact_hash");
+        }else check.verify(first.id==replayed.id&&first.media instanceof TLRPC.TL_messageMediaDocument&&first.media.document.size==bytes.length,"upload_native_send_replay_same_message_and_document");
         java.util.List<xyz.eclipseofficial.vyrn.domain.Models.Message> messages=bridge.repository.liveMessages(group.getString("id"),null,100);
         check.verify(messages.size()==1&&messages.get(0).attachment!=null&&messages.get(0).attachment.id.equals(complete.getString("id")),"upload_native_send_one_server_message_with_original_media");
         TLRPC.TL_inputPeerUser other=new TLRPC.TL_inputPeerUser();other.user_id=identity.origin+1;send.send_as=other;
@@ -184,7 +192,7 @@ final class MediaUiIntegration {
         String client=UUID.nameUUIDFromBytes((owner+":"+send.random_id).getBytes(java.nio.charset.StandardCharsets.UTF_8)).toString();
         try(xyz.eclipseofficial.vyrn.data.OutboxStore outbox=new xyz.eclipseofficial.vyrn.data.OutboxStore(instrumentation.getTargetContext(),account)){
             xyz.eclipseofficial.vyrn.data.OutboxStore.Entry saved=outbox.get(owner,client);
-            check.verify(saved.state==xyz.eclipseofficial.vyrn.data.OutboxStore.SENT&&saved.media.equals(complete.getString("id"))&&saved.session.equals(identity.session)&&new JSONObject(saved.upload).getString("id").equals(id),"upload_native_send_durable_origin_and_media_binding");
+            check.verify(saved.state==xyz.eclipseofficial.vyrn.data.OutboxStore.SENT&&saved.media.equals(complete.getString("id"))&&saved.session.equals(identity.session)&&new JSONObject(saved.upload).getString("id").equals(id)&&new JSONObject(saved.upload).getString("kind").equals(kind),"upload_native_send_durable_origin_and_media_binding");
         }
         VyrnBridge.cancelUpload(account,identity,input.id);long deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(30);boolean cancelled=false;
         while(System.nanoTime()<deadline){JSONObject value=(JSONObject)bridge.repository.requestForSession(owner,identity.session,"GET","/v1/media-uploads/"+id,null);if(value.getString("state").equals("cancelled")&&value.getJSONArray("parts").length()==0){cancelled=true;break;}Thread.sleep(100);}
