@@ -255,9 +255,9 @@ public final class VyrnBridge {
                 if(object.currentAccount!=account||owner==0||session==null||device==null||!session.equals(device[1])||isLoggingOut(account)||!samePrivatePending(object,object.messageOwner,local,dialog,owner,date,random)){bridge.privateCancelFailure(owner,session);continue;}
                 execute(()->{try{String peer=bridge.ids.remote("user",dialog);bridge.requirePrivateOrigin(device[0],session,owner,peer,dialog);if(isLoggingOut(account))throw new SecurityException("private_origin_changed");SignalMessages.requestNativeCancellation(ApplicationLoader.applicationContext,bridge.repository,device[0],session,device[2],account,local,dialog,random,date,peer);}catch(Exception unavailable){bridge.privateCancelFailure(owner,session);}});continue;
             }
-            if(object==null || object.messageOwner==null || object.getId()>=0 || object.getDialogId()>=0 || object.messageOwner.random_id==0 || object.type!=MessageObject.TYPE_TEXT&&object.type!=MessageObject.TYPE_FILE&&object.type!=MessageObject.TYPE_PHOTO || object.scheduled || object.isQuickReply() || MessageObject.isWelcomeMessage(object.messageOwner)){other.add(object);continue;}
+            if(object==null || object.messageOwner==null || object.getId()>=0 || object.getDialogId()>=0 || object.messageOwner.random_id==0 || object.type!=MessageObject.TYPE_TEXT&&object.type!=MessageObject.TYPE_FILE&&object.type!=MessageObject.TYPE_PHOTO&&object.type!=MessageObject.TYPE_VOICE || object.scheduled || object.isQuickReply() || MessageObject.isWelcomeMessage(object.messageOwner)){other.add(object);continue;}
             handled=true;final int localId=object.getId(),token=object.messageOwner.reqId;final long dialog=object.getDialogId(),random=object.messageOwner.random_id;final String text=object.messageOwner.message;
-            final boolean attachment=object.type==MessageObject.TYPE_FILE||object.type==MessageObject.TYPE_PHOTO;final String path=object.messageOwner.attachPath;final UploadIdentity origin=captureUploadIdentity(account);
+            final boolean attachment=object.type==MessageObject.TYPE_FILE||object.type==MessageObject.TYPE_PHOTO||object.type==MessageObject.TYPE_VOICE;final String path=object.messageOwner.attachPath;final UploadIdentity origin=captureUploadIdentity(account);
             execute(()->{try{VyrnBridge bridge=forAccount(account);if(!currentUploadIdentity(account,origin))throw new SecurityException("account_changed");String user=origin.owner;String client=UUID.nameUUIDFromBytes((user+":"+random).getBytes(StandardCharsets.UTF_8)).toString();
                 bridge.outbox.cancelFromUi(user,client,bridge.ids.remote("conversation",-dialog),text,localId,dialog,random);
                 if(attachment&&path!=null&&!path.isEmpty())FileLoader.getInstance(account).cancelFileUpload(path,false);
@@ -795,8 +795,14 @@ public final class VyrnBridge {
                     file=media.file;filename=file.name;kind="image";
                 }else if(in.media instanceof TLRPC.TL_inputMediaUploadedDocument){
                     TLRPC.TL_inputMediaUploadedDocument media=(TLRPC.TL_inputMediaUploadedDocument)in.media;
-                    if(media.file==null||media.thumb!=null||media.ttl_seconds!=0||!media.stickers.isEmpty()||media.spoiler||media.attributes.size()!=1||!(media.attributes.get(0) instanceof TLRPC.TL_documentAttributeFilename))throw new UnsupportedOperationException("media_variant_unavailable");
-                    file=media.file;filename=((TLRPC.TL_documentAttributeFilename)media.attributes.get(0)).file_name;kind="file";
+                    if(media.file==null||media.thumb!=null||media.ttl_seconds!=0||!media.stickers.isEmpty()||media.spoiler||media.attributes.size()!=1)throw new UnsupportedOperationException("media_variant_unavailable");
+                    file=media.file;
+                    if(media.attributes.get(0) instanceof TLRPC.TL_documentAttributeFilename){filename=((TLRPC.TL_documentAttributeFilename)media.attributes.get(0)).file_name;kind="file";}
+                    else if(media.attributes.get(0) instanceof TLRPC.TL_documentAttributeAudio){
+                        TLRPC.TL_documentAttributeAudio audio=(TLRPC.TL_documentAttributeAudio)media.attributes.get(0);
+                        if(!audio.voice||!"audio/ogg".equals(media.mime_type)||media.flags!=0||media.force_file||media.nosound_video||media.video_cover!=null||media.video_timestamp!=0||(audio.flags&~(4|1024))!=0||!Double.isFinite(audio.duration)||audio.duration<0||audio.duration>Integer.MAX_VALUE||audio.title!=null||audio.performer!=null||audio.waveform!=null&&(audio.waveform.length<1||audio.waveform.length>63))throw new UnsupportedOperationException("media_voice_options_unavailable");
+                        filename=file.name;kind="voice";
+                    }else throw new UnsupportedOperationException("media_variant_unavailable");
                 }else throw new UnsupportedOperationException("media_variant_unavailable");
                 JSONObject upload=new JSONObject().put("id",uploadId(identity,file.id)).put("part_count",file.parts).put("kind",kind).put("filename",filename).put("md5",file.md5_checksum==null?"":file.md5_checksum);
                 VyrnBridge bridge=forAccount(account);String client=UUID.nameUUIDFromBytes((identity.owner+":"+in.random_id).getBytes(StandardCharsets.UTF_8)).toString();
@@ -945,7 +951,12 @@ public final class VyrnBridge {
                 TLRPC.TL_photoSize size=new TLRPC.TL_photoSize();size.type="x";size.w=value.width;size.h=value.height;size.size=(int)value.size;size.location=avatarLocation(photo.id,'x');photo.sizes.add(size);
                 TLRPC.TL_messageMediaPhoto media=new TLRPC.TL_messageMediaPhoto();media.flags=1;media.photo=photo;out.media=media;
             }else{
-                TLRPC.TL_document document=new TLRPC.TL_document();document.id=mediaId;document.access_hash=document.id;document.file_reference=value.sha256.getBytes(StandardCharsets.US_ASCII);document.date=m.date;document.size=value.size;document.mime_type=value.contentType;document.dc_id=1;TLRPC.TL_documentAttributeFilename name=new TLRPC.TL_documentAttributeFilename();name.file_name=value.filename;document.attributes.add(name);TLRPC.TL_messageMediaDocument media=new TLRPC.TL_messageMediaDocument();media.flags=1;media.document=document;out.media=media;
+                TLRPC.TL_document document=new TLRPC.TL_document();document.id=mediaId;document.access_hash=document.id;document.file_reference=value.sha256.getBytes(StandardCharsets.US_ASCII);document.date=m.date;document.size=value.size;document.mime_type=value.contentType;document.dc_id=1;TLRPC.TL_documentAttributeFilename name=new TLRPC.TL_documentAttributeFilename();name.file_name=value.filename;document.attributes.add(name);
+                if("voice".equals(value.kind)){
+                    if(value.durationMs<1||value.durationMs>Integer.MAX_VALUE*1000L||!"audio/ogg".equals(value.contentType))throw new SecurityException("voice_descriptor_changed");
+                    TLRPC.TL_documentAttributeAudio audio=new TLRPC.TL_documentAttributeAudio();audio.voice=true;audio.duration=value.durationMs/1000.0;document.attributes.add(audio);
+                }
+                TLRPC.TL_messageMediaDocument media=new TLRPC.TL_messageMediaDocument();media.flags=1;media.document=document;out.media=media;
             }
             out.flags|=TLRPC.MESSAGE_FLAG_HAS_MEDIA;
         }

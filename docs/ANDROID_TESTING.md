@@ -1,3 +1,7 @@
+## Voice upload and native adapter — 2026-10-14
+
+Run `./scripts/test-android-integration.ps1 -Phases media-voice-upload` against matching local Core migration009. The dedicated emulator uses the original small Audio upload queue and original-codec synthetic recording; native media dispatch/outbox performs completion and publication. Replaying the same request must produce one message, validated duration/hash and one durable voice intent. This phase does not press the recording or playback controls. Evidence: artifacts/android-media-voice-upload.json.
+
 ## Original voice codec boundaries — 2026-10-14
 
 Run `./scripts/test-android-integration.ps1 -Phases media-voice-codec` with a matching local instrumentation APK. This dedicated-emulator phase uses synthetic PCM with original native startRecord/writeFrame/stopRecord and full cropOpusFile decode/re-encode; it never opens the microphone. Three endings test zero, half and near-full final frames. Fixtures in backend/internal/api/testdata allow independent backend framing/timing checks. This is codec verification, not recording/Send/playback UI acceptance.

@@ -1,5 +1,11 @@
 # Acceptance matrix
 
+## Group voice transport and native DTO accepted locally — 2026-10-14
+
+Original small Audio FileLoader transfer, durable voice completion/publication, repeat without duplicate, account/session/media binding, verified1010ms duration overriding a false client hint, hash-bound native voice acknowledgement and explicit music rejection pass44 checks. Existing file28/photo27 pass on the same local APK495f5123c601812d5040a4a392aaeb662b2fae44038b133b40b36f85d182d1bd (99 total), scripts exit0 without attach retries.
+
+This is transport/DTO verification with synthetic original-codec audio. Actual recording/Send and receive/playback controls, permission dialogs, pending voice cancellation, offline/cold/low-storage edges, private encrypted voice and physical phones are not accepted yet. The native TYPE_VOICE cancellation path is connected but its interactive behavior remains to be proved. Group default voice permissions were not enabled by this checkpoint. Full original goal remains active.
+
 ## Voice codec and upload metadata groundwork — 2026-10-14
 
 Original native PCM encoding, container opening and full decode/re-encode pass for three final-input boundaries on local APKd1f2eeb6bbd40f5c62e67c9e576cb99e80680cdb871e0fe014d9f39bb74ff463. Six native fixture durations, direct/resumable voice API metadata/ACL/deletion and existing image/avatar/upload regressions pass with migration009 in isolated PostgreSQL schemas. The actual native encoder EOS defect was fixed; see TEST_REPORT for provenance and limits.

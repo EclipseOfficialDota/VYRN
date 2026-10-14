@@ -41,10 +41,11 @@ public final class Models {
         public Message(String id,String sender,String text,int date,int ordinal,boolean encrypted,boolean deleted,String conversation,int revision,int editedDate,Attachment attachment){this.id=id;this.sender=sender;this.text=text;this.date=date;this.ordinal=ordinal;this.encrypted=encrypted;this.deleted=deleted;this.conversation=conversation;this.revision=revision;this.editedDate=editedDate;this.attachment=attachment;}
     }
     public static final class Attachment {
-        public final String id,conversation,kind,filename,contentType,sha256;public final long size;public final boolean encrypted;
+        public final String id,conversation,kind,filename,contentType,sha256;public final long size,durationMs;public final boolean encrypted;
         public final int width,height;
         public Attachment(String id,String conversation,String kind,String filename,String contentType,String sha256,long size,boolean encrypted){this(id,conversation,kind,filename,contentType,sha256,size,encrypted,0,0);}
-        public Attachment(String id,String conversation,String kind,String filename,String contentType,String sha256,long size,boolean encrypted,int width,int height){this.id=id;this.conversation=conversation;this.kind=kind;this.filename=filename;this.contentType=contentType;this.sha256=sha256;this.size=size;this.encrypted=encrypted;this.width=width;this.height=height;}
+        public Attachment(String id,String conversation,String kind,String filename,String contentType,String sha256,long size,boolean encrypted,int width,int height){this(id,conversation,kind,filename,contentType,sha256,size,encrypted,width,height,0);}
+        public Attachment(String id,String conversation,String kind,String filename,String contentType,String sha256,long size,boolean encrypted,int width,int height,long durationMs){this.id=id;this.conversation=conversation;this.kind=kind;this.filename=filename;this.contentType=contentType;this.sha256=sha256;this.size=size;this.encrypted=encrypted;this.width=width;this.height=height;this.durationMs=durationMs;}
     }
     public static final class Member {
         public final User user;public final String role;public final int joinedDate;

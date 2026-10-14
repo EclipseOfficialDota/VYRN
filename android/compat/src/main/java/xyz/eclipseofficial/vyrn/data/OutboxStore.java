@@ -41,7 +41,7 @@ public final class OutboxStore extends SQLiteOpenHelper {
         return enqueue(user,client,conversation,text,null,null);
     }
     public synchronized Entry enqueueMedia(String user,String client,String conversation,String text,String session,org.json.JSONObject upload) throws Exception {
-        java.util.UUID.fromString(session);java.util.UUID.fromString(upload.getString("id"));String kind=upload.getString("kind");if(upload.getInt("part_count")<1||upload.getInt("part_count")>8192||!("file".equals(kind)||"image".equals(kind)))throw new IllegalArgumentException("media_intent");
+        java.util.UUID.fromString(session);java.util.UUID.fromString(upload.getString("id"));String kind=upload.getString("kind");if(upload.getInt("part_count")<1||upload.getInt("part_count")>8192||!("file".equals(kind)||"image".equals(kind)||"voice".equals(kind)))throw new IllegalArgumentException("media_intent");
         return enqueue(user,client,conversation,text,session,upload);
     }
     private Entry enqueue(String user,String client,String conversation,String text,String session,org.json.JSONObject upload) throws Exception {
