@@ -458,6 +458,15 @@ func (s *Server) completeUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	contentType := "application/octet-stream"
+	var duration int64
+	if in.Kind == "voice" {
+		duration, err = voiceDuration(path)
+		if err != nil {
+			fail(w, 400, "invalid_voice")
+			return
+		}
+		contentType = "audio/ogg"
+	}
 	if in.Kind == "image" {
 		config, format, e := avatarImage(path, true)
 		if e != nil || config.Width < 1 {
@@ -477,7 +486,7 @@ func (s *Server) completeUpload(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 	hash = hex.EncodeToString(sha.Sum(nil))
-	if _, err = tx.Exec(ctx, `INSERT INTO media(id,owner_id,conversation_id,kind,filename,content_type,size,sha256,storage_key,encrypted) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,false)`, id, current(r).UserID, in.Conversation, in.Kind, in.Filename, contentType, size, hash, id); err != nil {
+	if _, err = tx.Exec(ctx, `INSERT INTO media(id,owner_id,conversation_id,kind,filename,content_type,size,sha256,storage_key,encrypted,duration_ms) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,false,$10)`, id, current(r).UserID, in.Conversation, in.Kind, in.Filename, contentType, size, hash, id, duration); err != nil {
 		s.internal(w)
 		return
 	}

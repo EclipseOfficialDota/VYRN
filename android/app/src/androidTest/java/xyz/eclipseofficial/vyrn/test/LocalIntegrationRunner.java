@@ -87,7 +87,9 @@ public final class LocalIntegrationRunner extends Instrumentation {
             check(foreground!=null,"foreground_activity");
             stage="foreground_idle";
             if(!boundedChatStartup)waitForIdleSync();
-            if(phase.equals("media-photo-chat-cold-recover")){
+            if(phase.equals("media-voice-codec")){
+                stage="media_voice_codec";MediaUiIntegration.voiceCodec(this,(condition,name)->{check(condition,name);passed.put(name);});
+            }else if(phase.equals("media-photo-chat-cold-recover")){
                 stage="media_cold_chat";MediaUiIntegration.recoverColdChat(this,foreground,(condition,name)->{check(condition,name);passed.put(name);});
             }else if(phase.equals("media-photo-upload-cold-prepare")||phase.equals("media-photo-upload-cold-recover")){
                 stage="media_cold_upload";MediaUiIntegration.uploadCold(this,foreground,read("vyrn-test-fixture.json"),(condition,name)->{check(condition,name);passed.put(name);},phase.endsWith("recover"));

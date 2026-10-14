@@ -8,6 +8,43 @@ function Write-Text([string]$Path,[string]$Text){
  if(!(Test-Path -LiteralPath $Path) -or [IO.File]::ReadAllText($Path) -cne $Text){[IO.File]::WriteAllText($Path,$Text,[Text.UTF8Encoding]::new($false))}
 }
 function Edit([string]$Relative,[scriptblock]$Transform){$p=Join-Path $upstream $Relative;$old=[IO.File]::ReadAllText($p);$new=& $Transform $old;Write-Text $p $new}
+Edit 'TMessagesProj/jni/audio.c' {
+ param($t)
+ if(!$t.Contains('static int vyrnWriteFramePacket(')){
+  $start='int writeFrame(uint8_t *framePcmBytes, uint32_t frameByteCount, int end) {'
+  $end='JNIEXPORT jint Java_org_telegram_messenger_MediaController_startRecord('
+  $from=$t.IndexOf($start)
+  if($from -lt 0 -or !$t.Contains('const opus_int32 frame_size = 960;')){throw 'Pinned native voice encoder marker missing'}
+  $to=$t.IndexOf($end,$from)
+  if($to -lt 0){throw 'Pinned native voice encoder end marker missing'}
+  $section=$t.Substring($from,$to-$from)
+  if(([regex]::Matches($section,[regex]::Escape('total_samples += nb_samples;'))).Count -ne 1){throw 'Pinned voice sample accounting changed'}
+  $section=$section.Replace($start,'static int vyrnWriteFramePacket(uint8_t *framePcmBytes, uint32_t frameByteCount, int end, int padding) {').Replace('total_samples += nb_samples;','if (!padding) total_samples += nb_samples;')
+  $tail=@'
+// Drain encoder lookahead without extending the recorded PCM duration.
+// Empty/near-full final input must still produce valid EOS audio packets.
+int writeFrame(uint8_t *framePcmBytes, uint32_t frameByteCount, int end) {
+    if (!_encoder || !_fileOs || frameByteCount > frame_size * 2 || (!framePcmBytes && frameByteCount)) return 0;
+    if (!end) return vyrnWriteFramePacket(framePcmBytes, frameByteCount, 0, 0);
+    const ogg_int64_t target = ((total_samples + frameByteCount / 2) * 48000 + rate - 1) / rate + header.preskip;
+    const ogg_int64_t step = frame_size * 48000 / coding_rate;
+    if (frameByteCount) {
+        const int last = enc_granulepos + step >= target;
+        if (!vyrnWriteFramePacket(framePcmBytes, frameByteCount, last, 0)) return 0;
+        if (last) return 1;
+    }
+    opus_int16 silence[960] = {0};
+    do {
+        if (!vyrnWriteFramePacket((uint8_t *)silence, sizeof(silence), enc_granulepos + step >= target, 1)) return 0;
+    } while (enc_granulepos < target);
+    return 1;
+}
+
+'@
+  $t=$t.Substring(0,$from)+$section+$tail+$t.Substring($to)
+ }
+ $t
+}
 function Disable-AiControls([string]$t){
  $available='xyz.eclipseofficial.vyrn.compat.VyrnBridge.aiEditorAvailable()'
  foreach($button in @('aiButton','topAiButton','aiStyleButton')){

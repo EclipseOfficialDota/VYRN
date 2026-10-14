@@ -65,7 +65,7 @@ All production endpoints require HTTPS. JSON uses UTF-8. Authentication is `Auth
 | PUT `/v1/conversations/{id}/sends/{client}/cancel` | atomically fence an unsent client ID or return its committed message ID |
 | POST `/v1/media?kind=file&conversation_id=...` | raw bytes, Content-Length, optional X-Filename; encrypted=true for private attachments |
 | GET `/v1/media/{id}` | authorized download with range support and SHA-256 ETag for If-Range |
-| GET `/v1/media/{id}/metadata` | authorized file descriptor: kind, filename, content_type, size, sha256, encrypted, created_at and conversation_id |
+| GET `/v1/media/{id}/metadata` | authorized file descriptor: kind, filename, content_type, size, sha256, encrypted, created_at and conversation_id; validated unencrypted voices also include duration_ms |
 | GET `/health/live`, `/health/ready` | process and PostgreSQL readiness |
 
 Media metadata uses the same access rule as downloading bytes: the owner, a viewer of a currently assigned enabled-user avatar, or a current conversation member with a live message referencing the file. Conversation membership alone does not grant access to an unpublished upload. Deleted/expired messages do not grant access; the upload owner retains access until collection. Responses never expose storage keys or filesystem paths. Missing, nonregular or size-mismatched stored files return404. Download ETags are the quoted stored SHA-256; clients still verify the complete downloaded hash before accepting an attachment. This supports hash-bound byte-range downloads, not resumable upload sessions. Private encryption and native image/file/voice integration remain client work.

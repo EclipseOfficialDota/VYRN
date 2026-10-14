@@ -30,6 +30,25 @@ import xyz.eclipseofficial.vyrn.domain.Models;
 
 /** Native file selection/send and receive/download scenarios; group setup uses API fixtures. */
 final class MediaUiIntegration {
+    static void voiceCodec(Instrumentation instrumentation,AuthUiIntegration.Check check) throws Exception {
+        org.telegram.messenger.MediaController controller=org.telegram.messenger.MediaController.getInstance();
+        java.lang.reflect.Method start=controller.getClass().getDeclaredMethod("startRecord",String.class,int.class),write=controller.getClass().getDeclaredMethod("writeFrame",java.nio.ByteBuffer.class,int.class),stop=controller.getClass().getDeclaredMethod("stopRecord");
+        start.setAccessible(true);write.setAccessible(true);stop.setAccessible(true);
+        for(int tail:new int[]{0,480,959}){
+            File file=new File(instrumentation.getTargetContext().getFilesDir(),"vyrn-native-voice-"+tail+".ogg");
+            check.verify((Integer)start.invoke(controller,file.getAbsolutePath(),48000)==1,"voice_original_native_encoder_started_"+tail);
+            try{
+                java.nio.ByteBuffer pcm=java.nio.ByteBuffer.allocateDirect(1920).order(java.nio.ByteOrder.nativeOrder());
+                for(int i=0;i<960;i++)pcm.putShort((short)(Math.sin(i*2*Math.PI*400/48000)*6000));
+                boolean encoded=true;for(int frame=0;frame<50;frame++)if((Integer)write.invoke(controller,pcm,1920)!=1){encoded=false;break;}
+                check.verify(encoded,"voice_original_native_frames_encoded_"+tail);
+                check.verify((Integer)write.invoke(controller,pcm,tail*2)==1,"voice_original_native_eos_encoded_"+tail);
+            }finally{stop.invoke(controller);}
+            check.verify(file.isFile()&&file.length()>0&&org.telegram.messenger.MediaController.isOpusFile(file.getAbsolutePath())==1,"voice_original_native_container_opens_"+tail);
+            File decoded=new File(instrumentation.getTargetContext().getFilesDir(),"vyrn-native-voice-decoded-"+tail+".ogg");
+            check.verify(org.telegram.messenger.MediaController.cropOpusFile(file.getAbsolutePath(),decoded.getAbsolutePath(),0,2000)&&decoded.isFile(),"voice_original_native_full_pcm_decode_and_reencode_"+tail);
+        }
+    }
     static void uploadCold(Instrumentation instrumentation,Activity activity,JSONObject fixture,AuthUiIntegration.Check check,boolean recover) throws Exception {
         android.content.Context context=instrumentation.getTargetContext();File evidence=new File(context.getFilesDir(),"vyrn-test-cold-upload.json");
         if(!recover)AuthUiIntegration.registration(instrumentation,activity,fixture,check);
@@ -241,6 +260,10 @@ final class MediaUiIntegration {
             android.graphics.Rect visible=new android.graphics.Rect();int[] screen=new int[2],window=new int[2];
             shown[0]=view.isShown()&&view.getGlobalVisibleRect(visible);view.getLocationOnScreen(screen);view.getLocationInWindow(window);
             position[0]=visible.centerX()+screen[0]-window[0];position[1]=visible.centerY()+screen[1]-window[1];
+            if(name.equals("photo_ui_original_selection_control"))try{
+                JSONObject point=new JSONObject().put("x",position[0]).put("y",position[1]).put("visible",visible.toShortString()).put("screen_x",screen[0]).put("screen_y",screen[1]).put("window_x",window[0]).put("window_y",window[1]);
+                Files.write(new File(instrumentation.getTargetContext().getFilesDir(),"vyrn-test-photo-tap.json").toPath(),point.toString().getBytes(StandardCharsets.UTF_8));
+            }catch(Exception failure){throw new AssertionError(failure);}
         });
         check.verify(shown[0],name+"_shown");long time=android.os.SystemClock.uptimeMillis();
         for(int action:new int[]{android.view.MotionEvent.ACTION_DOWN,android.view.MotionEvent.ACTION_UP}){

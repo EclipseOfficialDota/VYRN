@@ -1,3 +1,7 @@
+## Original voice codec boundaries — 2026-10-14
+
+Run `./scripts/test-android-integration.ps1 -Phases media-voice-codec` with a matching local instrumentation APK. This dedicated-emulator phase uses synthetic PCM with original native startRecord/writeFrame/stopRecord and full cropOpusFile decode/re-encode; it never opens the microphone. Three endings test zero, half and near-full final frames. Fixtures in backend/internal/api/testdata allow independent backend framing/timing checks. This is codec verification, not recording/Send/playback UI acceptance.
+
 ## Photo send during a mid-upload outage — 2026-10-14
 
 With the native local TLS proxy running, use a matching instrumentation build:

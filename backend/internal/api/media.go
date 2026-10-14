@@ -142,6 +142,15 @@ func (s *Server) upload(w http.ResponseWriter, r *http.Request) {
 		conv = conversation
 	}
 	contentType := "application/octet-stream"
+	var duration int64
+	if kind == "voice" && !encrypted {
+		duration, err = voiceDuration(path)
+		if err != nil {
+			fail(w, 400, "invalid_voice")
+			return
+		}
+		contentType = "audio/ogg"
+	}
 	if kind == "avatar" || kind == "image" && !encrypted {
 		config, format, imageErr := avatarImage(path, true)
 		if imageErr != nil || config.Width < 1 {
@@ -154,7 +163,7 @@ func (s *Server) upload(w http.ResponseWriter, r *http.Request) {
 		}
 		contentType = "image/" + format
 	}
-	_, err = tx.Exec(ctx, `INSERT INTO media(id,owner_id,conversation_id,kind,filename,content_type,size,sha256,storage_key,encrypted) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$10,$9)`, id, p.UserID, conv, kind, name, contentType, size, hex.EncodeToString(hash.Sum(nil)), encrypted, id)
+	_, err = tx.Exec(ctx, `INSERT INTO media(id,owner_id,conversation_id,kind,filename,content_type,size,sha256,storage_key,encrypted,duration_ms) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$10,$9,$11)`, id, p.UserID, conv, kind, name, contentType, size, hex.EncodeToString(hash.Sum(nil)), encrypted, id, duration)
 	if err != nil || tx.Commit(ctx) != nil {
 		s.internal(w)
 		return
@@ -283,6 +292,7 @@ type mediaDetails struct {
 	Encrypted    bool      `json:"encrypted"`
 	Width        int       `json:"width,omitempty"`
 	Height       int       `json:"height,omitempty"`
+	DurationMS   int64     `json:"duration_ms,omitempty"`
 	CreatedAt    time.Time `json:"created_at"`
 	Conversation *string   `json:"conversation_id"`
 	storageKey   string
@@ -291,7 +301,7 @@ type mediaDetails struct {
 // Metadata and bytes must use the same live-message membership boundary.
 func (s *Server) accessibleMedia(ctx context.Context, id, user string) (mediaDetails, error) {
 	var value mediaDetails
-	err := s.db.QueryRow(ctx, `SELECT f.id::text,f.kind,f.filename,f.content_type,f.size,f.sha256,f.encrypted,f.created_at,f.conversation_id::text,f.storage_key FROM media f WHERE f.id=$1 AND (f.owner_id=$2 OR EXISTS(SELECT 1 FROM users u WHERE u.avatar_id=f.id AND NOT u.disabled) OR EXISTS(SELECT 1 FROM messages msg JOIN members m ON m.conversation_id=msg.conversation_id WHERE msg.media_id=f.id AND m.user_id=$2 AND msg.deleted_at IS NULL AND (msg.expires_at IS NULL OR msg.expires_at>now())))`, id, user).Scan(&value.ID, &value.Kind, &value.Filename, &value.ContentType, &value.Size, &value.SHA256, &value.Encrypted, &value.CreatedAt, &value.Conversation, &value.storageKey)
+	err := s.db.QueryRow(ctx, `SELECT f.id::text,f.kind,f.filename,f.content_type,f.size,f.sha256,f.encrypted,f.created_at,f.conversation_id::text,f.storage_key,f.duration_ms FROM media f WHERE f.id=$1 AND (f.owner_id=$2 OR EXISTS(SELECT 1 FROM users u WHERE u.avatar_id=f.id AND NOT u.disabled) OR EXISTS(SELECT 1 FROM messages msg JOIN members m ON m.conversation_id=msg.conversation_id WHERE msg.media_id=f.id AND m.user_id=$2 AND msg.deleted_at IS NULL AND (msg.expires_at IS NULL OR msg.expires_at>now())))`, id, user).Scan(&value.ID, &value.Kind, &value.Filename, &value.ContentType, &value.Size, &value.SHA256, &value.Encrypted, &value.CreatedAt, &value.Conversation, &value.storageKey, &value.DurationMS)
 	return value, err
 }
 

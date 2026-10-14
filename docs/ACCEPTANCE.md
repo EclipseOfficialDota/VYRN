@@ -1,5 +1,11 @@
 # Acceptance matrix
 
+## Voice codec and upload metadata groundwork — 2026-10-14
+
+Original native PCM encoding, container opening and full decode/re-encode pass for three final-input boundaries on local APKd1f2eeb6bbd40f5c62e67c9e576cb99e80680cdb871e0fe014d9f39bb74ff463. Six native fixture durations, direct/resumable voice API metadata/ACL/deletion and existing image/avatar/upload regressions pass with migration009 in isolated PostgreSQL schemas. The actual native encoder EOS defect was fixed; see TEST_REPORT for provenance and limits.
+
+Voice transport/UI integration is still incomplete: original recording/Send controls, incoming native voice rows and playback, permissions, progress/cancel/offline/cold/low-storage and two physical devices require completion. Codec/API evidence does not satisfy those UI requirements. Full original goal remains active.
+
 ## Group gallery photo resumes after mid-upload disconnection — 2026-10-14
 
 On local TLS APKc359566d74b1f205d56f64080bc82870217f7e6f9818743b7c1652e42e875faf,73 checks cover actual gallery/Send, positive original worker progress before a real local transport outage, retained partial upload and native pending bubble for12 seconds, authenticated reconnection, automatic completion under the same upload ID, exact prepared media and no duplicate message. The report and worker/wrapper exit distinction are recorded in TEST_REPORT. Long offline beyond the retry budget, low-storage, physical phones, private encrypted media, voice, background acceptance, production rollout, Release signing and offsite restore remain pending. Full goal remains active.
