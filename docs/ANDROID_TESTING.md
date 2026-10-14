@@ -1,3 +1,13 @@
+## Automatic pending gallery photo recovery — 2026-10-14
+
+Use the exact ordered pair in one invocation with a matching local instrumentation build:
+
+```powershell
+./scripts/test-android-integration.ps1 -Phases @('media-photo-chat-cold-prepare','media-photo-chat-cold-recover')
+```
+
+This clears only the dedicated emulator app before prepare, preserves its data between phases, commits and holds the first upload-part acknowledgement, then force-stops and restarts the original app. Recovery relies on normal unsent-message startup. Evidence: artifacts/android-media-photo-chat-cold.json. The older media-photo-upload-cold-prepare/recover pair tests explicit original FileLoader worker resume and remains a separate component scenario. Neither pair establishes physical-device compatibility.
+
 ## Original native upload workers — 2026-10-12
 
 With matching local Core supporting migration008, run separate `media-upload`, `media-upload-big`, `media-upload-cancel` invocations of scripts/test-android-integration.ps1. Final local APKafce9eb96099e93d3d9de6df002569ec741c30fc6272638acd1fa32f08f344de passes24+24+19=67 checks, reports2026-10-12T08:39:17/08:44:31/08:35:25+03:30. Small2MiB+113 and big12MiB+113 use original FileLoader/FileUploadOperation, original progress notifications, persisted server parts and exact completed hash.16MiB+113 cancel test calls original FileLoader.cancelFileUpload after real progress; server cancellation/cleanup, late-part409, no completion and original source preservation pass. Small had one allowed pre-runner attach retry. All accepted scripts exit0.

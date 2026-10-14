@@ -1,3 +1,13 @@
+## Automatic pending gallery photo recovery — 2026-10-14
+
+The new media-photo-chat-cold-prepare/recover pair exercises original gallery selection and Send, preserves the actual pending native message, and interrupts the app after the local Core commits the first upload part while its acknowledgement is held. The next phase starts a new Android process with the original account/session. Recovery uses normal ApplicationLoader/unsent-message startup; it does not call FileLoader or retrySendMessage, insert a pending message, or inject upload preferences.
+
+Prepare passed55 checks and recover8 at2026-10-13T23:43:21+03:30. Recovery confirms one server message, original client/upload identity in the SENT outbox row, original prepared image size/SHA, and an acknowledged message cell in the reopened native chat. These checks cover this interrupted single-photo group send; they do not establish prolonged offline recovery, low-storage behavior, a decoded non-thumbnail recovery bitmap, or physical phone acceptance.
+
+The shared driver regression media-photo-send-part-ack-ui passed62 checks at2026-10-14T16:06:43+03:30 and exited0. The cold pair also exited0; neither invocation needed a startup attach retry. Both reports match local TLS APK SHA-256 6c742a3bd022cb2b87d39304732db8f7f952e7da6fda6517e6ca4ee5fa124f68: artifacts/android-media-photo-chat-cold.json and artifacts/android-media-photo-send-part-ack-ui.json (125 checks total). The Oct13 regression request rejected for usage limits did not execute; the Oct14 result is the executed regression.
+
+Normal phone APKs and production backend remain at their earlier versions. Physical Xiaomi installation, full two-device/background/media acceptance, production rollout, signed Release and external backup/restore remain open. Existing Android8+ ARM32/ARM64 configuration is a compatibility target, not proof on every phone from the past five years.
+
 ## Native upload transport/progress/cancel — 2026-10-12
 
 Same local APKafce9eb96099e93d3d9de6df002569ec741c30fc6272638acd1fa32f08f344de passes67 native upload checks: small24 (08:39:17), big24 (08:44:31), cancel19 (08:35:25), all2026-10-12+03:30, independent scripts exit0. Original small/big part producers and progress full-size, persisted chunks, exact completed-file SHA/replay, actual FileLoader cancellation after progress, late-write fence, part cleanup and source preservation pass. Small had one pre-runner attach retry. Final independent Signal35 also passes on same APK.
