@@ -1,3 +1,7 @@
+## Original voice recording UI storage error and retry — 2026-10-14
+
+Run `./scripts/test-android-integration.ps1 -Phases media-voice-storage-ui` on local Core migration009/native TLS and the owned no-host-audio emulator. It records through original composer touch controls, matches the unique live output descriptor by device/inode and changes it to read-only. Require visible storage Toast text, failed-file cleanup, zero published audio/message, restored composer and successful repeat recording in the same activity. Report: artifacts/android-media-voice-storage-ui.json. Permission is fixture-granted; whole-volume ENOSPC and physical hardware are separate acceptance requirements.
+
 ## Native voice storage-I/O failure — 2026-10-14
 
 Run `./scripts/test-android-integration.ps1 -Phases media-voice-storage` with the matching local instrumentation APK. The test uses the actual native encoder and finalizer, switches only its own output file descriptor to read-only, and requires rejected finalization, partial-file cleanup, original error notification, no audioDidSent and successful subsequent codec boundary/decode tests. A second fixture injects the prior-frame failure latch. Report: artifacts/android-media-voice-storage.json.

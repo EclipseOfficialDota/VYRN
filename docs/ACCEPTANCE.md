@@ -1,5 +1,11 @@
 # Acceptance matrix
 
+## Original voice recording UI error and retry accepted locally — 2026-10-14
+
+38 checks cover real composer record/hold/release, actual encoder write failure, visible storage Toast accessibility text, deletion of the failed recording, no published media/message, restored composer and successful repeat recording/Send in the same activity. Shared component storage regression passes21 on APK7b8e0acb4bc63e19a6e6effc8b2c3aea8c6f2944d1bd504c6ad1d6ddf831c61d. Final scripts exit0 without startup attach retries. See TEST_REPORT for fixture details and excluded initial attempt.
+
+This is write-failure UI acceptance on the owned no-host-audio emulator. Whole-volume ENOSPC, physical devices, permission onboarding, pause/drafts, other media storage cases and full background/private/release/offsite scope remain pending.
+
 ## Voice storage-I/O failure contained locally — 2026-10-14
 
 Native encoder output is switched to a read-only descriptor after successful startup. Final write/flush failure returns failure, cleans partial files, emits the original error event and never emits audioDidSent. Prior-frame failure cleanup and subsequent native encode/PCM decode pass21 checks; actual member record/Send passes29 on APK7e38fa16779a73f6ce31e3eba0b16aed5ebd91e9f35205e66618c821627659f5. Automatic cold voice recovery also passes; authoritative report is artifacts/android-media-voice-chat-cold.json.

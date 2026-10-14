@@ -30,6 +30,16 @@ import xyz.eclipseofficial.vyrn.domain.Models;
 
 /** Native file selection/send and receive/download scenarios; group setup uses API fixtures. */
 final class MediaUiIntegration {
+    private static void failVoiceOutput(File recorded) throws Exception {
+        int output=-1,matches=0;
+        android.system.StructStat source=android.system.Os.stat(recorded.getAbsolutePath());
+        for(File descriptor:new File("/proc/self/fd").listFiles()){
+            try{android.system.StructStat opened=android.system.Os.stat(descriptor.getAbsolutePath());if(opened.st_dev==source.st_dev&&opened.st_ino==source.st_ino){output=Integer.parseInt(descriptor.getName());matches++;}}catch(android.system.ErrnoException vanished){}
+        }
+        if(output<0||matches!=1)throw new AssertionError("voice_storage_native_output_missing");
+        java.io.FileDescriptor readOnly=android.system.Os.open(recorded.getAbsolutePath(),android.system.OsConstants.O_RDONLY,0);
+        try{android.system.Os.dup2(readOnly,output);}finally{android.system.Os.close(readOnly);}
+    }
     static void voiceStorage(Instrumentation instrumentation,AuthUiIntegration.Check check) throws Exception {
         org.telegram.messenger.MediaController controller=org.telegram.messenger.MediaController.getInstance();
         java.lang.reflect.Method start=controller.getClass().getDeclaredMethod("startRecord",String.class,int.class),finish=controller.getClass().getDeclaredMethod("vyrnFinishVoiceRecord",int.class,int.class,File.class,File.class);
@@ -47,13 +57,7 @@ final class MediaUiIntegration {
                 CompletableFuture<Boolean> saved=new CompletableFuture<>();
                 ((org.telegram.messenger.DispatchQueue)field(controller,"fileEncodingQueue")).postRunnable(()->{try{
                     if((Integer)start.invoke(controller,recorded.getAbsolutePath(),48000)!=1)throw new AssertionError("voice_storage_native_start_failed");
-                    // Switch only this encoder's output to a read-only descriptor (real write failure).
-                    int output=-1;for(File descriptor:new File("/proc/self/fd").listFiles()){
-                        try{if(new File(android.system.Os.readlink(descriptor.getAbsolutePath())).getCanonicalPath().equals(recorded.getCanonicalPath())){output=Integer.parseInt(descriptor.getName());break;}}catch(android.system.ErrnoException vanished){}
-                    }
-                    if(output<0)throw new AssertionError("voice_storage_native_output_missing");
-                    java.io.FileDescriptor full=android.system.Os.open(recorded.getAbsolutePath(),android.system.OsConstants.O_RDONLY,0);
-                    try{android.system.Os.dup2(full,output);}finally{android.system.Os.close(full);}
+                    failVoiceOutput(recorded);
                     failed.setBoolean(controller,earlierFailure);((java.nio.ByteBuffer)field(controller,"fileBuffer")).rewind();
                     saved.complete((Boolean)finish.invoke(controller,account,guid,previous,recorded));
                 }catch(Throwable failure){try{JSONObject diagnostic=new JSONObject().put("type",failure.getClass().getSimpleName());if(failure instanceof AssertionError&&failure.getMessage()!=null&&failure.getMessage().matches("voice_storage_[a-z_]+"))diagnostic.put("guard",failure.getMessage());if(failure instanceof android.system.ErrnoException)diagnostic.put("errno",((android.system.ErrnoException)failure).errno);Files.write(new File(instrumentation.getTargetContext().getFilesDir(),"vyrn-test-voice-storage.json").toPath(),diagnostic.toString().getBytes(StandardCharsets.UTF_8));}catch(Exception ignored){}saved.completeExceptionally(failure);}});
@@ -143,7 +147,7 @@ final class MediaUiIntegration {
             boolean denied=false;try{bridge.repository.uploadPartForSession(owner,session,upload,0,new byte[]{1,2,3});}catch(RestRepository.ApiException failure){denied=failure.status==409;}check.verify(denied,"cancel_cold_fence_rejects_late_replay");Files.delete(evidence.toPath());
         }
     }
-    static void sendUi(Instrumentation instrumentation,Activity activity,JSONObject fixture,AuthUiIntegration.Check check,boolean member,boolean offline,boolean ackLoss,boolean cancel,boolean photo,boolean coldPrepare,boolean midOffline,boolean voice) throws Exception {
+    static void sendUi(Instrumentation instrumentation,Activity activity,JSONObject fixture,AuthUiIntegration.Check check,boolean member,boolean offline,boolean ackLoss,boolean cancel,boolean photo,boolean coldPrepare,boolean midOffline,boolean voice,boolean storageFailure) throws Exception {
         AuthUiIntegration.registration(instrumentation,activity,fixture,check);
         int account=UserConfig.selectedAccount;RestRepository repository=VyrnBridge.forAccount(account).repository;String owner=repository.me().id;
         RestRepository creator=repository;String creatorId=owner;
@@ -160,7 +164,7 @@ final class MediaUiIntegration {
         boolean[] opened={false};instrumentation.runOnMainSync(()->{Bundle args=new Bundle();args.putLong("chat_id",local);opened[0]=LaunchActivity.getLastFragment().presentFragment(new ChatActivity(args));});check.verify(opened[0],"file_ui_actual_chat_open");
         awaitUi(instrumentation,()->LaunchActivity.getLastFragment() instanceof ChatActivity&&((ChatActivity)LaunchActivity.getLastFragment()).getChatActivityEnterView()!=null&&!LaunchActivity.getLastFragment().getParentLayout().isTransitionAnimationInProgress(),check,"file_ui_composer_ready");
         ChatActivity chat=(ChatActivity)LaunchActivity.getLastFragment();
-        if(voice){recordVoice(instrumentation,activity,chat,account,conversation,check,offline,cancel,coldPrepare);return;}
+        if(voice){recordVoice(instrumentation,activity,chat,account,conversation,check,offline,cancel,coldPrepare,storageFailure);return;}
         awaitUi(instrumentation,()->connectionHeader(account,chat,ConnectionsManager.ConnectionStateConnected),check,"file_ui_header_uses_authenticated_vyrn_connection");
         // Directory only is fixture setup; original controls work without camera/gallery grants.
         for(String permission:new String[]{"android.permission.READ_MEDIA_IMAGES","android.permission.READ_MEDIA_VIDEO","android.permission.CAMERA"})check.verify(instrumentation.getTargetContext().checkSelfPermission(permission)==android.content.pm.PackageManager.PERMISSION_DENIED,"file_ui_unrelated_permission_initially_denied");
@@ -220,19 +224,30 @@ final class MediaUiIntegration {
             if(ackLoss||midOffline){try(xyz.eclipseofficial.vyrn.data.OutboxStore outbox=new xyz.eclipseofficial.vyrn.data.OutboxStore(instrumentation.getTargetContext(),account);android.database.Cursor intent=outbox.getReadableDatabase().rawQuery("SELECT upload_body FROM outbox WHERE user_id=? AND conversation_id=? AND state=1",new String[]{owner,conversation})){check.verify(intent.getCount()==1&&intent.moveToFirst(),"file_ui_ack_loss_one_durable_media_intent");JSONObject uploadBody=new JSONObject(intent.getString(0));check.verify(uploadBody.getInt("part_count")>1,"media_ack_loss_original_multi_part_transfer");String upload=uploadBody.getString("id");if(midOffline)check.verify(upload.equals(interruptedUpload),"mid_upload_preserves_original_transfer_identity");Files.write(new File(instrumentation.getTargetContext().getFilesDir(),"vyrn-test-media-upload-id.txt").toPath(),upload.getBytes(StandardCharsets.UTF_8));}}
         }finally{instrumentation.runOnMainSync(()->{org.telegram.messenger.NotificationCenter.getInstance(account).removeObserver(observer,org.telegram.messenger.NotificationCenter.fileUploadProgressChanged);org.telegram.messenger.NotificationCenter.getInstance(account).removeObserver(observer,org.telegram.messenger.NotificationCenter.fileUploadFailed);if(photo)org.telegram.messenger.NotificationCenter.getInstance(account).removeObserver(observer,org.telegram.messenger.NotificationCenter.fileUploaded);});if(galleryImage!=null)instrumentation.getTargetContext().getContentResolver().delete(galleryImage,null,null);}
     }
-    private static void recordVoice(Instrumentation instrumentation,Activity activity,ChatActivity chat,int account,String conversation,AuthUiIntegration.Check check,boolean offline,boolean cancel,boolean coldPrepare) throws Exception {
+    private static void recordVoice(Instrumentation instrumentation,Activity activity,ChatActivity chat,int account,String conversation,AuthUiIntegration.Check check,boolean offline,boolean cancel,boolean coldPrepare,boolean storageFailure) throws Exception {
         org.telegram.ui.Components.ChatActivityEnterView composer=chat.getChatActivityEnterView();
         check.verify(org.telegram.messenger.ChatObject.canSendVoice(chat.getCurrentChat())&&!composer.hasRecordVideo()&&!composer.isInVideoMode(),"voice_ui_supported_audio_only_composer");
         instrumentation.getUiAutomation().grantRuntimePermission(instrumentation.getTargetContext().getPackageName(),"android.permission.RECORD_AUDIO");
         View control=(View)field(composer,"audioVideoButtonContainer");awaitUi(instrumentation,()->control.isShown()&&control.hasWindowFocus(),check,"voice_ui_original_record_control_ready");
         if(offline){AuthUiIntegration.networkStep(instrumentation,activity,"offline-load",check);awaitUi(instrumentation,()->connectionHeader(account,chat,ConnectionsManager.ConnectionStateWaitingForNetwork),check,"voice_ui_real_offline_header_before_recording");}
+        CompletableFuture<Void> failed=new CompletableFuture<>(),toast=new CompletableFuture<>();java.util.concurrent.atomic.AtomicBoolean audioSent=new java.util.concurrent.atomic.AtomicBoolean();File[] failedSource={null};
+        if(storageFailure)instrumentation.getUiAutomation().setOnAccessibilityEventListener(event->{if(event.getEventType()==android.view.accessibility.AccessibilityEvent.TYPE_NOTIFICATION_STATE_CHANGED)for(CharSequence text:event.getText())if(text!=null&&(text.toString().contains("Voice could not be saved")||text.toString().contains("ذخیرهٔ ویس انجام نشد")))toast.complete(null);});
         CompletableFuture<Void> started=new CompletableFuture<>();CompletableFuture<String> prepared=new CompletableFuture<>();java.util.concurrent.atomic.AtomicLong progress=new java.util.concurrent.atomic.AtomicLong();
-        org.telegram.messenger.NotificationCenter.NotificationCenterDelegate observer=(event,selected,args)->{if(selected!=account)return;if(event==org.telegram.messenger.NotificationCenter.recordStarted)started.complete(null);else if(event==org.telegram.messenger.NotificationCenter.recordStartError)started.completeExceptionally(new AssertionError("native_record_start_failed"));else if(event==org.telegram.messenger.NotificationCenter.fileUploaded&&args.length>1&&args[0] instanceof String&&((String)args[0]).endsWith(".ogg"))prepared.complete((String)args[0]);else if(event==org.telegram.messenger.NotificationCenter.fileUploadProgressChanged&&args.length>1&&args[0] instanceof String&&((String)args[0]).endsWith(".ogg"))progress.accumulateAndGet(((Number)args[1]).longValue(),Math::max);};
-        instrumentation.runOnMainSync(()->{for(int event:new int[]{org.telegram.messenger.NotificationCenter.recordStarted,org.telegram.messenger.NotificationCenter.recordStartError,org.telegram.messenger.NotificationCenter.fileUploaded,org.telegram.messenger.NotificationCenter.fileUploadProgressChanged})org.telegram.messenger.NotificationCenter.getInstance(account).addObserver(observer,event);});
+        org.telegram.messenger.NotificationCenter.NotificationCenterDelegate observer=(event,selected,args)->{if(selected!=account)return;if(event==org.telegram.messenger.NotificationCenter.recordStarted)started.complete(null);else if(event==org.telegram.messenger.NotificationCenter.recordStartError){failed.complete(null);started.completeExceptionally(new AssertionError("native_record_start_failed"));}else if(event==org.telegram.messenger.NotificationCenter.audioDidSent)audioSent.set(true);else if(event==org.telegram.messenger.NotificationCenter.fileUploaded&&args.length>1&&args[0] instanceof String&&((String)args[0]).endsWith(".ogg"))prepared.complete((String)args[0]);else if(event==org.telegram.messenger.NotificationCenter.fileUploadProgressChanged&&args.length>1&&args[0] instanceof String&&((String)args[0]).endsWith(".ogg"))progress.accumulateAndGet(((Number)args[1]).longValue(),Math::max);};
+        instrumentation.runOnMainSync(()->{for(int event:new int[]{org.telegram.messenger.NotificationCenter.recordStarted,org.telegram.messenger.NotificationCenter.recordStartError,org.telegram.messenger.NotificationCenter.audioDidSent,org.telegram.messenger.NotificationCenter.fileUploaded,org.telegram.messenger.NotificationCenter.fileUploadProgressChanged})org.telegram.messenger.NotificationCenter.getInstance(account).addObserver(observer,event);});
         int[] point=new int[2];instrumentation.runOnMainSync(()->{control.getLocationOnScreen(point);point[0]+=control.getWidth()/2;point[1]+=control.getHeight()/2;});long down=android.os.SystemClock.uptimeMillis();
         try{
             android.view.MotionEvent press=android.view.MotionEvent.obtain(down,down,android.view.MotionEvent.ACTION_DOWN,point[0],point[1],0);press.setSource(android.view.InputDevice.SOURCE_TOUCHSCREEN);try{check.verify(instrumentation.getUiAutomation().injectInputEvent(press,true),"voice_ui_actual_record_down");}finally{press.recycle();}
-            try{started.get(15,TimeUnit.SECONDS);check.verify(true,"voice_ui_original_recorder_started");Thread.sleep(4000);}finally{android.view.MotionEvent release=android.view.MotionEvent.obtain(down,android.os.SystemClock.uptimeMillis(),android.view.MotionEvent.ACTION_UP,point[0],point[1],0);release.setSource(android.view.InputDevice.SOURCE_TOUCHSCREEN);try{check.verify(instrumentation.getUiAutomation().injectInputEvent(release,true),"voice_ui_actual_record_release_send");}finally{release.recycle();}}
+            try{started.get(15,TimeUnit.SECONDS);check.verify(true,"voice_ui_original_recorder_started");if(storageFailure){org.telegram.messenger.MediaController controller=org.telegram.messenger.MediaController.getInstance();CompletableFuture<Void> switched=new CompletableFuture<>();((org.telegram.messenger.DispatchQueue)field(controller,"fileEncodingQueue")).postRunnable(()->{try{failedSource[0]=(File)field(controller,"recordingAudioFile");failVoiceOutput(failedSource[0]);switched.complete(null);}catch(Throwable failure){switched.completeExceptionally(failure);}});switched.get(10,TimeUnit.SECONDS);check.verify(true,"voice_ui_original_recording_output_write_failure_injected");}Thread.sleep(4000);}finally{android.view.MotionEvent release=android.view.MotionEvent.obtain(down,android.os.SystemClock.uptimeMillis(),android.view.MotionEvent.ACTION_UP,point[0],point[1],0);release.setSource(android.view.InputDevice.SOURCE_TOUCHSCREEN);try{check.verify(instrumentation.getUiAutomation().injectInputEvent(release,true),"voice_ui_actual_record_release_send");}finally{release.recycle();}}
+            if(storageFailure){
+                failed.get(10,TimeUnit.SECONDS);toast.get(10,TimeUnit.SECONDS);
+                check.verify(true,"voice_ui_storage_error_visible_accessibility_toast");
+                check.verify(failedSource[0]!=null&&!failedSource[0].exists()&&!audioSent.get()&&!prepared.isDone()&&VyrnBridge.forAccount(account).repository.liveMessages(conversation,null,100).isEmpty(),"voice_ui_failed_recording_removed_and_never_sent");
+                awaitUi(instrumentation,()->!composer.isRecordingAudioVideo()&&control.isShown(),check,"voice_ui_storage_error_restores_original_composer");
+                instrumentation.getUiAutomation().setOnAccessibilityEventListener(null);
+                recordVoice(instrumentation,activity,chat,account,conversation,check,false,false,false,false);
+                return;
+            }
             if(coldPrepare){prepareColdChat(instrumentation,chat,account,conversation,check);return;}
             byte[] retained=null;
             if(offline){
@@ -246,7 +261,7 @@ final class MediaUiIntegration {
             check.verify(sent.attachment.sha256.equals(hex(MessageDigest.getInstance("SHA-256").digest(bytes)))&&sent.attachment.size==bytes.length&&sent.attachment.durationMs>=3000&&progress.get()==bytes.length,"voice_ui_original_recorded_bytes_duration_and_progress");
             awaitUi(instrumentation,()->cell(chat.getFragmentView(),sent.ordinal)!=null&&cell(chat.getFragmentView(),sent.ordinal).getMessageObject().isVoice()&&cell(chat.getFragmentView(),sent.ordinal).getMessageObject().messageOwner.send_state==0,check,"voice_ui_original_sent_bubble_acknowledged");
             Thread.sleep(1500);check.verify(bridge.repository.liveMessages(conversation,null,100).size()==1,"voice_ui_actual_send_not_duplicated");
-        }finally{instrumentation.runOnMainSync(()->{for(int event:new int[]{org.telegram.messenger.NotificationCenter.recordStarted,org.telegram.messenger.NotificationCenter.recordStartError,org.telegram.messenger.NotificationCenter.fileUploaded,org.telegram.messenger.NotificationCenter.fileUploadProgressChanged})org.telegram.messenger.NotificationCenter.getInstance(account).removeObserver(observer,event);});}
+        }finally{if(storageFailure)instrumentation.getUiAutomation().setOnAccessibilityEventListener(null);instrumentation.runOnMainSync(()->{for(int event:new int[]{org.telegram.messenger.NotificationCenter.recordStarted,org.telegram.messenger.NotificationCenter.recordStartError,org.telegram.messenger.NotificationCenter.audioDidSent,org.telegram.messenger.NotificationCenter.fileUploaded,org.telegram.messenger.NotificationCenter.fileUploadProgressChanged})org.telegram.messenger.NotificationCenter.getInstance(account).removeObserver(observer,event);});}
     }
     private static String interruptPhotoUpload(Instrumentation instrumentation,Activity activity,ChatActivity chat,int account,String conversation,java.util.concurrent.atomic.AtomicLong progress,java.util.concurrent.atomic.AtomicBoolean failed,AuthUiIntegration.Check check) throws Exception {
         awaitUi(instrumentation,()->progress.get()>0,check,"mid_upload_original_worker_acknowledged_partial_progress");
