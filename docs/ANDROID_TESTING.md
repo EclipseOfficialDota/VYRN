@@ -1,3 +1,7 @@
+## Voice recording and Send while offline — 2026-10-14
+
+Run `./scripts/test-android-integration.ps1 -Phases media-voice-send-offline-ui` against matching local Core migration009/native TLS. The driver requires the owned no-host-audio emulator, removes local transport before recording, verifies pending voice/source retention, restores TLS/mapping and checks automatic completion of the same original recording. It restores owned networking in finally. Report: artifacts/android-media-voice-send-offline-ui.json. This is before-upload disconnection, not mid-transfer/process-death or physical microphone acceptance.
+
 ## Original group voice recording and Send — 2026-10-14
 
 Run each phase independently with a matching local instrumentation APK and Core migration009:

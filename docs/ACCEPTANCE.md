@@ -1,5 +1,11 @@
 # Acceptance matrix
 
+## Native voice queues offline and resumes on reconnect — 2026-10-14
+
+On APK5e57397231d41a169932102cf2a64c6b4bab40297e6f57428e11046aeb3ef439,35 checks cover real local transport disconnection before recording, actual offline header, original composer record/release, pending voice/source retention without upload acknowledgement, authenticated reconnection and automatic original send completion with exact retained bytes and no duplicate. Member record29 and received play/pause56 also pass (120 total). See TEST_REPORT for actual worker/wrapper exit evidence; the offline wrapper cleanup exit1 is not a claimed test-script exit0.
+
+Mid-transfer/cold/low-storage/cancel voice, permission dialogs, recording pause/resume/drafts, private encrypted media, physical phones/background and release/offsite requirements remain incomplete. Full goal stays active.
+
 ## Group voice records and sends through original composer — 2026-10-14
 
 Owner and ordinary member recordings pass29 checks each on APK7f0fe0277dd75ebc6dbca8bf683e2b74e59d546590f85521202f2f55f6ac1e64: actual native registration/composer, touchscreen hold/release, original AudioRecord and SendMessagesHelper, exact recorded upload bytes/duration/progress, one published voice and acknowledged native bubble. Received play/pause56 and gallery photo Send59 also pass on that APK (173 total), final scripts exit0 with no attach retry. Only owned no-host-audio emulator recording is allowed; microphone permission is fixture-granted.
