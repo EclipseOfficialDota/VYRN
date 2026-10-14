@@ -1,3 +1,15 @@
+## Native gallery photo during a real mid-upload outage — 2026-10-14
+
+media-photo-send-mid-offline-ui passed73 checks at2026-10-14T16:22:20+03:30 on local TLS APKc359566d74b1f205d56f64080bc82870217f7e6f9818743b7c1652e42e875faf. The test selects a1024x768 fixture through the original gallery and presses its real Send control. The local fault helper passes the first part acknowledgement and holds the committed second part. Original worker progress is positive and below the actual prepared image size before interruption; the pending native photo and upload ID are captured from the original worker.
+
+The host terminates only its owned fault helper and native local TLS proxy, removes the emulator reverse mapping, and acknowledges that transition to the test. A real offline header, retained partial progress/source and pending native bubble survive12 seconds. Restoring the native TLS proxy and mapping lets the original worker finish automatically without a manual FileLoader/retry call. Existing send checks verify prepared image SHA/size/dimensions, complete progress, acknowledged photo/bitmap, one server message and one durable multi-part media intent; its completed upload ID equals the original interrupted transfer. The host additionally binds the successful held second-part commit to that exact ID.
+
+Report: artifacts/android-media-photo-send-mid-offline-ui.json; no attach retry. Instrumentation and its PowerShell/ADB workers ended and the current report matches the APK. RTK23572 remained childless after the test child exited; after verifying its exact command and zero children, only that wrapper was stopped. Outer handle10284 therefore exited1 during wrapper cleanup; a test-script exit0 is not claimed. Native TLS31784/listener18443 was preserved and fault listener18444 was gone.
+
+Same-APK media-photo-send-part-ack-ui regression passed62 checks at2026-10-14T16:23:40+03:30, exited0 and needed no attach retry (135 checks with the mid-upload scenario). Its report is artifacts/android-media-photo-send-part-ack-ui.json. Both instrumentation builds succeeded; the final build took32 seconds. PowerShell parser, repository scanner175 and diff checks pass.
+
+The stdlib fault-helper checks pass, including passing part zero without arming the part-one hold and withholding the successful second acknowledgement until cancellation. This is a bounded12-second mid-upload outage, not exhausted retry-budget/long offline, low-storage, physical-device, private encrypted photo or voice acceptance. Normal phone APKs and production services were not changed.
+
 ## Automatic pending gallery photo recovery — 2026-10-14
 
 The new media-photo-chat-cold-prepare/recover pair exercises original gallery selection and Send, preserves the actual pending native message, and interrupts the app after the local Core commits the first upload part while its acknowledgement is held. The next phase starts a new Android process with the original account/session. Recovery uses normal ApplicationLoader/unsent-message startup; it does not call FileLoader or retrySendMessage, insert a pending message, or inject upload preferences.

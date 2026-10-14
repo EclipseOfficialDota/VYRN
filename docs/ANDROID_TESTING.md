@@ -1,3 +1,13 @@
+## Photo send during a mid-upload outage — 2026-10-14
+
+With the native local TLS proxy running, use a matching instrumentation build:
+
+```powershell
+./scripts/test-android-integration.ps1 -Phases media-photo-send-mid-offline-ui
+```
+
+This isolated phase acknowledges part zero, holds the committed second part, then removes local transport after original upload progress. It verifies the native pending photo during a12-second outage and automatic completion under the same transfer identity after reconnection. The driver stops only owned local helpers, restores the native TLS proxy/mapping in finally, and saves artifacts/android-media-photo-send-mid-offline-ui.json. It does not test production transport or a physical phone.
+
 ## Automatic pending gallery photo recovery — 2026-10-14
 
 Use the exact ordered pair in one invocation with a matching local instrumentation build:

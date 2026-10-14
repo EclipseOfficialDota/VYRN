@@ -18,10 +18,58 @@ func TestCommittedUploadPartHeldUntilProcessInterruption(t *testing.T) {
 	defer upstream.Close()
 	target, _ := url.Parse(upstream.URL)
 	state := filepath.Join(t.TempDir(), "held-part.json")
-	proxy := partFaultProxy(target, http.DefaultTransport, state, true)
+	proxy := partFaultProxy(target, http.DefaultTransport, state, true, 0)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	request := httptest.NewRequest("PUT", "/v1/media-uploads/11111111-1111-4111-8111-111111111111/parts/0", strings.NewReader("part")).WithContext(ctx)
+	recorder := httptest.NewRecorder()
+	done := make(chan struct{})
+	go func() { proxy.ServeHTTP(recorder, request); close(done) }()
+	deadline := time.Now().Add(3 * time.Second)
+	var proof heldSend
+	for time.Now().Before(deadline) {
+		data, err := os.ReadFile(state)
+		if err == nil && json.Unmarshal(data, &proof) == nil {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if proof.Status != 204 || proof.Server != "11111111-1111-4111-8111-111111111111" {
+		t.Fatal("committed part proof missing")
+	}
+	select {
+	case <-done:
+		t.Fatal("part acknowledgement escaped before interruption")
+	default:
+	}
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("held upload did not stop after cancellation")
+	}
+	if recorder.Code == 204 {
+		t.Fatal("held success leaked")
+	}
+}
+
+func TestCommittedSecondPartHeldAfterFirstAcknowledgement(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(204) }))
+	defer upstream.Close()
+	target, _ := url.Parse(upstream.URL)
+	state := filepath.Join(t.TempDir(), "held-part.json")
+	proxy := partFaultProxy(target, http.DefaultTransport, state, true, 1)
+	first := httptest.NewRecorder()
+	proxy.ServeHTTP(first, httptest.NewRequest("PUT", "/v1/media-uploads/11111111-1111-4111-8111-111111111111/parts/0", strings.NewReader("first")))
+	if first.Code != 204 {
+		t.Fatal("first part acknowledgement did not pass")
+	}
+	if _, err := os.Stat(state); !os.IsNotExist(err) {
+		t.Fatal("first part armed second-part hold")
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	request := httptest.NewRequest("PUT", "/v1/media-uploads/11111111-1111-4111-8111-111111111111/parts/1", strings.NewReader("part")).WithContext(ctx)
 	recorder := httptest.NewRecorder()
 	done := make(chan struct{})
 	go func() { proxy.ServeHTTP(recorder, request); close(done) }()
@@ -64,7 +112,7 @@ func TestCommittedUploadAckDiscardedAndReplayObserved(t *testing.T) {
 	defer upstream.Close()
 	target, _ := url.Parse(upstream.URL)
 	state := filepath.Join(t.TempDir(), "part.json")
-	front := httptest.NewServer(partFaultProxy(target, http.DefaultTransport, state, false))
+	front := httptest.NewServer(partFaultProxy(target, http.DefaultTransport, state, false, 0))
 	defer front.Close()
 	path := "/v1/media-uploads/00000000-0000-0000-0000-000000000001/parts/0"
 	for _, unrelated := range []struct {

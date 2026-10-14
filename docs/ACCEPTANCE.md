@@ -1,5 +1,9 @@
 # Acceptance matrix
 
+## Group gallery photo resumes after mid-upload disconnection — 2026-10-14
+
+On local TLS APKc359566d74b1f205d56f64080bc82870217f7e6f9818743b7c1652e42e875faf,73 checks cover actual gallery/Send, positive original worker progress before a real local transport outage, retained partial upload and native pending bubble for12 seconds, authenticated reconnection, automatic completion under the same upload ID, exact prepared media and no duplicate message. The report and worker/wrapper exit distinction are recorded in TEST_REPORT. Long offline beyond the retry budget, low-storage, physical phones, private encrypted media, voice, background acceptance, production rollout, Release signing and offsite restore remain pending. Full goal remains active.
+
 ## Automatic group photo send recovery accepted locally — 2026-10-14
 
 Original gallery/Send -> committed first part with held acknowledgement -> actual process death -> normal unsent-message startup now has a passing paired scenario. On local TLS APK6c742a3bd022cb2b87d39304732db8f7f952e7da6fda6517e6ca4ee5fa124f68, prepare55/recover8 checks pass; original account/session, client/upload ID, prepared image SHA/size, one published message and acknowledged native chat cell are verified without an explicit worker/retry call. Same-APK committed-part lost-ack regression passes62 checks. Both scripts exit0, no attach retries. See the latest TEST_REPORT entry for report dates and limits.
