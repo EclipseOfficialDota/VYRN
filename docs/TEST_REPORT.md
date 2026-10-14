@@ -1,3 +1,15 @@
+## Offline pending voice cancelled from native chat — 2026-10-14
+
+media-voice-cancel-chat-ui passed42 checks at2026-10-14T18:40:44.8950346+00:00 on local TLS APK4ea553b34e9118c2a4726fba70f3c09966354963c14562021d16b2027a4ab664. The actual composer records/releases a voice while local transport is disconnected; the native pending bubble and source remain without upload acknowledgement. The existing original ChatMessageCell accessibility Cancel action captures the original native transfer ID and durably records cancellation before reconnection.
+
+The bubble remains until remote proof. After owned TLS/mapping restoration, the cancellation worker confirms the server transfer fence and removal of staged parts, clears its journal entry, publishes no message and removes the native pending bubble. A late part for the same original upload UUID returns409, and another server check confirms the cancelled voice has not revived. This reuses the existing TYPE_VOICE cancellation path; no new production cancellation behavior or direct cancellation API substitute was added.
+
+Report: artifacts/android-media-voice-cancel-chat-ui.json; no attach retry. Instrumentation/PowerShell/ADB workers ended; RTK20004 remained childless. Its exact command and zero children were revalidated before stopping only that wrapper. Outer handle48033 consequently exited1 in wrapper cleanup; no test-script exit0 is claimed. Restored native TLS33536/listener18443 was retained.
+
+Same-APK member record/Send29 checks at2026-10-14T18:43:18.7147244+00:00 and received voice play/pause56 at2026-10-14T18:43:27.5062551+00:00 pass (127 total with cancellation). Both regression scripts exit0, no attach retries. Reports: artifacts/android-media-voice-send-member-ui.json and artifacts/android-media-voice-ui.json. Instrumentation build66623 exits0 in42 seconds. The driver requires the owned no-host-audio emulator and fixture-grants recording permission.
+
+This accepts the original accessibility cancellation while disconnected before upload; physical cancel gestures, cancellation after partial transfer/unknown publication acknowledgement/process death, recording pause/drafts, low storage, encrypted private voice and full physical/background/release/offsite acceptance remain open. No normal phone APK, production, signing, TURN or external backup change was made. Full original goal remains active.
+
 ## Native group voice while disconnected — 2026-10-14
 
 media-voice-send-offline-ui passed35 checks at2026-10-14T18:30:34.9849285+00:00 on local TLS APK5e57397231d41a169932102cf2a64c6b4bab40297e6f57428e11046aeb3ef439. The host stops only its owned native local TLS proxy and removes the emulator reverse mapping before recording. The actual offline header is verified, the original composer receives the record/release gestures, and the original native pending voice retains its recorded source with zero acknowledged upload progress. The test snapshots those actual bytes while disconnected and verifies another three seconds of retention before authenticated reconnection.

@@ -1,3 +1,7 @@
+## Cancel an offline pending voice from chat — 2026-10-14
+
+Run `./scripts/test-android-integration.ps1 -Phases media-voice-cancel-chat-ui` against local Core migration009/native TLS and the owned no-host-audio emulator. It records through the actual composer while offline, activates the original bubble's accessibility Cancel, and requires durable cancellation/server fence/part cleanup before native bubble removal. Reconnection must not publish the voice, and late parts must be rejected. Evidence: artifacts/android-media-voice-cancel-chat-ui.json. This is before-upload accessibility cancellation, not a physical gesture/mid-transfer/process-death case.
+
 ## Voice recording and Send while offline — 2026-10-14
 
 Run `./scripts/test-android-integration.ps1 -Phases media-voice-send-offline-ui` against matching local Core migration009/native TLS. The driver requires the owned no-host-audio emulator, removes local transport before recording, verifies pending voice/source retention, restores TLS/mapping and checks automatic completion of the same original recording. It restores owned networking in finally. Report: artifacts/android-media-voice-send-offline-ui.json. This is before-upload disconnection, not mid-transfer/process-death or physical microphone acceptance.

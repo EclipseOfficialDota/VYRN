@@ -1,5 +1,11 @@
 # Acceptance matrix
 
+## Pending offline voice cancellation accepted locally — 2026-10-14
+
+Original record/release, pending native voice/source retention, native ChatMessageCell accessibility Cancel, durable original-transfer cancellation before reconnect, bubble retained until server proof, cleared parts/journal/bubble, no server message and409 for a late same-ID part pass42 checks on APK4ea553b34e9118c2a4726fba70f3c09966354963c14562021d16b2027a4ab664. Member record29 and received play/pause56 pass on that APK (127 total). See TEST_REPORT for exact worker/wrapper exits; cancellation cleanup exit1 is not a claimed test-script exit0.
+
+The tested cancel action is accessibility, before acknowledged upload progress. Physical gestures, mid-transfer/unknown-ack/cold cancellation, low storage, pause/drafts, encrypted media and the rest of the physical two-device/background/release/offsite goal remain incomplete.
+
 ## Native voice queues offline and resumes on reconnect — 2026-10-14
 
 On APK5e57397231d41a169932102cf2a64c6b4bab40297e6f57428e11046aeb3ef439,35 checks cover real local transport disconnection before recording, actual offline header, original composer record/release, pending voice/source retention without upload acknowledgement, authenticated reconnection and automatic original send completion with exact retained bytes and no duplicate. Member record29 and received play/pause56 also pass (120 total). See TEST_REPORT for actual worker/wrapper exit evidence; the offline wrapper cleanup exit1 is not a claimed test-script exit0.
