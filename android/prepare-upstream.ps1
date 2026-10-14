@@ -8,6 +8,35 @@ function Write-Text([string]$Path,[string]$Text){
  if(!(Test-Path -LiteralPath $Path) -or [IO.File]::ReadAllText($Path) -cne $Text){[IO.File]::WriteAllText($Path,$Text,[Text.UTF8Encoding]::new($false))}
 }
 function Edit([string]$Relative,[scriptblock]$Transform){$p=Join-Path $upstream $Relative;$old=[IO.File]::ReadAllText($p);$new=& $Transform $old;Write-Text $p $new}
+Edit 'TMessagesProj/src/main/java/org/telegram/messenger/MediaController.java' {
+ param($t)
+ if(!$t.Contains('private void vyrnFinishVoiceRecord()')){
+  $frame='if (fileBuffer.position() == fileBuffer.limit() || flush) {'
+  $write='writeFrame(fileBuffer, !flush ? fileBuffer.limit() : finalBuffer.position())'
+  $pause="recordQueue.postRunnable(() -> {`n                    stopRecord();"
+  $finish="fileEncodingQueue.postRunnable(() -> {`n                stopRecord();"
+  $method='    private void stopRecordingInternal(final int send, boolean notify, int scheduleDate, boolean once, long payStars) {'
+  $t=$t.Replace("`r`n","`n")
+  foreach($marker in @($frame,$write,$pause,$finish,$method)){if(([regex]::Matches($t,[regex]::Escape($marker))).Count -ne 1){throw 'Pinned voice buffering/finalization marker changed'}}
+  $t=$t.Replace($frame,'if (fileBuffer.position() == fileBuffer.limit()) {').Replace($write,'writeFrame(fileBuffer, fileBuffer.limit())')
+  $t=$t.Replace($pause,"fileEncodingQueue.postRunnable(() -> {`n                    vyrnFinishVoiceRecord();").Replace($finish,"fileEncodingQueue.postRunnable(() -> {`n                vyrnFinishVoiceRecord();")
+  $helper=@'
+    private void vyrnFinishVoiceRecord() {
+        final int bytes = fileBuffer.position();
+        try {
+            if (writeFrame(fileBuffer, bytes) == 0) throw new IllegalStateException("voice_final_frame_failed");
+            recordTimeCount += bytes / 2 / (sampleRate / 1000);
+            fileBuffer.rewind();
+        } finally {
+            stopRecord();
+        }
+    }
+
+'@
+  $t=$t.Replace($method,$helper+$method)
+ }
+ $t
+}
 Edit 'TMessagesProj/jni/audio.c' {
  param($t)
  if(!$t.Contains('static int vyrnWriteFramePacket(')){
@@ -604,6 +633,18 @@ Edit 'TMessagesProj/src/main/java/org/telegram/ui/Components/AlertsCreator.java'
 Edit 'TMessagesProj/src/main/java/org/telegram/ui/Components/ChatActivityEnterView.java' {
  param($t)
  $t=(& git -c "safe.directory=$($upstream.Replace('\','/'))" -C $upstream show "${pin}:TMessagesProj/src/main/java/org/telegram/ui/Components/ChatActivityEnterView.java") -join "`n"
+ $start=$t.IndexOf('    public void checkRoundVideo() {');$end=$t.IndexOf('    public boolean isInVideoMode()', $start)
+ if($start -lt 0 -or $end -lt 0){throw 'Pinned round-video capability marker missing'}
+ $voiceOnly=@'
+    public void checkRoundVideo() {
+        // VYRN supports group voice recording; round video has no backend contract.
+        hasRecordVideo = sendRoundEnabled = false;
+        sendVoiceEnabled = DialogObject.isChatDialog(dialog_id) && ChatObject.canSendVoice(accountInstance.getMessagesController().getChat(-dialog_id));
+        setRecordVideoButtonVisible(false, false);
+    }
+
+'@
+ $t=$t.Substring(0,$start)+$voiceOnly+$t.Substring($end)
  $t=Disable-AiControls $t
  $send='protected boolean sendMessageInternal(boolean notify, int scheduleDate, int scheduleRepeatPeriod, long payStars, boolean allowConfirm) {'
  $button='public void checkSendButton(boolean animated) {'

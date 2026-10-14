@@ -1,5 +1,11 @@
 # Acceptance matrix
 
+## Group voice records and sends through original composer — 2026-10-14
+
+Owner and ordinary member recordings pass29 checks each on APK7f0fe0277dd75ebc6dbca8bf683e2b74e59d546590f85521202f2f55f6ac1e64: actual native registration/composer, touchscreen hold/release, original AudioRecord and SendMessagesHelper, exact recorded upload bytes/duration/progress, one published voice and acknowledged native bubble. Received play/pause56 and gallery photo Send59 also pass on that APK (173 total), final scripts exit0 with no attach retry. Only owned no-host-audio emulator recording is allowed; microphone permission is fixture-granted.
+
+The actual short-read/double-EOS producer bug was reproduced and fixed without relaxing backend validation. Group voice rights are now connected; unsupported round-video recording is disabled. Physical microphone/output, real permission dialogs, recording pause/resume/drafts, pending cancellation/offline/cold/low-storage, private encrypted voice and the full two-device/background/release/offsite goal remain incomplete.
+
 ## Received group voice plays and pauses in native chat — 2026-10-14
 
 On local APK90d208b5a76b7c13ad74918c3cd1af910f2d579f7e14a221432d002db70daf81, actual recipient registration/chat, a distinct REST-fixture sender, authenticated original FileLoader download with exact SHA, TYPE_VOICE rendering, native accessibility Play with positive original-player progress and native Pause pass56 checks. File receive36, photo receive40 and voice upload44 also pass on that APK (176 total), scripts exit0 with no attach retries. The shared test harness avoids cancelling automatic download; no production download/player fix is claimed.

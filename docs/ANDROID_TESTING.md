@@ -1,3 +1,14 @@
+## Original group voice recording and Send — 2026-10-14
+
+Run each phase independently with a matching local instrumentation APK and Core migration009:
+
+```powershell
+./scripts/test-android-integration.ps1 -Phases media-voice-send-ui
+./scripts/test-android-integration.ps1 -Phases media-voice-send-member-ui
+```
+
+The script refuses these phases unless emulator-5560 is the owned vyrn_api35 qemu process started with -no-audio, so host audio is not captured. RECORD_AUDIO is fixture-granted. The original composer receives a real touchscreen hold/release, and original recording/Send/upload must publish exactly one acknowledged voice with matching bytes, duration and progress. Member group ownership is an independent REST fixture. Reports are artifacts/android-media-voice-send-ui.json and artifacts/android-media-voice-send-member-ui.json. Permission dialogs, physical hardware and interrupted/cold/pause/low-storage recording remain separate requirements.
+
 ## Received voice play/pause in native chat — 2026-10-14
 
 Run `./scripts/test-android-integration.ps1 -Phases media-voice-ui` against local Core migration009. The recipient registers through native controls; an independent REST sender publishes original-codec synthetic five-second audio. The actual ChatActivity must render a voice row, the original FileLoader must download matching bytes, and the original accessibility Play/Pause controls must produce positive player progress and a paused target. Active automatic downloads are awaited rather than cancelled by a test click. Evidence: artifacts/android-media-voice-ui.json. This does not use the microphone or verify physical audio output/recording UI.

@@ -876,7 +876,7 @@ public final class VyrnBridge {
     public static void bindRequestToGuid(int account,int token,int guid){PendingRequest pending=REQUESTS.get(requestKey(account,token));if(pending!=null && guid!=0)synchronized(pending){pending.guid=guid;}}
     public static void cancelRequestsForGuid(int account,int guid){if(guid==0)return;for(PendingRequest pending:REQUESTS.values()){boolean matches;synchronized(pending){matches=pending.account==account && pending.guid==guid;}if(matches)pending.cancel(null);}}
     private static TLRPC.TL_error problem(Throwable failure){
-        if(org.telegram.messenger.BuildConfig.DEBUG&&failure!=null){String detail="";if(failure instanceof SecurityException&&java.util.Arrays.asList("account_changed","session_changed","signal_edit_context_changed","signal_edit_intent_changed","signal_message_deleted","signal_edit_revision_conflict").contains(failure.getMessage()))detail=" guard="+failure.getMessage();android.util.Log.w("VyrnBridge","request_failure="+failure.getClass().getName()+" cause_type="+(failure.getCause()==null?"none":failure.getCause().getClass().getName())+detail);}
+        if(org.telegram.messenger.BuildConfig.DEBUG&&failure!=null){String detail="";if(failure instanceof RestRepository.ApiException){RestRepository.ApiException api=(RestRepository.ApiException)failure;detail=" http_status="+api.status+" api_code="+(api.code!=null&&api.code.matches("[a-z_]{1,64}")?api.code:"unknown");}if(failure instanceof UnsupportedOperationException&&java.util.Arrays.asList("media_variant_unavailable","media_options_unavailable","media_voice_options_unavailable").contains(failure.getMessage()))detail=" guard="+failure.getMessage();if(failure instanceof SecurityException&&java.util.Arrays.asList("account_changed","session_changed","signal_edit_context_changed","signal_edit_intent_changed","signal_message_deleted","signal_edit_revision_conflict").contains(failure.getMessage()))detail=" guard="+failure.getMessage();android.util.Log.w("VyrnBridge","request_failure="+failure.getClass().getName()+" cause_type="+(failure.getCause()==null?"none":failure.getCause().getClass().getName())+detail);}
         TLRPC.TL_error error=null;if(failure!=null){error=new TLRPC.TL_error();error.code=failure instanceof RestRepository.ApiException?((RestRepository.ApiException)failure).status:503;error.text=failure instanceof UnsupportedOperationException?"VYRN_FEATURE_UNAVAILABLE":"VYRN_REQUEST_FAILED";}
         if(temporaryRequestFailure(failure))error.text="VYRN_RETRYABLE_REQUEST_FAILED";
         if(failure instanceof RestRepository.ApiException&&((RestRepository.ApiException)failure).code.equals("revision_conflict"))error.text="VYRN_EDIT_CONFLICT";
@@ -928,7 +928,7 @@ public final class VyrnBridge {
         chat.default_banned_rights=new TLRPC.TL_chatBannedRights();chat.flags|=1<<18;
         TLRPC.TL_chatBannedRights rights=chat.default_banned_rights;
         rights.send_media=rights.send_photos=rights.send_videos=rights.send_roundvideos=rights.send_audios=rights.send_voices=rights.send_docs=rights.send_polls=rights.send_stickers=rights.send_gifs=rights.send_games=rights.send_inline=true;
-        rights.send_media=rights.send_docs=rights.send_photos=false;
+        rights.send_media=rights.send_docs=rights.send_photos=rights.send_voices=false;
         rights.change_info=rights.invite_users=rights.pin_messages=true;
         return chat;
     }
