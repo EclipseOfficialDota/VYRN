@@ -1,5 +1,11 @@
 # Acceptance matrix
 
+## Actual group voice cold recovery accepted locally — 2026-10-14
+
+Original composer recording, committed first part with acknowledgement held, actual process death and automatic original message recovery pass40 checks. Upload/client/account/session identity and exact bytes survive; validated duration and the native voice bubble return without a duplicate. Photo recovery regression passes63 on the same APK9967984866c43fd89086cf6cdcd0dd26f1e358945f8a10b171e98348479f3eab. Both scripts exit0. See TEST_REPORT for dates and the excluded permission-blocked attempt.
+
+Positive-progress interruption, prolonged offline retry exhaustion, low storage, private encrypted media, physical devices/background, signed release and offsite restoration remain incomplete. Full goal stays active.
+
 ## Pending offline voice cancellation accepted locally — 2026-10-14
 
 Original record/release, pending native voice/source retention, native ChatMessageCell accessibility Cancel, durable original-transfer cancellation before reconnect, bubble retained until server proof, cleared parts/journal/bubble, no server message and409 for a late same-ID part pass42 checks on APK4ea553b34e9118c2a4726fba70f3c09966354963c14562021d16b2027a4ab664. Member record29 and received play/pause56 pass on that APK (127 total). See TEST_REPORT for exact worker/wrapper exits; cancellation cleanup exit1 is not a claimed test-script exit0.

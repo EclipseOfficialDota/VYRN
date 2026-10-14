@@ -1,3 +1,13 @@
+## Actual voice chat cold recovery — 2026-10-14
+
+The new media-voice-chat-cold-prepare/recover pair records through original composer touchscreen hold/release and AudioRecord on the owned no-host-audio emulator. The fault proxy commits part zero to local Core migration009 and withholds its acknowledgement. Preparation retains the actual pending voice, source hash/size, original random ID, account/session, native upload UUID and PID. The host force-stops the app between phases without clearing data. Recovery uses normal ApplicationLoader/unsent-message startup, with no explicit FileLoader or retrySendMessage invocation. Checks require a changed PID, the same account/session/upload/client identity, exact recorded bytes, validated duration, acknowledged native voice bubble and one message after a further wait.
+
+Initial attempt59201 passed prepare but hung behind an Android permission-controller activity during synchronous foreground startup; targeted dumpsys confirmed that activity. Only the test app was force-stopped, and the suite exited1. That attempt is excluded. Both photo and voice cold recovery now use existing bounded startup/prompt handling. No production permission/upload implementation changed.
+
+Final build43577 exited0 in37s. Local TLS APK SHA-2569967984866c43fd89086cf6cdcd0dd26f1e358945f8a10b171e98348479f3eab: voice pair79119 passed30+10 at2026-10-14T18:59:52.4532692+00:00; photo pair68133 passed55+8 at2026-10-14T19:00:46.4759409+00:00 (103 total). Both scripts exited0 with no startup attach retry. Reports: artifacts/android-media-voice-chat-cold.json and artifacts/android-media-photo-chat-cold.json. Exact ordered pairs, committed-part hold proof, normal TLS restoration and owned fault cleanup are enforced by the driver.
+
+This proves actual group voice recovery after the first committed but unacknowledged part. Positive-progress interruption, prolonged offline exhaustion, recording pause/drafts, cancellation followed by process death, low storage, private encrypted media, physical devices and background delivery remain unverified. No phone APK, VPS rollout, DNS, signing, TURN or external backup change was made. The full eight-item goal remains active.
+
 ## Offline pending voice cancelled from native chat — 2026-10-14
 
 media-voice-cancel-chat-ui passed42 checks at2026-10-14T18:40:44.8950346+00:00 on local TLS APK4ea553b34e9118c2a4726fba70f3c09966354963c14562021d16b2027a4ab664. The actual composer records/releases a voice while local transport is disconnected; the native pending bubble and source remain without upload acknowledgement. The existing original ChatMessageCell accessibility Cancel action captures the original native transfer ID and durably records cancellation before reconnection.

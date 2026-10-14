@@ -1,3 +1,13 @@
+## Actual voice chat recovery after process death — 2026-10-14
+
+Run the exact ordered pair on matching local Core migration009/native TLS and the owned no-host-audio emulator:
+
+```powershell
+./scripts/test-android-integration.ps1 -Phases @('media-voice-chat-cold-prepare','media-voice-chat-cold-recover')
+```
+
+The driver clears the dedicated test app only before prepare, records through original controls, holds a committed part acknowledgement, then force-stops/relaunches the app. Recovery handles permission prompts during bounded startup and relies on normal unsent-message recovery. Require original identity/hash/size, voice type/duration and one published message. Report: artifacts/android-media-voice-chat-cold.json. This is local group recovery before first acknowledgement, not physical-device, prolonged-outage or positive-progress acceptance.
+
 ## Cancel an offline pending voice from chat — 2026-10-14
 
 Run `./scripts/test-android-integration.ps1 -Phases media-voice-cancel-chat-ui` against local Core migration009/native TLS and the owned no-host-audio emulator. It records through the actual composer while offline, activates the original bubble's accessibility Cancel, and requires durable cancellation/server fence/part cleanup before native bubble removal. Reconnection must not publish the voice, and late parts must be rejected. Evidence: artifacts/android-media-voice-cancel-chat-ui.json. This is before-upload accessibility cancellation, not a physical gesture/mid-transfer/process-death case.
