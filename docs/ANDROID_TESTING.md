@@ -1,3 +1,9 @@
+## Native voice storage-I/O failure — 2026-10-14
+
+Run `./scripts/test-android-integration.ps1 -Phases media-voice-storage` with the matching local instrumentation APK. The test uses the actual native encoder and finalizer, switches only its own output file descriptor to read-only, and requires rejected finalization, partial-file cleanup, original error notification, no audioDidSent and successful subsequent codec boundary/decode tests. A second fixture injects the prior-frame failure latch. Report: artifacts/android-media-voice-storage.json.
+
+This is a component I/O failure scenario, not actual whole-volume ENOSPC or original recording UI error acceptance. Android denies app access to /dev/full; the test does not weaken that policy or fill the device volume.
+
 ## Actual voice chat recovery after process death — 2026-10-14
 
 Run the exact ordered pair on matching local Core migration009/native TLS and the owned no-host-audio emulator:

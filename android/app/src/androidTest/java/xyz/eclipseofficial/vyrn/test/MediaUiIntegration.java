@@ -30,6 +30,42 @@ import xyz.eclipseofficial.vyrn.domain.Models;
 
 /** Native file selection/send and receive/download scenarios; group setup uses API fixtures. */
 final class MediaUiIntegration {
+    static void voiceStorage(Instrumentation instrumentation,AuthUiIntegration.Check check) throws Exception {
+        org.telegram.messenger.MediaController controller=org.telegram.messenger.MediaController.getInstance();
+        java.lang.reflect.Method start=controller.getClass().getDeclaredMethod("startRecord",String.class,int.class),finish=controller.getClass().getDeclaredMethod("vyrnFinishVoiceRecord",int.class,int.class,File.class,File.class);
+        start.setAccessible(true);finish.setAccessible(true);
+        java.lang.reflect.Field failed=controller.getClass().getDeclaredField("vyrnVoiceWriteFailed");failed.setAccessible(true);
+        int account=UserConfig.selectedAccount,guid=17041;
+        java.util.concurrent.atomic.AtomicReference<CompletableFuture<Void>> error=new java.util.concurrent.atomic.AtomicReference<>(new CompletableFuture<>());java.util.concurrent.atomic.AtomicBoolean published=new java.util.concurrent.atomic.AtomicBoolean();
+        org.telegram.messenger.NotificationCenter.NotificationCenterDelegate observer=(event,selected,args)->{if(event==org.telegram.messenger.NotificationCenter.audioDidSent)published.set(true);else if(args.length>0&&args[0].equals(guid))error.get().complete(null);};
+        instrumentation.runOnMainSync(()->{org.telegram.messenger.NotificationCenter center=org.telegram.messenger.NotificationCenter.getInstance(account);center.addObserver(observer,org.telegram.messenger.NotificationCenter.recordStartError);center.addObserver(observer,org.telegram.messenger.NotificationCenter.audioDidSent);});
+        try {
+            for(boolean earlierFailure:new boolean[]{false,true}){
+                error.set(new CompletableFuture<>());
+                File previous=new File(instrumentation.getTargetContext().getCacheDir(),"voice-storage-previous.ogg"),recorded=new File(instrumentation.getTargetContext().getCacheDir(),"voice-storage-current.ogg");
+                Files.write(previous.toPath(),new byte[]{1});Files.write(recorded.toPath(),new byte[]{2});
+                CompletableFuture<Boolean> saved=new CompletableFuture<>();
+                ((org.telegram.messenger.DispatchQueue)field(controller,"fileEncodingQueue")).postRunnable(()->{try{
+                    if((Integer)start.invoke(controller,recorded.getAbsolutePath(),48000)!=1)throw new AssertionError("voice_storage_native_start_failed");
+                    // Switch only this encoder's output to a read-only descriptor (real write failure).
+                    int output=-1;for(File descriptor:new File("/proc/self/fd").listFiles()){
+                        try{if(new File(android.system.Os.readlink(descriptor.getAbsolutePath())).getCanonicalPath().equals(recorded.getCanonicalPath())){output=Integer.parseInt(descriptor.getName());break;}}catch(android.system.ErrnoException vanished){}
+                    }
+                    if(output<0)throw new AssertionError("voice_storage_native_output_missing");
+                    java.io.FileDescriptor full=android.system.Os.open(recorded.getAbsolutePath(),android.system.OsConstants.O_RDONLY,0);
+                    try{android.system.Os.dup2(full,output);}finally{android.system.Os.close(full);}
+                    failed.setBoolean(controller,earlierFailure);((java.nio.ByteBuffer)field(controller,"fileBuffer")).rewind();
+                    saved.complete((Boolean)finish.invoke(controller,account,guid,previous,recorded));
+                }catch(Throwable failure){try{JSONObject diagnostic=new JSONObject().put("type",failure.getClass().getSimpleName());if(failure instanceof AssertionError&&failure.getMessage()!=null&&failure.getMessage().matches("voice_storage_[a-z_]+"))diagnostic.put("guard",failure.getMessage());if(failure instanceof android.system.ErrnoException)diagnostic.put("errno",((android.system.ErrnoException)failure).errno);Files.write(new File(instrumentation.getTargetContext().getFilesDir(),"vyrn-test-voice-storage.json").toPath(),diagnostic.toString().getBytes(StandardCharsets.UTF_8));}catch(Exception ignored){}saved.completeExceptionally(failure);}});
+                check.verify(!saved.get(10,TimeUnit.SECONDS),earlierFailure?"voice_storage_prior_frame_failure_rejected":"voice_storage_actual_write_failure_final_flush_rejected");
+                error.get().get(10,TimeUnit.SECONDS);
+                check.verify(!previous.exists()&&!recorded.exists(),"voice_storage_partial_files_removed_"+earlierFailure);
+                check.verify(!published.get(),"voice_storage_failure_never_publishes_audio_"+earlierFailure);
+            }
+            failed.setBoolean(controller,false);
+            voiceCodec(instrumentation,check);
+        }finally{failed.setBoolean(controller,false);instrumentation.runOnMainSync(()->{org.telegram.messenger.NotificationCenter center=org.telegram.messenger.NotificationCenter.getInstance(account);center.removeObserver(observer,org.telegram.messenger.NotificationCenter.recordStartError);center.removeObserver(observer,org.telegram.messenger.NotificationCenter.audioDidSent);});}
+    }
     static void voiceCodec(Instrumentation instrumentation,AuthUiIntegration.Check check) throws Exception {
         voiceCodec(instrumentation,check,50);
     }

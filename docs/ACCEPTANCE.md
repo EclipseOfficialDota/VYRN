@@ -1,5 +1,11 @@
 # Acceptance matrix
 
+## Voice storage-I/O failure contained locally — 2026-10-14
+
+Native encoder output is switched to a read-only descriptor after successful startup. Final write/flush failure returns failure, cleans partial files, emits the original error event and never emits audioDidSent. Prior-frame failure cleanup and subsequent native encode/PCM decode pass21 checks; actual member record/Send passes29 on APK7e38fa16779a73f6ce31e3eba0b16aed5ebd91e9f35205e66618c821627659f5. Automatic cold voice recovery also passes; authoritative report is artifacts/android-media-voice-chat-cold.json.
+
+This accepts component write-failure handling, not whole-volume ENOSPC or the original recording UI error presentation. Actual low-storage, pause/draft interaction, physical devices, background/private media and release/offsite requirements remain pending. Full goal stays active.
+
 ## Actual group voice cold recovery accepted locally — 2026-10-14
 
 Original composer recording, committed first part with acknowledgement held, actual process death and automatic original message recovery pass40 checks. Upload/client/account/session identity and exact bytes survive; validated duration and the native voice bubble return without a duplicate. Photo recovery regression passes63 on the same APK9967984866c43fd89086cf6cdcd0dd26f1e358945f8a10b171e98348479f3eab. Both scripts exit0. See TEST_REPORT for dates and the excluded permission-blocked attempt.

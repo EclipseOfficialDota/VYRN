@@ -88,7 +88,9 @@ public final class LocalIntegrationRunner extends Instrumentation {
             check(foreground!=null,"foreground_activity");
             stage="foreground_idle";
             if(!boundedChatStartup)waitForIdleSync();
-            if(phase.equals("media-voice-codec")){
+            if(phase.equals("media-voice-storage")){
+                stage="media_voice_storage";MediaUiIntegration.voiceStorage(this,(condition,name)->{check(condition,name);passed.put(name);});
+            }else if(phase.equals("media-voice-codec")){
                 stage="media_voice_codec";MediaUiIntegration.voiceCodec(this,(condition,name)->{check(condition,name);passed.put(name);});
             }else if(phase.equals("media-photo-chat-cold-recover")||phase.equals("media-voice-chat-cold-recover")){
                 stage="media_cold_chat";MediaUiIntegration.recoverColdChat(this,foreground,(condition,name)->{check(condition,name);passed.put(name);});

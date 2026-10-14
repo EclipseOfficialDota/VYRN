@@ -10,7 +10,7 @@ function Write-Text([string]$Path,[string]$Text){
 function Edit([string]$Relative,[scriptblock]$Transform){$p=Join-Path $upstream $Relative;$old=[IO.File]::ReadAllText($p);$new=& $Transform $old;Write-Text $p $new}
 Edit 'TMessagesProj/src/main/java/org/telegram/messenger/MediaController.java' {
  param($t)
- if(!$t.Contains('private void vyrnFinishVoiceRecord()')){
+ if(!$t.Contains('private void vyrnFinishVoiceRecord()') -and !$t.Contains('private boolean vyrnFinishVoiceRecord(')){
   $frame='if (fileBuffer.position() == fileBuffer.limit() || flush) {'
   $write='writeFrame(fileBuffer, !flush ? fileBuffer.limit() : finalBuffer.position())'
   $pause="recordQueue.postRunnable(() -> {`n                    stopRecord();"
@@ -34,6 +34,61 @@ Edit 'TMessagesProj/src/main/java/org/telegram/messenger/MediaController.java' {
 
 '@
   $t=$t.Replace($method,$helper+$method)
+ }
+ $t
+}
+Edit 'TMessagesProj/src/main/java/org/telegram/messenger/MediaController.java' {
+ param($t)
+ if(!$t.Contains('private volatile boolean vyrnVoiceWriteFailed;')){
+  $t=$t.Replace("`r`n","`n")
+  $t=$t.Replace('    private DispatchQueue fileEncodingQueue;',"    private volatile boolean vyrnVoiceWriteFailed;`n    private DispatchQueue fileEncodingQueue;")
+  $t=$t.Replace('if (startRecord(recordingAudioFile.getPath(), sampleRate) == 0) {',"vyrnVoiceWriteFailed = false;`n                if (startRecord(recordingAudioFile.getPath(), sampleRate) == 0) {")
+  $t=$t.Replace('while (finalBuffer.hasRemaining()) {','while (!vyrnVoiceWriteFailed && finalBuffer.hasRemaining()) {')
+  $t=$t.Replace('FileLog.e("writing frame failed");',"vyrnVoiceWriteFailed = true;`n                                    fileBuffer.rewind();")
+  $old=@'
+    private void vyrnFinishVoiceRecord() {
+        final int bytes = fileBuffer.position();
+        try {
+            if (writeFrame(fileBuffer, bytes) == 0) throw new IllegalStateException("voice_final_frame_failed");
+            recordTimeCount += bytes / 2 / (sampleRate / 1000);
+            fileBuffer.rewind();
+        } finally {
+            stopRecord();
+        }
+    }
+'@
+  if(!$t.Contains($old)){throw 'Pinned voice storage finalizer marker changed'}
+  $new=@'
+    private boolean vyrnFinishVoiceRecord(int account, int guid, File previous, File recorded) {
+        final int bytes = fileBuffer.position();
+        boolean saved = false;
+        try {
+            saved = !vyrnVoiceWriteFailed && writeFrame(fileBuffer, bytes) != 0;
+            if (saved) recordTimeCount += bytes / 2 / (sampleRate / 1000);
+        } finally {
+            fileBuffer.rewind();
+            stopRecord();
+        }
+        if (!saved) {
+            for (File file : new File[]{previous, recorded}) if (file != null) {
+                AutoDeleteMediaTask.unlockFile(file);
+                file.delete();
+            }
+            AndroidUtilities.runOnUIThread(() -> {
+                requestRecordAudioFocus(false);
+                NotificationCenter.getInstance(account).postNotificationName(NotificationCenter.recordStartError, guid);
+                android.widget.Toast.makeText(ApplicationLoader.applicationContext,
+                    LocaleController.isRTL ? "ذخیرهٔ ویس انجام نشد؛ فضای حافظه و دسترسی ذخیره‌سازی را بررسی کنید." : "Voice could not be saved. Check storage space and access.",
+                    android.widget.Toast.LENGTH_LONG).show();
+            });
+        }
+        return saved;
+    }
+'@
+  $t=$t.Replace($old,$new)
+  $t=$t.Replace("                    vyrnFinishVoiceRecord();","                    if (!vyrnFinishVoiceRecord(recordingCurrentAccount, recordingGuid, recordingPrevAudioFile, recordingAudioFile)) {`n                        cleanRecording(true);`n                        return;`n                    }")
+  $t=$t.Replace('            final File recordingPrevAudioFileToSend_ = recordingPrevAudioFile;',"            final File recordingPrevAudioFileToSend_ = recordingPrevAudioFile;`n            final int vyrnAccount = recordingCurrentAccount, vyrnGuid = recordingGuid;")
+  $t=$t.Replace('                vyrnFinishVoiceRecord();','                if (!vyrnFinishVoiceRecord(vyrnAccount, vyrnGuid, recordingPrevAudioFileToSend_, recordingAudioFileToSend_)) return;')
  }
  $t
 }
@@ -71,6 +126,17 @@ int writeFrame(uint8_t *framePcmBytes, uint32_t frameByteCount, int end) {
 
 '@
   $t=$t.Substring(0,$from)+$section+$tail+$t.Substring($to)
+ }
+ $t
+}
+Edit 'TMessagesProj/jni/audio.c' {
+ param($t)
+ if(!$t.Contains('if (last) return fflush(_fileOs) == 0;')){
+  $t=$t.Replace('if (last) return 1;','if (last) return fflush(_fileOs) == 0;')
+  $marker="} while (enc_granulepos < target);`n    return 1;"
+  $t=$t.Replace("`r`n","`n")
+  if(!$t.Contains($marker)){throw 'Pinned voice flush marker changed'}
+  $t=$t.Replace($marker,"} while (enc_granulepos < target);`n    return fflush(_fileOs) == 0;")
  }
  $t
 }
