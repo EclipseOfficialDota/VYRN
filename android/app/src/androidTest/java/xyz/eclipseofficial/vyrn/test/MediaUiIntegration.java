@@ -31,6 +31,9 @@ import xyz.eclipseofficial.vyrn.domain.Models;
 /** Native file selection/send and receive/download scenarios; group setup uses API fixtures. */
 final class MediaUiIntegration {
     static void voiceCodec(Instrumentation instrumentation,AuthUiIntegration.Check check) throws Exception {
+        voiceCodec(instrumentation,check,50);
+    }
+    private static void voiceCodec(Instrumentation instrumentation,AuthUiIntegration.Check check,int frames) throws Exception {
         org.telegram.messenger.MediaController controller=org.telegram.messenger.MediaController.getInstance();
         java.lang.reflect.Method start=controller.getClass().getDeclaredMethod("startRecord",String.class,int.class),write=controller.getClass().getDeclaredMethod("writeFrame",java.nio.ByteBuffer.class,int.class),stop=controller.getClass().getDeclaredMethod("stopRecord");
         start.setAccessible(true);write.setAccessible(true);stop.setAccessible(true);
@@ -40,13 +43,13 @@ final class MediaUiIntegration {
             try{
                 java.nio.ByteBuffer pcm=java.nio.ByteBuffer.allocateDirect(1920).order(java.nio.ByteOrder.nativeOrder());
                 for(int i=0;i<960;i++)pcm.putShort((short)(Math.sin(i*2*Math.PI*400/48000)*6000));
-                boolean encoded=true;for(int frame=0;frame<50;frame++)if((Integer)write.invoke(controller,pcm,1920)!=1){encoded=false;break;}
+                boolean encoded=true;for(int frame=0;frame<frames;frame++)if((Integer)write.invoke(controller,pcm,1920)!=1){encoded=false;break;}
                 check.verify(encoded,"voice_original_native_frames_encoded_"+tail);
                 check.verify((Integer)write.invoke(controller,pcm,tail*2)==1,"voice_original_native_eos_encoded_"+tail);
             }finally{stop.invoke(controller);}
             check.verify(file.isFile()&&file.length()>0&&org.telegram.messenger.MediaController.isOpusFile(file.getAbsolutePath())==1,"voice_original_native_container_opens_"+tail);
             File decoded=new File(instrumentation.getTargetContext().getFilesDir(),"vyrn-native-voice-decoded-"+tail+".ogg");
-            check.verify(org.telegram.messenger.MediaController.cropOpusFile(file.getAbsolutePath(),decoded.getAbsolutePath(),0,2000)&&decoded.isFile(),"voice_original_native_full_pcm_decode_and_reencode_"+tail);
+            check.verify(org.telegram.messenger.MediaController.cropOpusFile(file.getAbsolutePath(),decoded.getAbsolutePath(),0,frames*20L+1000)&&decoded.isFile(),"voice_original_native_full_pcm_decode_and_reencode_"+tail);
         }
     }
     static void uploadCold(Instrumentation instrumentation,Activity activity,JSONObject fixture,AuthUiIntegration.Check check,boolean recover) throws Exception {
@@ -391,7 +394,7 @@ final class MediaUiIntegration {
         android.graphics.Bitmap image=android.graphics.Bitmap.createBitmap(width,height,android.graphics.Bitmap.Config.ARGB_8888);
         try{int[] pixels=new int[width*height];java.util.Random random=new java.util.Random(71);for(int i=0;i<pixels.length;i++)pixels[i]=0xff000000|random.nextInt(0x1000000);image.setPixels(pixels,0,width,0,0,width,height);java.io.ByteArrayOutputStream output=new java.io.ByteArrayOutputStream();if(!image.compress(android.graphics.Bitmap.CompressFormat.PNG,100,output))throw new AssertionError("photo_fixture_encode");return output.toByteArray();}finally{image.recycle();}
     }
-    static void run(Instrumentation instrumentation,Activity activity,JSONObject fixture,AuthUiIntegration.Check check,boolean photo) throws Exception {
+    static void run(Instrumentation instrumentation,Activity activity,JSONObject fixture,AuthUiIntegration.Check check,boolean photo,boolean voice) throws Exception {
         AuthUiIntegration.registration(instrumentation,activity,fixture,check);
         mediaIds(instrumentation,check);
         int account=UserConfig.selectedAccount;VyrnBridge bridge=VyrnBridge.forAccount(account);RestRepository repository=bridge.repository;
@@ -400,8 +403,9 @@ final class MediaUiIntegration {
         JSONObject tokens=(JSONObject)sender.request("POST","/v1/auth/register",new JSONObject().put("email","media-sender-"+UUID.randomUUID()+"@vyrn.local").put("password",fixture.getString("password")).put("invite_code",fixture.getString("invite")).put("display_name","Media sender").put("device_id",UUID.randomUUID().toString()).put("device_name","Media API fixture"),false);
         sender.vault.save(tokens);String senderId=tokens.getString("user_id");
         JSONObject group=(JSONObject)sender.requestForUser(senderId,"POST","/v1/conversations",new JSONObject().put("kind","group").put("title","Native file test").put("members",new org.json.JSONArray().put(owner)),true);
-        String conversation=group.getString("id");byte[] bytes=photo?testPhoto():new byte[2*1024*1024+113];if(!photo)for(int i=0;i<bytes.length;i++)bytes[i]=(byte)(i*31);
-        HttpsURLConnection connection=(HttpsURLConnection)new java.net.URL(org.telegram.messenger.BuildConfig.VYRN_API_URL+"/v1/media?kind="+(photo?"image":"file")+"&conversation_id="+conversation).openConnection();
+        if(voice)voiceCodec(instrumentation,check,250);
+        String conversation=group.getString("id");byte[] bytes=voice?Files.readAllBytes(new File(instrumentation.getTargetContext().getFilesDir(),"vyrn-native-voice-480.ogg").toPath()):photo?testPhoto():new byte[2*1024*1024+113];if(!photo&&!voice)for(int i=0;i<bytes.length;i++)bytes[i]=(byte)(i*31);
+        HttpsURLConnection connection=(HttpsURLConnection)new java.net.URL(org.telegram.messenger.BuildConfig.VYRN_API_URL+"/v1/media?kind="+(voice?"voice":photo?"image":"file")+"&conversation_id="+conversation).openConnection();
         JSONObject upload;
         try{connection.setInstanceFollowRedirects(false);connection.setConnectTimeout(15000);connection.setReadTimeout(20000);connection.setRequestMethod("POST");connection.setRequestProperty("Authorization","Bearer "+sender.vault.load().getString("access_token"));connection.setRequestProperty("X-Filename","vyrn-native-file.bin");connection.setDoOutput(true);connection.setFixedLengthStreamingMode(bytes.length);try(java.io.OutputStream output=connection.getOutputStream()){output.write(bytes);}check.verify(connection.getResponseCode()==201,"media_fixture_upload");try(java.io.InputStream input=connection.getInputStream();java.io.ByteArrayOutputStream output=new java.io.ByteArrayOutputStream()){byte[] buffer=new byte[4096];int count;while((count=input.read(buffer))!=-1){if(output.size()+count>65536)throw new AssertionError("media_fixture_response_limit");output.write(buffer,0,count);}upload=new JSONObject(output.toString("UTF-8"));}}finally{connection.disconnect();}
         JSONObject posted=(JSONObject)sender.requestForUser(senderId,"POST","/v1/conversations/"+conversation+"/messages",new JSONObject().put("client_id",UUID.randomUUID().toString()).put("encrypted",false).put("media_id",upload.getString("id")).put("payload",new JSONObject().put("text","VYRN native file")),true);
@@ -435,10 +439,33 @@ final class MediaUiIntegration {
             file=FileLoader.getInstance(account).getPathToAttach(document[0]);
             location=new TLRPC.TL_inputDocumentFileLocation();location.id=document[0].id;location.file_reference=document[0].file_reference;location.thumb_size="";
         }
-        if(!file.isFile())instrumentation.runOnMainSync(()->check.verify(rendered[0].performAccessibilityAction(AccessibilityNodeInfo.ACTION_CLICK,new Bundle()),"media_actual_download_action"));
+        JSONObject beforeDownload=new JSONObject();
+        if(!file.isFile())instrumentation.runOnMainSync(()->{
+            boolean loading=FileLoader.getInstance(account).isLoadingFile(file.getName());
+            if(voice)try{beforeDownload.put("button",field(rendered[0],"buttonState")).put("mini",field(rendered[0],"miniButtonState")).put("loading",loading);}catch(Exception failure){throw new AssertionError(failure);}
+            if(!loading)check.verify(rendered[0].performAccessibilityAction(AccessibilityNodeInfo.ACTION_CLICK,new Bundle()),"media_actual_download_action");
+        });
+        if(voice)Files.write(new File(instrumentation.getTargetContext().getFilesDir(),"vyrn-test-voice-before-download.json").toPath(),beforeDownload.toString().getBytes(StandardCharsets.UTF_8));
         deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(60);while(System.nanoTime()<deadline&&(!file.isFile()||file.length()!=bytes.length))Thread.sleep(100);
+        if(voice&&!file.isFile()){
+            JSONObject diagnostic=new JSONObject().put("expected",file.getAbsolutePath()).put("before",beforeDownload);
+            instrumentation.runOnMainSync(()->{try{org.telegram.messenger.MessageObject object=rendered[0].getMessageObject();diagnostic.put("type",object.type).put("voice",object.isVoice()).put("message_path",FileLoader.getInstance(account).getPathToMessage(object.messageOwner).getAbsolutePath()).put("button",field(rendered[0],"buttonState")).put("mini",field(rendered[0],"miniButtonState")).put("loading",FileLoader.getInstance(account).isLoadingFile(FileLoader.getAttachFileName(object.getDocument()))).put("playing",org.telegram.messenger.MediaController.getInstance().isPlayingMessage(object));}catch(Exception failure){throw new AssertionError(failure);}});
+            Files.write(new File(instrumentation.getTargetContext().getFilesDir(),"vyrn-test-voice-download.json").toPath(),diagnostic.toString().getBytes(StandardCharsets.UTF_8));
+        }
         check.verify(file.isFile()&&Arrays.equals(MessageDigest.getInstance("SHA-256").digest(Files.readAllBytes(file.toPath())),MessageDigest.getInstance("SHA-256").digest(bytes)),"media_original_worker_complete_verified_file");
         check.verify(VyrnBridge.verifyAttachment(account,location,file),"media_completion_guard_accepts_exact_file");
+        if(voice){
+            org.telegram.messenger.MediaController player=org.telegram.messenger.MediaController.getInstance();
+            awaitUi(instrumentation,()->rendered[0].getMessageObject().type==org.telegram.messenger.MessageObject.TYPE_VOICE&&rendered[0].getMessageObject().isVoice(),check,"voice_actual_native_received_bubble");
+            if(!player.isPlayingMessage(rendered[0].getMessageObject())||player.isMessagePaused())instrumentation.runOnMainSync(()->check.verify(rendered[0].performAccessibilityAction(AccessibilityNodeInfo.ACTION_CLICK,new Bundle()),"voice_actual_native_play_control"));
+            try{awaitUi(instrumentation,()->player.isPlayingMessage(rendered[0].getMessageObject())&&!player.isMessagePaused()&&player.getPlayingMessageObject().audioProgress>0,check,"voice_original_player_advances_received_audio");}catch(AssertionError failure){
+                JSONObject diagnostic=new JSONObject();instrumentation.runOnMainSync(()->{try{Object audio=field(player,"audioPlayer");diagnostic.put("playing",player.isPlayingMessage(rendered[0].getMessageObject())).put("paused",player.isMessagePaused()).put("button",field(rendered[0],"buttonState")).put("mini",field(rendered[0],"miniButtonState")).put("progress",player.getPlayingMessageObject()==null?-1:player.getPlayingMessageObject().audioProgress).put("player",audio==null?"none":audio.getClass().getSimpleName());if(audio instanceof org.telegram.ui.Components.VideoPlayer)diagnostic.put("position",((org.telegram.ui.Components.VideoPlayer)audio).getCurrentPosition()).put("duration",((org.telegram.ui.Components.VideoPlayer)audio).getDuration());}catch(Exception error){throw new AssertionError(error);}});
+                Files.write(new File(instrumentation.getTargetContext().getFilesDir(),"vyrn-test-voice-playback.json").toPath(),diagnostic.toString().getBytes(StandardCharsets.UTF_8));throw failure;
+            }
+            instrumentation.runOnMainSync(()->check.verify(rendered[0].performAccessibilityAction(AccessibilityNodeInfo.ACTION_CLICK,new Bundle()),"voice_actual_native_pause_control"));
+            awaitUi(instrumentation,()->player.isPlayingMessage(rendered[0].getMessageObject())&&player.isMessagePaused(),check,"voice_original_player_paused_from_chat");
+            instrumentation.runOnMainSync(()->player.cleanupPlayer(true,true));
+        }
         if(photo){
             android.graphics.Bitmap decoded=android.graphics.BitmapFactory.decodeFile(file.getAbsolutePath());try{check.verify(decoded!=null&&decoded.getWidth()==256&&decoded.getHeight()==192,"media_native_photo_download_decodes");}finally{if(decoded!=null)decoded.recycle();}
             boolean[] displayed={false};deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(20);

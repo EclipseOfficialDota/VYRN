@@ -1,3 +1,7 @@
+## Received voice play/pause in native chat — 2026-10-14
+
+Run `./scripts/test-android-integration.ps1 -Phases media-voice-ui` against local Core migration009. The recipient registers through native controls; an independent REST sender publishes original-codec synthetic five-second audio. The actual ChatActivity must render a voice row, the original FileLoader must download matching bytes, and the original accessibility Play/Pause controls must produce positive player progress and a paused target. Active automatic downloads are awaited rather than cancelled by a test click. Evidence: artifacts/android-media-voice-ui.json. This does not use the microphone or verify physical audio output/recording UI.
+
 ## Voice upload and native adapter — 2026-10-14
 
 Run `./scripts/test-android-integration.ps1 -Phases media-voice-upload` against matching local Core migration009. The dedicated emulator uses the original small Audio upload queue and original-codec synthetic recording; native media dispatch/outbox performs completion and publication. Replaying the same request must produce one message, validated duration/hash and one durable voice intent. This phase does not press the recording or playback controls. Evidence: artifacts/android-media-voice-upload.json.

@@ -1,5 +1,11 @@
 # Acceptance matrix
 
+## Received group voice plays and pauses in native chat — 2026-10-14
+
+On local APK90d208b5a76b7c13ad74918c3cd1af910f2d579f7e14a221432d002db70daf81, actual recipient registration/chat, a distinct REST-fixture sender, authenticated original FileLoader download with exact SHA, TYPE_VOICE rendering, native accessibility Play with positive original-player progress and native Pause pass56 checks. File receive36, photo receive40 and voice upload44 also pass on that APK (176 total), scripts exit0 with no attach retries. The shared test harness avoids cancelling automatic download; no production download/player fix is claimed.
+
+This accepts recipient accessibility/player behavior with synthetic audio on one emulator. It does not accept a physical play gesture, audible device output, actual recording/Send UI, microphone permissions, two native phones, private encrypted voice, interrupted/cold/low-storage voice or the remaining full goal.
+
 ## Group voice transport and native DTO accepted locally — 2026-10-14
 
 Original small Audio FileLoader transfer, durable voice completion/publication, repeat without duplicate, account/session/media binding, verified1010ms duration overriding a false client hint, hash-bound native voice acknowledgement and explicit music rejection pass44 checks. Existing file28/photo27 pass on the same local APK495f5123c601812d5040a4a392aaeb662b2fae44038b133b40b36f85d182d1bd (99 total), scripts exit0 without attach retries.
