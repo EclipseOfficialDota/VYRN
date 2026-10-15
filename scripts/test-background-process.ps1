@@ -1,5 +1,5 @@
 # Owned emulator only. No instrumentation runs during process death/delivery observation.
-param([ValidateSet('emulator-5560','emulator-5562','emulator-5564')][string]$Serial='emulator-5560',[switch]$PrivateChat,[switch]$Doze)
+param([ValidateSet('emulator-5560','emulator-5562','emulator-5564')][string]$Serial='emulator-5560',[switch]$PrivateChat,[switch]$Doze,[switch]$Reboot)
 $ErrorActionPreference='Stop'
 $root=Split-Path $PSScriptRoot -Parent
 $adb=Join-Path $root '.tools/android-sdk/platform-tools/adb.exe'
@@ -10,7 +10,7 @@ function Read-Adb([string[]]$Arguments){
     if($result.code -ne 0){
         # Identify only the operation, never fixture output or credentials.
         $operation=($Arguments | Select-Object -First 2) -join ' '
-        throw "Background ADB operation '$operation' failed (exit=$($result.code), timeout=$($result.timed_out)); no app data removed"
+        throw "Background ADB operation '$operation' failed (exit=$($result.code), timeout=$($result.timed_out))"
     }
     return $result.output
 }
@@ -58,9 +58,10 @@ $marker=if($PrivateChat){$fixture.marker}else{'Background-'+[guid]::NewGuid().To
 $notificationText=if($PrivateChat){$fixture.title}else{$marker}
 $deliveredInIdle=$null
 $wasDeepEnabled=$null
+$beforeBoot=$null;$afterBoot=$null
 try {
     # Instrumentation completion may terminate its target. Establish an ordinary
-    # user launch before the controlled kill; never launch again until delivery.
+    # user launch before controlled termination; never launch again until delivery.
     $null=Read-Adb @('shell','input','keyevent','224')
     $null=Read-Adb @('shell','wm','dismiss-keyguard')
     $launch=Read-Adb @('shell','am','start','-W','-n',"$package/org.telegram.ui.LaunchActivity")
@@ -69,10 +70,27 @@ try {
     Wait-For { (Read-AppPid) -gt 0 -and (Read-Adb @('shell','dumpsys','activity','services',$package)) -match 'isForeground=true' } 90 'Enabled service did not start on ordinary cold app launch'
     $before=Read-AppPid
     $null=Read-Adb @('shell','input','keyevent','223')
-    $null=Read-Adb @('shell','kill','-9',"$before")
-    Wait-For { $current=Read-AppPid; $current -gt 0 -and $current -ne $before -and (Read-Adb @('shell','dumpsys','activity','services',$package)) -match 'isForeground=true' } 90 'Sticky service did not recover after actual process death'
+    if($Reboot){
+        $beforeBoot=(Read-Adb @('shell','cat','/proc/sys/kernel/random/boot_id')).Trim()
+        $null=Read-Adb @('reboot')
+        Wait-For {
+            $boot=Invoke-TestAdb -Arguments @('-s',$Serial,'shell','getprop','sys.boot_completed') -TimeoutMs 5000
+            if($boot.code -ne 0 -or $boot.output.Trim() -ne '1'){return $false}
+            $identity=Invoke-TestAdb -Arguments @('-s',$Serial,'shell','cat','/proc/sys/kernel/random/boot_id') -TimeoutMs 5000
+            $identity.code -eq 0 -and $identity.output.Trim() -ne $beforeBoot
+        } 120 'Owned emulator did not finish reboot'
+        Assert-Check ((Read-Adb @('emu','avd','name')) -match "(?m)^$expected\r*$") 'owned_emulator_identity_after_reboot'
+        $afterBoot=(Read-Adb @('shell','cat','/proc/sys/kernel/random/boot_id')).Trim()
+        Assert-Check ($beforeBoot -match '^[0-9a-f-]{36}$' -and $afterBoot -match '^[0-9a-f-]{36}$' -and $beforeBoot -ne $afterBoot) 'actual_android_kernel_boot_identity_changed'
+        # Re-establish only the test transport. Never launch the app after boot.
+        $null=Read-Adb @('reverse','tcp:18443','tcp:18443')
+        $null=Read-Adb @('shell','wm','dismiss-keyguard')
+        $null=Read-Adb @('shell','input','keyevent','223')
+    }else{$null=Read-Adb @('shell','kill','-9',"$before")}
+    Wait-For { $current=Read-AppPid; $current -gt 0 -and ($Reboot -or $current -ne $before) -and (Read-Adb @('shell','dumpsys','activity','services',$package)) -match 'isForeground=true' } 90 'Enabled foreground service did not recover after termination'
     $after=Read-AppPid
-    Assert-Check ($after -ne $before) 'actual_process_kill_and_automatic_foreground_service_restart'
+    if($Reboot){Assert-Check ($after -gt 0) 'automatic_foreground_service_start_after_real_android_reboot'}
+    else{Assert-Check ($after -ne $before) 'actual_process_kill_and_automatic_foreground_service_restart'}
     $processes=Read-Adb @('shell','dumpsys','activity','processes',$package)
     Assert-Check ($processes -notmatch 'mInstr=ActiveInstrumentation|instrumentationClass=') 'no_app_instrumentation_after_restart'
     Assert-Check ((Read-Adb @('shell','dumpsys','power')) -match 'mWakefulness=Asleep') 'screen_off_before_external_message'
@@ -127,7 +145,8 @@ try {
     $kind=if($PrivateChat){'private'}else{'group'}
     $suffix=if($PrivateChat){"private-$Serial"}else{$Serial}
     if($Doze){$suffix="doze-$suffix"}
-    @{date=[DateTimeOffset]::Now.ToString('o');result='passed';chat_kind=$kind;forced_deep_idle=$Doze.IsPresent;notification_observed_during_idle=$deliveredInIdle;apk_sha256=(Get-FileHash (Join-Path $root 'artifacts/VyrnApp-dev-x86_64-debug-local-tls.apk')).Hash.ToLowerInvariant();test_apk_sha256=(Get-FileHash (Join-Path $root 'artifacts/VyrnApp-dev-debug-androidTest.apk')).Hash.ToLowerInvariant();device=$expected;serial=$Serial;before_pid=$before;after_pid=$after;checks=$script:checks;scope='Native UI registration/opt-in; external actual process kill, automatic sticky restart, external REST sender, screen-off real system notification, system UI notification touch and original chat read; no app instrumentation during kill/delivery. Private mode uses Signal prepared before process death, posted after restart, decrypted only by original recipient UI. Optional forced deep idle uses ADB-reversed local TLS; not long natural Doze, radio/OEM network restrictions, reboot, physical phone or private media.'}|ConvertTo-Json -Depth 5|Set-Content (Join-Path $root "artifacts/android-background-process-$suffix.json") -Encoding utf8
+    if($Reboot){$suffix="reboot-$suffix"}
+    @{date=[DateTimeOffset]::Now.ToString('o');result='passed';chat_kind=$kind;android_reboot=$Reboot.IsPresent;before_boot_id=$beforeBoot;after_boot_id=$afterBoot;forced_deep_idle=$Doze.IsPresent;notification_observed_during_idle=$deliveredInIdle;apk_sha256=(Get-FileHash (Join-Path $root 'artifacts/VyrnApp-dev-x86_64-debug-local-tls.apk')).Hash.ToLowerInvariant();test_apk_sha256=(Get-FileHash (Join-Path $root 'artifacts/VyrnApp-dev-debug-androidTest.apk')).Hash.ToLowerInvariant();device=$expected;serial=$Serial;before_pid=$before;after_pid=$after;checks=$script:checks;scope='Native UI registration/opt-in; actual process kill or optional kernel-verified Android reboot; automatic service recovery, external REST sender, screen-off notification, system UI touch and original chat read; no app instrumentation during termination/delivery. Private Signal body prepared before termination, posted after recovery, decrypted by recipient UI. Local ADB-reversed TLS; reboot test uses emulator without PIN. Not long natural Doze, radio/OEM restrictions, physical phone, locked credential storage or private media.'}|ConvertTo-Json -Depth 5|Set-Content (Join-Path $root "artifacts/android-background-process-$suffix.json") -Encoding utf8
     Write-Output "PASS: $($script:checks.Count) external background process-recovery checks"
 } catch {
     try{$failureUi=Read-Ui;[IO.File]::WriteAllText((Join-Path $root '.local/background-process-failure.xml'),$failureUi.OuterXml)}catch{}

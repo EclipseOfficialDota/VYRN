@@ -1,5 +1,11 @@
 # Acceptance matrix
 
+## Private-text boot recovery accepted on API30 without PIN — 2026-10-16
+
+The existing system boot receiver started the opted-in VYRN foreground service after an actual kernel-UUID-verified Android reboot. No app launch or instrumentation occurred after reboot before screen-off private Signal delivery. Real notification touch opened the correct native private chat with decrypted text and confirmed server read. Preparation27/external14 recorded checks passed, script exit0; see TEST_REPORT and artifacts/android-background-process-reboot-private-emulator-5564.json. ADB-local TLS was restored after boot; the emulator has no PIN.
+
+This narrows only the positive API30 boot/private-text case. Opt-out boot, newer Android restrictions, storage before user unlock, physical/OEM/network behavior and media boot delivery remain unaccepted. No extra receiver or product build was required. Full objective remains incomplete.
+
 ## Forced deep idle observed locally — 2026-10-16
 
 Group and private Signal process-death notification scenarios also pass with explicit Android mState=IDLE checks around external message delivery. Group preparation26/external13 and private preparation27/external15 recorded checks pass with script exits0. Both notifications were observed during forced idle, opened matching native chats and recorded reads. Prior emulator idle-enable state was restored and verified; emulator shut down. See TEST_REPORT and the doze-specific reports for hashes, PIDs and the failed disabled-idle attempt.
