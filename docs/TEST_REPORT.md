@@ -1,3 +1,23 @@
+## Fresh normal phone APKs — 2026-10-15
+
+The requested five-year phone compatibility range uses the existing minSdk26 (Android8+) and both ARM32/ARM64 architectures. No minimum-SDK change was necessary. A normal public-HTTPS dev/debug build from e66e6a8 completed successfully in2m34s (exit0), without LocalTest or instrumentation. verify-apks.ps1 exited0 for all three APKs: signatures, package, API26 minimum, expected native libraries/ABIs, cleartext disabled, and no local test CA or desktop/test Signal libraries. These are debug-signed test builds, not the final Release.
+
+| APK | Bytes | SHA256 |
+| --- | ---: | --- |
+| VyrnApp-dev-arm64-v8a-debug.apk | 122494209 | 61368d598c53bc67bc363143771342b9b171230864cc6cbe9473611665eddc19 |
+| VyrnApp-dev-armeabi-v7a-debug.apk | 108207595 | 031c4ed5e9708e9cf42a2e88fb95b04812bfd0c9365b95eb80180a66e890b0ca |
+| VyrnApp-dev-universal-debug.apk | 158719706 | 347350639eed0db722073acbdc7c198cc63a59a17dd5af5b3b96c7fdd71ff510 |
+
+Files and apk-verification.json are local ignored artifacts. ADB listed no connected devices at this checkpoint. No actual install or runtime claim is made for these ARM builds, Android8 hardware or the reported Xiaomi Note10Pro installation failure. Its cause remains unconfirmed; universal packaging does not prove that an unknown installation failure is fixed. No new public download route was deployed.
+
+## Production Core deployment and isolated restore/rollback compatibility — 2026-10-15
+
+Source e66e6a8 was built with the pinned Go1.26.8 toolchain. go vet ./..., security unit tests and the complete API suite on actual PostgreSQL passed; database has no package tests. The API suite includes receipt/unread, staged transfer, original-native voice fixtures and Signal publication/session/concurrency cases. The Linux executable SHA256 is c95b3454eef1f76d7fc9ea218826f0ec6df9ab6f4e84fed87f7dc387a2275846.
+
+The VPS candidate image sha256:0332c2f7887d52ec62648b1cc455d514da65b07f55dee2d738fe9b912d9ec503 passed real isolated snapshot restoration, schema7→9 migration, readiness and media integrity/ownership checks before activation. The first rehearsal selected the edge network and failed startup; the successful repeat used vyrn_private and exited0. A fresh consistent database/media/config snapshot preceded activation. Only Core was recreated; PostgreSQL and media were retained. /opt/vyrn/current now selects /opt/vyrn/releases/core-20261015-e66e6a8. Core/PostgreSQL health, running image/executable, nine applied migrations, public certificate-validated HTTPS readiness and unauthenticated conversation-read401 passed. Deployment script exited0.
+
+After activation, a separate disposable restored clone was upgraded to schema9 and started with the prior immutable image sha256:2daeb2878a140b3233c30a5ebfc2ec14d20641ba3f5dbacf56f8e6f615bb6820. Old-binary readiness and hash passed; drill exited0. Production remained on the new release. Protected same-VPS evidence is under /opt/vyrn/operations/upgrade-20261015-e66e6a8, deploy-20261015-e66e6a8 and rollback-check-20261015-e66e6a8. Snapshots contain one avatar, not a production-scale media workload. Full old API compatibility and offsite/disaster restore are not proven. DNS, signing, TURN and external backup were not changed; the full goal remains active.
+
 ## Authenticated private chat read acknowledgement — 2026-10-15
 
 Native readHistory now supports ordinary private user peers as well as groups. Before queuing a private read, it validates the current owner/session/dialog mapping, resolves the positive message ordinal through the existing metadata-only private context, and authenticates the cached Signal display context against the actual peer, conversation, sender, revision and ordinal. Missing/expired/mismatched context fails before any read intent is queued. It does not call Signal receive/send/prepare, create a conversation, or fetch/decrypt a missing message over the network to authorize a read. Existing cached display validation reads the authenticated encrypted cache; it does not re-encrypt the transport payload. The shared durable ReadReceipts journal remains opaque metadata only.

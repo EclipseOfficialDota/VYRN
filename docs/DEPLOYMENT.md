@@ -1,26 +1,20 @@
 # Deployment runbook
 
-Status (2026-10-11): **Core updated to source a00a123; Core and PostgreSQL healthy; public API DNS/TLS active; owner panel active through SSH only. Full production Android acceptance remains pending.** See [Persian owner guide](OWNER_GUIDE.fa.md).
+Status (2026-10-15): **Core source e66e6a8 is active, schema is at nine migrations, Core and PostgreSQL are healthy, and public API TLS readiness passes. Physical-phone and final Release acceptance remain pending.** See [Persian owner guide](OWNER_GUIDE.fa.md).
 
 ## Active deployment
 
-The actual host is Ubuntu 24.04.3 LTS, with Docker 29.1.3 and Compose 2.40.3 installed from Ubuntu packages. Source release: `/opt/vyrn/releases/core-20261011-a00a123`, linked as `/opt/vyrn/current`. Run Compose with both `deployment/compose.yaml` and `deployment/compose.existing-nginx.yaml` and `/etc/vyrn/runtime.env`. Core listens only on `127.0.0.1:18080`; PostgreSQL is unpublished. Caddy is excluded by its `standalone-proxy` profile because existing Nginx uses 80/443. The owner panel Nginx site listens only on `127.0.0.1:19091`.
+Host: Ubuntu 24.04.3 LTS, Docker 29.1.3 and Compose 2.40.3. The active release is /opt/vyrn/releases/core-20261015-e66e6a8, selected by /opt/vyrn/current. Use both deployment/compose.yaml and deployment/compose.existing-nginx.yaml with the protected /etc/vyrn/runtime.env. Core binds only 127.0.0.1:18080; PostgreSQL is unpublished. Existing Nginx retains ports 80/443 and the owner panel binds only 127.0.0.1:19091. Caddy's standalone-proxy profile remains excluded.
 
-The October 11 update deploys the tested private-message deletion backend. Archive and executable SHA256 were checked before activation, and the running container executable matches `157771edb9eb31f93eba73d6f44a6cda852be86791a289ee1a091a71d1928cda`. All seven migration files and both Compose files match the previous release exactly. Only Core was recreated with `up -d --no-deps --no-build core`; PostgreSQL retains its October 4 start time and the existing media volume. The initial image build failed before activation because the installed builder lacks `COPY --chmod`; a00a123 uses ordinary COPY followed by RUN chmod, verified by the successful actual image build. Current image is `vyrn-core:a00a123`, also tagged `vyrn-core:latest`. The previous release and `vyrn-core:rollback-20261011` remain available.
+The October 15 release uses source e66e6a892643d6e5ca386d0ac5bbee2e89316d59. Running executable SHA256: c95b3454eef1f76d7fc9ea218826f0ec6df9ab6f4e84fed87f7dc387a2275846. Immutable image: sha256:0332c2f7887d52ec62648b1cc455d514da65b07f55dee2d738fe9b912d9ec503, tagged vyrn-core:e66e6a8 and vyrn-core:latest. Migrations 008_media_uploads.sql and 009_voice_duration.sql upgraded schema7 to schema9; all prior migrations were byte-compared unchanged. Admin source, Compose files and the prebuilt Dockerfile are unchanged from the prior release.
 
-Post-deployment checks from Windows passed certificate-validated readiness on API, WS, media and push hosts; the unauthenticated bulk deletion endpoint returns401. Core and PostgreSQL Docker health are healthy, and the SSH-only owner panel returns200 after release directory/static permissions were normalized. Evidence: `artifacts/core-production-a00a123.json`. These checks do not establish authenticated production deletion or physical-phone acceptance.
+Before activation, a consistent database/media/config snapshot was restored into a disposable database and private media volume. Candidate startup applied migrations7→9 and passed readiness, media size/checksum and UID10001 checks while live schema remained7. The first rehearsal attempt used the edge network and could not reach PostgreSQL; the successful repeat used vyrn_private. A fresh validated snapshot was then taken immediately before activation at /opt/vyrn/operations/deploy-20261015-e66e6a8/snapshot. Its parent directory is root-only and runtime.env is mode0600. These same-VPS snapshots are temporary and unreliable as disaster backups.
 
-For rollback on this unchanged-schema deployment, run on the VPS:
+Only Core was recreated with up -d --no-deps --no-build core; PostgreSQL and the production media volume were retained. Running image/executable, schema9 and certificate-validated public readiness were verified. The unauthenticated new conversation-read route returns401. A separate post-deploy drill restored the pre-deploy snapshot, upgraded its clone to schema9, and successfully started the previous immutable Core image against that clone. Production remained on the new image throughout this rollback compatibility drill.
 
-```sh
-docker tag vyrn-core:rollback-20261011 vyrn-core:latest
-ln -s /opt/vyrn/releases/vps-initial-20261004 /opt/vyrn/current.rollback
-mv -Tf /opt/vyrn/current.rollback /opt/vyrn/current
-docker compose --env-file /etc/vyrn/runtime.env -f /opt/vyrn/current/deployment/compose.yaml -f /opt/vyrn/current/deployment/compose.existing-nginx.yaml up -d --no-deps --no-build core
-curl -fsS http://127.0.0.1:18080/health/ready
-```
+## Retained rollback candidate
 
-Rollback was retained, not exercised after the successful deployment. Future releases with migration changes require a separate database rollback assessment.
+The prior release /opt/vyrn/releases/core-20261011-a00a123 and image vyrn-core:rollback-20261015-e66e6a8 (immutable sha256:2daeb2878a140b3233c30a5ebfc2ec14d20641ba3f5dbacf56f8e6f615bb6820) are retained. The old executable hash is157771edb9eb31f93eba73d6f44a6cda852be86791a289ee1a091a71d1928cda. Its readiness on restored schema9 was exercised in isolation; complete old-API compatibility with new media flows was not established. No production rollback or live database overwrite was performed. Assess those contracts before reverting; preserve current data and restore into separate volumes if database recovery is necessary.
 
 Dedicated key login was verified. Existing root/password access, SSH settings, firewall policy and unrelated services were preserved. Owner credentials live only in `/etc/vyrn/owner-access.json` mode 0600. Owner login, TOTP, all panel read endpoints, invite creation/revocation and session logout passed on the VPS. Bootstrap environment was removed. Containers use restart `unless-stopped` and Docker is enabled; whole-host reboot has not been tested.
 

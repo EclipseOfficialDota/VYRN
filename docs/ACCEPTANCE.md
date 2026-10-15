@@ -1,5 +1,15 @@
 # Acceptance matrix
 
+## Fresh ARM phone packaging verified — 2026-10-15
+
+Current e66e6a8 normal public-HTTPS ARM64, ARM32 and universal debug APKs build successfully. All three pass signature, minSdk26/Android8+, native ABI and network-policy checks; see TEST_REPORT for hashes. This covers packaging for the requested phone age range, not installation/runtime acceptance on every device. No ADB devices were connected. The Xiaomi installation issue remains unconfirmed, and final Release signing is pending.
+
+## Updated public Core and restored-schema startup accepted — 2026-10-15
+
+Core source e66e6a8 is active on the VPS, with schema9, healthy Core/PostgreSQL and certificate-validated public readiness. A real isolated pre-deploy restore migrated7→9 and validated the single existing avatar's checksum/size and media UID. A separate post-deploy restored clone also passed readiness with the retained old Core image on schema9. No live database overwrite or production rollback was performed. See DEPLOYMENT, BACKUP_RESTORE and TEST_REPORT for identities and scope.
+
+These checks do not accept physical-phone installation, public APK delivery, final Release signing/update, closed-process notifications, full old API compatibility or offsite/full-host recovery. Same-VPS snapshots remain temporary and unreliable. Full goal stays active.
+
 ## Online private native read acknowledgement accepted locally — 2026-10-15
 
 On APK62df92f7a9fd97de855e3bdf463f40f8b8b1d2f294e0e0c20efdc662a55e3814, PrivateComposer passes315 scenario checks including original incoming chat read receipts in both directions, native request replay, unchanged encrypted payload/revision and rejection of another peer's context. Existing actual private offline Send/draft/cold confirmation/display checks remain included. Group notification/read regression passes26 on the same APK. Both scripts exit0; see TEST_REPORT.
