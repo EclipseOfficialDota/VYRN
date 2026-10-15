@@ -240,6 +240,7 @@ final class ChatUiIntegration {
         if(phase.equals("chat-private-native-delete")){privateNativeDelete(instrumentation,activity,fixture,repository,root,check);privateDeleted(instrumentation,fixture,repository,local,false,root,check);return;}
         if(deleted){privateDeleted(instrumentation,fixture,repository,local,offline,root,check);return;}
         await(()->{boolean[] visible={false};instrumentation.runOnMainSync(()->visible[0]=privateCell(root,ordinal,text)!=null);return visible[0];},check,offline?"private_cold_offline_native_plaintext_bubble":"private_native_plaintext_bubble");
+        if(phase.equals("chat-private-view"))privateRead(instrumentation,fixture,repository,user,local,check);
         if(phase.equals("chat-private-edit-cold")||phase.equals("chat-private-native-edit")||phase.equals("chat-private-watch-edit")){privateEdit(instrumentation,activity,fixture,repository,root,!phase.equals("chat-private-watch-edit"),check,checkpoints);return;}
         if(phase.equals("chat-private-edit-reconciled"))privateEditReconciled(instrumentation,fixture,repository,check);
         if(phase.equals("chat-private-auto-recover"))instrumentation.runOnMainSync(()->check.verify(((ChatActivity)LaunchActivity.getLastFragment()).messages.stream().noneMatch(message->message.getId()==fixture.optInt("local_id")),"private_automatic_recovery_removes_original_negative_chat_row"));
@@ -272,6 +273,20 @@ final class ChatUiIntegration {
             }
         }
         write(instrumentation,new JSONObject().put("message_id",fixture.getString("message_id")).put("ordinal",ordinal).put("offline",offline).put("conversation",fixture.getString("conversation")));
+    }
+    private static void privateRead(Instrumentation instrumentation,JSONObject fixture,RestRepository repository,String user,long dialog,AuthUiIntegration.Check check) throws Exception {
+        String id=fixture.getString("message_id"),conversation=fixture.getString("conversation");
+        JSONObject before=(JSONObject)repository.request("GET","/v1/messages/"+id,null,true);
+        if(!before.getString("sender_id").equals(user))await(()->{try{org.json.JSONArray rows=(org.json.JSONArray)repository.request("GET","/v1/conversations/"+conversation+"/messages?limit=100&live_only=true",null,true);for(int i=0;i<rows.length();i++)if(rows.getJSONObject(i).getString("id").equals(id))return rows.getJSONObject(i).getJSONObject("receipts").getBoolean("read_by_me");}catch(Exception unavailable){}return false;},check,"private_original_chat_records_server_read_receipt",30);
+        org.telegram.tgnet.TLRPC.TL_messages_readHistory read=new org.telegram.tgnet.TLRPC.TL_messages_readHistory();read.peer=MessagesController.getInstance(UserConfig.selectedAccount).getInputPeer(dialog);read.max_id=fixture.getInt("ordinal");
+        java.util.concurrent.CompletableFuture<Boolean> acknowledged=new java.util.concurrent.CompletableFuture<>();org.telegram.tgnet.ConnectionsManager.getInstance(UserConfig.selectedAccount).sendRequest(read,(result,error)->acknowledged.complete(error==null&&result instanceof org.telegram.tgnet.TLRPC.TL_messages_affectedMessages));
+        check.verify(acknowledged.get(30,java.util.concurrent.TimeUnit.SECONDS),"private_read_repeat_uses_authenticated_cached_context");
+        JSONObject after=(JSONObject)repository.request("GET","/v1/messages/"+id,null,true);
+        check.verify(before.getJSONObject("payload").toString().equals(after.getJSONObject("payload").toString())&&before.getInt("revision")==after.getInt("revision"),"private_read_preserves_encrypted_payload_and_revision");
+        long wrong;try(IdMap ids=new IdMap(instrumentation.getTargetContext(),UserConfig.selectedAccount)){wrong=ids.local("user",java.util.UUID.randomUUID().toString());}
+        org.telegram.tgnet.TLRPC.TL_inputPeerUser swapped=new org.telegram.tgnet.TLRPC.TL_inputPeerUser();swapped.user_id=wrong;swapped.access_hash=wrong;read.peer=swapped;
+        java.util.concurrent.CompletableFuture<Boolean> denied=new java.util.concurrent.CompletableFuture<>();org.telegram.tgnet.ConnectionsManager.getInstance(UserConfig.selectedAccount).sendRequest(read,(result,error)->denied.complete(error!=null));
+        check.verify(denied.get(30,java.util.concurrent.TimeUnit.SECONDS),"private_read_other_peer_context_rejected");
     }
     private static void privateVerificationUi(Instrumentation instrumentation,Activity activity,RestRepository repository,String peer,AuthUiIntegration.Check check) throws Exception {
         int account=UserConfig.selectedAccount;String device;try(xyz.eclipseofficial.vyrn.data.SignalDeviceKeys keys=xyz.eclipseofficial.vyrn.data.SignalDeviceKeys.openLocal(instrumentation.getTargetContext(),repository)){device=keys.devices(peer).getJSONObject(0).getString("device_id");}

@@ -7,7 +7,7 @@ import java.util.TreeMap;
 import java.util.UUID;
 import org.json.JSONObject;
 
-/** Persist the highest observed group read position before attempting transport. */
+/** Persist the highest observed conversation read position before attempting transport. */
 public final class ReadReceipts {
     private static final Object LOCK=new Object();
     private final SharedPreferences records;

@@ -1,3 +1,9 @@
+## Private native read context — 2026-10-15
+
+Run `./scripts/test-two-client-messaging.ps1 -PrivateComposer` on the matching local TLS APK/Core with both preserved test emulators. Online private view phases now require actual incoming ChatActivity server read receipts, replay the native read request and verify unchanged encrypted payload/revision, then reject a different peer paired with that message ordinal. The read adapter uses only already authenticated local cached context for authorization; an unavailable cache is not fetched merely to mark a message read. Existing offline Send/cold confirmation checks remain part of this scenario. Run notification-ui separately as the group/other-session regression.
+
+These checks do not establish a newly unread private message read offline followed by cold receipt recovery, cross-session private races or physical devices. Reports: artifacts/android-two-client-private-composer.json and artifacts/android-notification-ui.json.
+
 ## Two-native-client current regression — 2026-10-15
 
 With the matching local TLS APK/Core and preserved emulator-5560/5562 ready, run each suite separately:

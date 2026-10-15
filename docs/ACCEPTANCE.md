@@ -1,5 +1,11 @@
 # Acceptance matrix
 
+## Online private native read acknowledgement accepted locally — 2026-10-15
+
+On APK62df92f7a9fd97de855e3bdf463f40f8b8b1d2f294e0e0c20efdc662a55e3814, PrivateComposer passes315 scenario checks including original incoming chat read receipts in both directions, native request replay, unchanged encrypted payload/revision and rejection of another peer's context. Existing actual private offline Send/draft/cold confirmation/display checks remain included. Group notification/read regression passes26 on the same APK. Both scripts exit0; see TEST_REPORT.
+
+Dedicated private offline read/cold receipt recovery, cross-session private read races, sender ticks, physical devices, full background delivery and release/offsite scope remain incomplete. Full goal stays active.
+
 ## Current full two-native-client regression checkpoints — 2026-10-15
 
 On the current4b5a0f53 APK, group -PrivateKeys -Offline passes231 scenario checks plus independent native registration on both emulators: both-direction Send, native Edit/Done and live recipient, shared Delete/Cancel, cold deletion absence, real transport loss, durable offline Send and automatic cold recovery without duplicate/revival. PrivateComposerEditCold passes605 scenario checks with both actual offline encrypted edits, process stops, original intent/editor recovery, live recipient updates, same revision2 message identity and both cold offline views. Reports: android-two-client-private-keys.json and android-two-client-private-composer-edit-cold.json. TEST_REPORT records exact hashes/dates and wrapper cleanup exits; no script exit0 is inferred.

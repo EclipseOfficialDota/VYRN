@@ -1012,7 +1012,7 @@ public final class VyrnBridge {
     }
     private void applyReadEvent(String owner,JSONObject body) throws Exception {
         Models.Conversation model=conversationModel(body.getString("conversation_id"));
-        if(!model.kind.equals("group"))return; // Private read-history UI remains gated.
+        if(!model.kind.equals("group")&&!model.kind.equals("private"))throw new SecurityException("unsupported_read_conversation");
         int max=body.getInt("max_id");if(max<1)throw new SecurityException("invalid_read_position");
         List<Models.User> members=repository.members(model.id);
         TL_update.TL_updateReadHistoryInbox read=new TL_update.TL_updateReadHistoryInbox();read.peer=peer(model,members);read.max_id=max;read.still_unread_count=model.unreadCount;read.pts=max;
@@ -1150,8 +1150,18 @@ public final class VyrnBridge {
         }
         if(request instanceof TLRPC.TL_messages_readHistory){
             TLRPC.TL_messages_readHistory in=(TLRPC.TL_messages_readHistory)request;
-            if(in.peer==null||in.peer.chat_id<=0||in.max_id<1)throw new UnsupportedOperationException();
-            JSONObject tokens=repository.vault.load();readReceipts.send(repository,tokens.getString("user_id"),tokens.getString("session_id"),conversation(in.peer),in.max_id);
+            if(in.peer==null||in.max_id<1)throw new UnsupportedOperationException();
+            JSONObject tokens=repository.vault.load();String target;
+            if(in.peer instanceof TLRPC.TL_inputPeerChat&&in.peer.chat_id>0)target=conversation(in.peer);
+            else if(in.peer instanceof TLRPC.TL_inputPeerUser&&in.peer.user_id>0){
+                String peer=ids.remote("user",in.peer.user_id);requirePrivateOrigin(tokens.getString("user_id"),tokens.getString("session_id"),UserConfig.getInstance(account).getClientUserId(),peer,in.peer.user_id);
+                JSONObject context=ids.privateContext(in.max_id);if(context==null)throw new SecurityException("private_read_context_unbound");
+                try(SignalDeviceKeys keys=SignalDeviceKeys.openLocal(ApplicationLoader.applicationContext,repository)){
+                    if(new SignalMessages(keys).display(peer,context.getString("conversation"),context.getString("message"),context.getString("sender"),context.getInt("revision"),in.max_id)==null)throw new SecurityException("private_read_context_unbound");
+                }
+                target=context.getString("conversation");
+            }else throw new UnsupportedOperationException();
+            readReceipts.send(repository,tokens.getString("user_id"),tokens.getString("session_id"),target,in.max_id);
             TLRPC.TL_messages_affectedMessages result=new TLRPC.TL_messages_affectedMessages();result.pts=in.max_id;return result;
         }
         if(request instanceof TLRPC.TL_messages_getDialogs)return dialogs();
