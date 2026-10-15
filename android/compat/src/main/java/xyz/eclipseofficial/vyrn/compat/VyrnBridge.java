@@ -979,7 +979,7 @@ public final class VyrnBridge {
         for(Models.Conversation c:repository.conversations()){
             if(requested!=null && (!c.kind.equals("group") || !requested.contains(-(long)ids.local("conversation",c.id))))continue;
             List<Models.User> members=repository.members(c.id);TLRPC.Peer peer=peer(c,members);for(Models.User u:members)result.users.add(mapUser(u));if(c.kind.equals("group"))result.chats.add(chat(c));
-            TLRPC.TL_dialog dialog=new TLRPC.TL_dialog();dialog.peer=peer;dialog.id=peer.chat_id!=0?-peer.chat_id:peer.user_id;dialog.notify_settings=new TLRPC.TL_peerNotifySettings();dialog.ttl_period=c.disappearingSeconds;if(c.disappearingSeconds>0)dialog.flags|=32;
+            TLRPC.TL_dialog dialog=new TLRPC.TL_dialog();dialog.peer=peer;dialog.id=peer.chat_id!=0?-peer.chat_id:peer.user_id;dialog.notify_settings=new TLRPC.TL_peerNotifySettings();dialog.unread_count=c.unreadCount;dialog.ttl_period=c.disappearingSeconds;if(c.disappearingSeconds>0)dialog.flags|=32;
             List<Models.Message> messages=repository.liveMessages(c.id,null,1);if(!messages.isEmpty()){TLRPC.Message message=message(messages.get(0),peer);result.messages.add(message);dialog.top_message=message.id;dialog.last_message_date=message.date;}result.dialogs.add(dialog);
         }return result;
     }

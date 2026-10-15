@@ -162,7 +162,7 @@ public final class RestRepository implements Models.Repository {
         JSONArray data=(JSONArray)request("GET","/v1/conversations/"+conversation+"/members",null,true);List<Models.User> result=new ArrayList<>();for(int i=0;i<data.length();i++)result.add(user(data.getJSONObject(i)));return result;
     }
     public List<Models.Conversation> conversations() throws Exception {
-        JSONArray data=(JSONArray)request("GET","/v1/conversations",null,true);List<Models.Conversation> result=new ArrayList<>();for(int i=0;i<data.length();i++){JSONObject c=data.getJSONObject(i);result.add(new Models.Conversation(c.getString("id"),c.getString("kind"),c.getString("title"),c.getString("role"),c.getInt("member_count"),c.getInt("disappearing_seconds")));}return result;
+        JSONArray data=(JSONArray)request("GET","/v1/conversations",null,true);List<Models.Conversation> result=new ArrayList<>();for(int i=0;i<data.length();i++){JSONObject c=data.getJSONObject(i);result.add(new Models.Conversation(c.getString("id"),c.getString("kind"),c.getString("title"),c.getString("role"),c.getInt("member_count"),c.getInt("disappearing_seconds"),c.optInt("unread_count",0)));}return result;
     }
     public List<Models.Message> messages(String conversation,String before,int limit) throws Exception{
         return messages(conversation,before,limit,false);

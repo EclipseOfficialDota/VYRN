@@ -28,8 +28,9 @@ public final class Models {
     }
     public static final class Conversation {
         public final String id, kind, title, role;
-        public final int members,disappearingSeconds;
-        public Conversation(String id,String kind,String title,String role,int members,int disappearingSeconds) { this.id=id;this.kind=kind;this.title=title;this.role=role;this.members=members;this.disappearingSeconds=disappearingSeconds; }
+        public final int members,disappearingSeconds,unreadCount;
+        public Conversation(String id,String kind,String title,String role,int members,int disappearingSeconds) { this(id,kind,title,role,members,disappearingSeconds,0); }
+        public Conversation(String id,String kind,String title,String role,int members,int disappearingSeconds,int unreadCount) { this.id=id;this.kind=kind;this.title=title;this.role=role;this.members=members;this.disappearingSeconds=disappearingSeconds;this.unreadCount=unreadCount; }
     }
     public static final class Message {
         public final Attachment attachment;

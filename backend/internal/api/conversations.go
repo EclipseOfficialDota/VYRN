@@ -247,7 +247,9 @@ func memberRole(ctx context.Context, tx pgx.Tx, conversation, user string) (kind
 }
 
 func (s *Server) conversations(w http.ResponseWriter, r *http.Request) {
-	rows, err := s.db.Query(r.Context(), `SELECT c.id::text,c.kind,c.title,m.role,c.disappearing_seconds,c.created_at,(SELECT count(*) FROM members all_members WHERE all_members.conversation_id=c.id) FROM conversations c JOIN members m ON m.conversation_id=c.id WHERE m.user_id=$1 ORDER BY c.created_at DESC LIMIT 500`, current(r).UserID)
+	rows, err := s.db.Query(r.Context(), `SELECT c.id::text,c.kind,c.title,m.role,c.disappearing_seconds,c.created_at,(SELECT count(*) FROM members all_members WHERE all_members.conversation_id=c.id),
+        (SELECT count(*) FROM messages msg WHERE msg.conversation_id=c.id AND msg.sender_id<>$1 AND msg.deleted_at IS NULL AND (msg.expires_at IS NULL OR msg.expires_at>now()) AND NOT EXISTS(SELECT 1 FROM receipts rc WHERE rc.message_id=msg.id AND rc.user_id=$1 AND rc.read_at IS NOT NULL))
+        FROM conversations c JOIN members m ON m.conversation_id=c.id WHERE m.user_id=$1 ORDER BY c.created_at DESC LIMIT 500`, current(r).UserID)
 	if err != nil {
 		s.internal(w)
 		return
@@ -256,13 +258,13 @@ func (s *Server) conversations(w http.ResponseWriter, r *http.Request) {
 	out := []map[string]any{}
 	for rows.Next() {
 		var id, kind, title, role string
-		var seconds, count int
+		var seconds, count, unread int
 		var created time.Time
-		if rows.Scan(&id, &kind, &title, &role, &seconds, &created, &count) != nil {
+		if rows.Scan(&id, &kind, &title, &role, &seconds, &created, &count, &unread) != nil {
 			s.internal(w)
 			return
 		}
-		out = append(out, map[string]any{"id": id, "kind": kind, "title": title, "role": role, "disappearing_seconds": seconds, "created_at": created, "member_count": count})
+		out = append(out, map[string]any{"id": id, "kind": kind, "title": title, "role": role, "disappearing_seconds": seconds, "created_at": created, "member_count": count, "unread_count": unread})
 	}
 	if rows.Err() != nil {
 		s.internal(w)

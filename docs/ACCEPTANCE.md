@@ -1,5 +1,11 @@
 # Acceptance matrix
 
+## Live-process screen-off notification accepted locally — 2026-10-15
+
+Actual app registration/system notification permission, Home/background and confirmed screen-off, distinct REST sender, real system notification and its original content action opening the correct native group pass20 checks on APK38f6d3e4388eefd999561de945d8ea36387ec1c320c54bb03e9ef06332e1e9eb. Script exits0/no attach retry. The reproduced zero-unread dialog model now receives authenticated server unread_count; PostgreSQL count/receipt/expiry/deletion/separation/101-message and existing message-permission tests pass. See TEST_REPORT.
+
+This does not accept delivery after process death/swipe/force-stop, Doze, physical phones, private notification privacy, mute/account races or native read-receipt synchronization. The sender is an API fixture and the notification action is invoked through its actual PendingIntent, not a physical shade tap. Full project goal remains active.
+
 ## Original voice recording UI error and retry accepted locally — 2026-10-14
 
 38 checks cover real composer record/hold/release, actual encoder write failure, visible storage Toast accessibility text, deletion of the failed recording, no published media/message, restored composer and successful repeat recording/Send in the same activity. Shared component storage regression passes21 on APK7b8e0acb4bc63e19a6e6effc8b2c3aea8c6f2944d1bd504c6ad1d6ddf831c61d. Final scripts exit0 without startup attach retries. See TEST_REPORT for fixture details and excluded initial attempt.

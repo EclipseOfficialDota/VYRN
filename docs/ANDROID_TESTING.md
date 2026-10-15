@@ -1,3 +1,9 @@
+## Live-process background notification with screen off — 2026-10-15
+
+Run `./scripts/test-android-integration.ps1 -Phases notification-ui` on matching local TLS/Core supporting conversation unread_count. The dedicated emulator registers through real UI, accepts the Android notification prompt, goes Home and turns the screen off with Android input. A distinct REST fixture sends a group message. Require an active system notification containing that message and its original content PendingIntent opening the correct ChatActivity. The test wakes the emulator and cancels its fixture notifications in finally. Failure diagnostics contain counts/state only in app-private vyrn-test-notification.json. Report: artifacts/android-notification-ui.json.
+
+This is live-process screen-off delivery, not process-death/Doze/physical-phone/private notification acceptance. Native read-history synchronization is not implemented by the unread-count DTO change. PostgreSQL tests: TestIntegrationConversationUnread and TestIntegrationMessagesAndPermissions; require DATABASE_URL and isolated test schemas (a skipped integration test is not evidence).
+
 ## Original voice recording UI storage error and retry — 2026-10-14
 
 Run `./scripts/test-android-integration.ps1 -Phases media-voice-storage-ui` on local Core migration009/native TLS and the owned no-host-audio emulator. It records through original composer touch controls, matches the unique live output descriptor by device/inode and changes it to read-only. Require visible storage Toast text, failed-file cleanup, zero published audio/message, restored composer and successful repeat recording in the same activity. Report: artifacts/android-media-voice-storage-ui.json. Permission is fixture-granted; whole-volume ENOSPC and physical hardware are separate acceptance requirements.
