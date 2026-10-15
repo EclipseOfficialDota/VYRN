@@ -1,5 +1,11 @@
 # Acceptance matrix
 
+## Forced deep idle observed locally — 2026-10-16
+
+Group and private Signal process-death notification scenarios also pass with explicit Android mState=IDLE checks around external message delivery. Group preparation26/external13 and private preparation27/external15 recorded checks pass with script exits0. Both notifications were observed during forced idle, opened matching native chats and recorded reads. Prior emulator idle-enable state was restored and verified; emulator shut down. See TEST_REPORT and the doze-specific reports for hashes, PIDs and the failed disabled-idle attempt.
+
+Scope is short forced idle on API30 with ADB-reversed local TLS. Natural long Doze, real radio-network/OEM restrictions and physical delivery remain unaccepted. This checkpoint narrows only the forced-idle gap in the older entries below; it does not complete the full objective.
+
 ## Group and private-text process-death delivery accepted on API30 — 2026-10-16
 
 This supersedes the independent-process/private-text limitation in the older visible-service checkpoint below only for these scenarios. After actual SIGKILL to the recipient app, Android automatically restarted its enabled foreground service; an external sender caused screen-off system notifications, and real notification touches opened matching original chats and recorded server reads. Private mode used real Signal device identities/keys and a ciphertext body prepared before death, sent after restart and decrypted by recipient UI. Server GET excluded plaintext; notification content excluded ciphertext prefixes. Private preparation27/external12 and group regression preparation26/external10 recorded checks passed with actual script exits0. Reports, hashes, PIDs and failed-attempt explanations are in TEST_REPORT. Sender is a fixture, not a second phone UI.

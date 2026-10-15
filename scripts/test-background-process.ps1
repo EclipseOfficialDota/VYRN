@@ -1,5 +1,5 @@
 # Owned emulator only. No instrumentation runs during process death/delivery observation.
-param([ValidateSet('emulator-5560','emulator-5562','emulator-5564')][string]$Serial='emulator-5560',[switch]$PrivateChat)
+param([ValidateSet('emulator-5560','emulator-5562','emulator-5564')][string]$Serial='emulator-5560',[switch]$PrivateChat,[switch]$Doze)
 $ErrorActionPreference='Stop'
 $root=Split-Path $PSScriptRoot -Parent
 $adb=Join-Path $root '.tools/android-sdk/platform-tools/adb.exe'
@@ -56,6 +56,8 @@ $senderHeaders=@{Authorization='Bearer '+$fixture.sender.access_token}
 $recipientHeaders=@{Authorization='Bearer '+$fixture.recipient.access_token}
 $marker=if($PrivateChat){$fixture.marker}else{'Background-'+[guid]::NewGuid().ToString('N')}
 $notificationText=if($PrivateChat){$fixture.title}else{$marker}
+$deliveredInIdle=$null
+$wasDeepEnabled=$null
 try {
     # Instrumentation completion may terminate its target. Establish an ordinary
     # user launch before the controlled kill; never launch again until delivery.
@@ -74,8 +76,28 @@ try {
     $processes=Read-Adb @('shell','dumpsys','activity','processes',$package)
     Assert-Check ($processes -notmatch 'mInstr=ActiveInstrumentation|instrumentationClass=') 'no_app_instrumentation_after_restart'
     Assert-Check ((Read-Adb @('shell','dumpsys','power')) -match 'mWakefulness=Asleep') 'screen_off_before_external_message'
+    if($Doze){
+        $idleConfig=Read-Adb @('shell','dumpsys','deviceidle')
+        if($idleConfig -notmatch '\bmDeepEnabled=(true|false)\b'){throw 'Original emulator deep-idle configuration unavailable'}
+        $wasDeepEnabled=$Matches[1] -eq 'true'
+        if(!$wasDeepEnabled){$null=Read-Adb @('shell','dumpsys','deviceidle','enable','deep')}
+        $null=Read-Adb @('shell','dumpsys','deviceidle','force-idle','deep')
+        Assert-Check ((Read-Adb @('shell','dumpsys','deviceidle')) -match '\bmState=IDLE\b') 'android_deep_idle_confirmed_before_external_message'
+    }
     $body=if($PrivateChat){$fixture.body|ConvertTo-Json -Depth 20 -Compress}else{@{client_id=[guid]::NewGuid().ToString();encrypted=$false;payload=@{text=$marker}}|ConvertTo-Json -Compress}
     try{$message=Invoke-RestMethod "$api/v1/conversations/$($fixture.conversation)/messages" -Method Post -Headers $senderHeaders -ContentType 'application/json' -Body $body -TimeoutSec 15}catch{throw 'External local fixture message send failed'}
+    if($Doze){
+        # Observe rather than require immediate delivery: this is ADB-reversed
+        # local TLS, not proof of radio/network delivery under OEM Doze rules.
+        $idleDeadline=[DateTimeOffset]::UtcNow.AddSeconds(10)
+        do{
+            $deliveredInIdle=(Read-Adb @('shell','dumpsys','notification','--noredact')).Contains($notificationText)
+            if(!$deliveredInIdle){Start-Sleep -Milliseconds 500}
+        }while(!$deliveredInIdle -and [DateTimeOffset]::UtcNow -lt $idleDeadline)
+        Assert-Check ((Read-Adb @('shell','dumpsys','deviceidle')) -match '\bmState=IDLE\b') 'android_deep_idle_retained_during_delivery_observation'
+        $null=Read-Adb @('shell','dumpsys','deviceidle','unforce')
+        Assert-Check ((Read-Adb @('shell','dumpsys','deviceidle')) -notmatch '\bmState=IDLE\b') 'android_deep_idle_released_without_opening_app'
+    }
     Wait-For { (Read-Adb @('shell','dumpsys','notification','--noredact')).Contains($notificationText) } 45 'No system notification after process recovery'
     if($PrivateChat){
         try{$storedMessage=Invoke-RestMethod "$api/v1/messages/$($message.id)" -Headers $recipientHeaders -TimeoutSec 10}catch{throw 'Private server message observation failed'}
@@ -104,13 +126,18 @@ try {
     Assert-Check $true 'native_chat_open_after_process_recovery_records_server_read'
     $kind=if($PrivateChat){'private'}else{'group'}
     $suffix=if($PrivateChat){"private-$Serial"}else{$Serial}
-    @{date=[DateTimeOffset]::Now.ToString('o');result='passed';chat_kind=$kind;apk_sha256=(Get-FileHash (Join-Path $root 'artifacts/VyrnApp-dev-x86_64-debug-local-tls.apk')).Hash.ToLowerInvariant();test_apk_sha256=(Get-FileHash (Join-Path $root 'artifacts/VyrnApp-dev-debug-androidTest.apk')).Hash.ToLowerInvariant();device=$expected;serial=$Serial;before_pid=$before;after_pid=$after;checks=$script:checks;scope='Native UI registration/opt-in; external actual process kill, automatic sticky restart, external REST sender, screen-off real system notification, system UI notification touch and original chat read; no app instrumentation during kill/delivery. Private mode uses Signal prepared before process death, posted after restart, decrypted only by original recipient UI. Not Doze/reboot/physical phone/private media.'}|ConvertTo-Json -Depth 5|Set-Content (Join-Path $root "artifacts/android-background-process-$suffix.json") -Encoding utf8
+    if($Doze){$suffix="doze-$suffix"}
+    @{date=[DateTimeOffset]::Now.ToString('o');result='passed';chat_kind=$kind;forced_deep_idle=$Doze.IsPresent;notification_observed_during_idle=$deliveredInIdle;apk_sha256=(Get-FileHash (Join-Path $root 'artifacts/VyrnApp-dev-x86_64-debug-local-tls.apk')).Hash.ToLowerInvariant();test_apk_sha256=(Get-FileHash (Join-Path $root 'artifacts/VyrnApp-dev-debug-androidTest.apk')).Hash.ToLowerInvariant();device=$expected;serial=$Serial;before_pid=$before;after_pid=$after;checks=$script:checks;scope='Native UI registration/opt-in; external actual process kill, automatic sticky restart, external REST sender, screen-off real system notification, system UI notification touch and original chat read; no app instrumentation during kill/delivery. Private mode uses Signal prepared before process death, posted after restart, decrypted only by original recipient UI. Optional forced deep idle uses ADB-reversed local TLS; not long natural Doze, radio/OEM network restrictions, reboot, physical phone or private media.'}|ConvertTo-Json -Depth 5|Set-Content (Join-Path $root "artifacts/android-background-process-$suffix.json") -Encoding utf8
     Write-Output "PASS: $($script:checks.Count) external background process-recovery checks"
 } catch {
     try{$failureUi=Read-Ui;[IO.File]::WriteAllText((Join-Path $root '.local/background-process-failure.xml'),$failureUi.OuterXml)}catch{}
     throw
 } finally {
     $senderHeaders=$null;$recipientHeaders=$null;$fixture=$null
+    if($Doze){
+        $null=Invoke-TestAdb -Arguments @('-s',$Serial,'shell','dumpsys','deviceidle','unforce')
+        if($wasDeepEnabled -eq $false){$null=Invoke-TestAdb -Arguments @('-s',$Serial,'shell','dumpsys','deviceidle','disable','deep')}
+    }
     $null=Invoke-TestAdb -Arguments @('-s',$Serial,'shell','run-as',$package,'rm','-f',$privateFile)
     $null=Invoke-TestAdb -Arguments @('-s',$Serial,'shell','rm','-f','/data/local/tmp/vyrn-background.xml')
     # End only the owned emulator fixture. This is cleanup after observation,
