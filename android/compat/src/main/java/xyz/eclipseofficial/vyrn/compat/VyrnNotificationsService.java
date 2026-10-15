@@ -32,6 +32,8 @@ public class VyrnNotificationsService extends Service {
     private static boolean hasAccount(){for(int account=0;account<UserConfig.MAX_ACCOUNT_COUNT;account++)if(UserConfig.getInstance(account).isClientActivated())return true;return false;}
     public static void refresh(){
         Context context=ApplicationLoader.applicationContext;
+        // Application.onCreate calls this before LaunchActivity loads saved accounts.
+        ApplicationLoader.postInitApplication();
         Intent intent=new Intent(context,org.telegram.messenger.NotificationsService.class);
         if(!enabled()||!hasAccount()){context.stopService(intent);return;}
         try{context.startForegroundService(intent);}

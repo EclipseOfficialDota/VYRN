@@ -75,9 +75,13 @@ final class AuthUiIntegration {
         check.verify(retained[0],"registration_ui_back_preserves_code");
         check.verify(instrumentation.getUiAutomation().performGlobalAction(android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_HOME),"registration_ui_home_action");
         instrumentation.waitForIdleSync();
-        instrumentation.getTargetContext().startActivity(new android.content.Intent(android.content.Intent.ACTION_MAIN).setClassName(instrumentation.getTargetContext(),"org.telegram.ui.LaunchActivity").addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK|android.content.Intent.FLAG_ACTIVITY_REORDER_TO_FRONT));
+        String launch="am start -W -a android.intent.action.MAIN -c android.intent.category.LAUNCHER -n "+instrumentation.getTargetContext().getPackageName()+"/org.telegram.ui.LaunchActivity";
+        try(java.io.InputStream input=new android.os.ParcelFileDescriptor.AutoCloseInputStream(instrumentation.getUiAutomation().executeShellCommand(launch));java.io.ByteArrayOutputStream output=new java.io.ByteArrayOutputStream()){
+            byte[] buffer=new byte[1024];int size;while((size=input.read(buffer))!=-1)output.write(buffer,0,size);
+            check.verify(new String(output.toByteArray(),java.nio.charset.StandardCharsets.UTF_8).contains("Status: ok"),"registration_ui_launcher_return_started");
+        }
         instrumentation.waitForIdleSync();
-        await(()->dialog()!=null,"registration_ui_home_return_preserves_code");
+        await(()->{boolean[] shown={false};instrumentation.runOnMainSync(()->{org.telegram.ui.ActionBar.AlertDialog alert=currentDialog();shown[0]=alert!=null&&alert.getWindow()!=null&&alert.getWindow().getDecorView().hasWindowFocus()&&alert.getMessageTextView().getText().toString().contains(code);});return shown[0];},"registration_ui_home_return_preserves_code");
         if(leavePending){
             check.verify(repository.vault.hasPendingRecovery(),"onboarding_marker_persisted");
             boolean rejected=false;try{repository.vault.acknowledgeRecovery(tokens.getString("user_id"),"different-session",code);}catch(SecurityException expected){rejected=true;}

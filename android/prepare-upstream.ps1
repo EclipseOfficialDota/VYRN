@@ -215,6 +215,9 @@ Edit 'TMessagesProj/src/main/java/org/telegram/ui/LaunchActivity.java' {
  $t=$t.Replace('MainTabsActivity mainTabsActivity = dialogsActivityProvider.provide(null);',"BaseFragment mainTabsActivity = $pending ? new xyz.eclipseofficial.vyrn.compat.VyrnLoginActivity() : dialogsActivityProvider.provide(null);")
  $intentSignature='private boolean handleIntent(Intent intent, boolean isNew, boolean restore, boolean fromPassword, Browser.Progress progress, boolean rebuildFragments, boolean openedTelegram) {'
  if(!$t.Contains($intentSignature)){throw 'Pinned onboarding intent marker missing'}
+ $resume="    protected void onResume() {`n        super.onResume();"
+ if(!$t.Contains($resume)){throw 'Pinned visible activity resume marker missing'}
+ $t=$t.Replace($resume,$resume+"`n        getWindow().getDecorView().post(() -> { if (!isFinishing() && !isDestroyed()) xyz.eclipseofficial.vyrn.compat.VyrnNotificationsService.refresh(); });")
  $t.Replace($intentSignature,"$intentSignature`n        if ($pending) { actionBarLayout.showLastFragment(); return false; }")
 }
 Edit 'TMessagesProj/src/main/java/org/telegram/messenger/UserConfig.java' {

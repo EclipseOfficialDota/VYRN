@@ -22,18 +22,23 @@ import xyz.eclipseofficial.vyrn.data.TokenVault;
 /** Visible connection service and screen-off delivery. Sender is a distinct REST fixture. */
 final class NotificationUiIntegration {
     static void run(Instrumentation test,Activity activity,JSONObject fixture,AuthUiIntegration.Check check,boolean coldPrepare) throws Exception {
+        run(test,activity,fixture,check,coldPrepare,false);
+    }
+    static void run(Instrumentation test,Activity activity,JSONObject fixture,AuthUiIntegration.Check check,boolean coldPrepare,boolean processPrepare) throws Exception {
         AuthUiIntegration.registration(test,activity,fixture,check);
         AuthUiIntegration.handlePrompts(test,activity,check);
         int account=UserConfig.selectedAccount;RestRepository recipient=VyrnBridge.forAccount(account).repository;
         RestRepository sender=new RestRepository(new TokenVault(test.getTargetContext(),9005));
         JSONObject tokens=(JSONObject)sender.request("POST","/v1/auth/register",new JSONObject().put("email","notification-"+UUID.randomUUID()+"@vyrn.local").put("password",fixture.getString("password")).put("invite_code",fixture.getString("invite")).put("display_name","Notification sender").put("device_id",UUID.randomUUID().toString()).put("device_name","Notification fixture"),false);
         sender.vault.save(tokens);String owner=tokens.getString("user_id");
-        JSONObject group=(JSONObject)sender.requestForUser(owner,"POST","/v1/conversations",new JSONObject().put("kind","group").put("title","Notification test").put("members",new JSONArray().put(recipient.me().id)),true);
+        String title=processPrepare?"Background "+UUID.randomUUID().toString().substring(0,8):"Notification test";
+        JSONObject group=(JSONObject)sender.requestForUser(owner,"POST","/v1/conversations",new JSONObject().put("kind","group").put("title",title).put("members",new JSONArray().put(recipient.me().id)),true);
         long dialog;try(IdMap ids=new IdMap(test.getTargetContext(),account)){dialog=-ids.local("conversation",group.getString("id"));}
         NotificationManager manager=test.getTargetContext().getSystemService(NotificationManager.class);
         long permissionDeadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(15);
         while(!manager.areNotificationsEnabled()&&System.nanoTime()<permissionDeadline){AuthUiIntegration.handlePrompts(test,activity,check);Thread.sleep(200);}
         check.verify(manager.areNotificationsEnabled(),"notification_permission_enabled");manager.cancelAll();
+        key(test,KeyEvent.KEYCODE_WAKEUP);
         enableConnection(test,check);
         StatusBarNotification connection=connectionNotification(manager);
         check.verify(connection!=null&&(connection.getNotification().flags&android.app.Notification.FLAG_FOREGROUND_SERVICE)!=0,"notification_connection_real_foreground_service");
@@ -44,6 +49,13 @@ final class NotificationUiIntegration {
             check.verify(activity.isDestroyed()&&connectionNotification(manager)!=null,"notification_connection_survives_original_activity_task_removal");
         }
         PowerManager power=test.getTargetContext().getSystemService(PowerManager.class);
+        if(processPrepare){
+            JSONObject saved=new JSONObject().put("sender",sender.vault.load()).put("recipient",recipient.vault.load()).put("conversation",group.getString("id")).put("title",title).put("pid",android.os.Process.myPid());
+            java.nio.file.Files.write(new java.io.File(test.getTargetContext().getFilesDir(),"vyrn-test-background.json").toPath(),saved.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            key(test,KeyEvent.KEYCODE_SLEEP);
+            check.verify(connectionNotification(manager)!=null,"notification_process_fixture_ready_with_connection_service");
+            return; // The external harness owns process death, delivery observation and cleanup.
+        }
         test.getTargetContext().startActivity(new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
         key(test,KeyEvent.KEYCODE_SLEEP);
         try {
@@ -116,15 +128,22 @@ final class NotificationUiIntegration {
     private static StatusBarNotification connectionNotification(NotificationManager manager){for(StatusBarNotification item:manager.getActiveNotifications())if("vyrn_connection".equals(item.getNotification().getChannelId()))return item;return null;}
     private static void enableConnection(Instrumentation test,AuthUiIntegration.Check check) throws Exception {
         check.verify(!xyz.eclipseofficial.vyrn.compat.VyrnNotificationsService.enabled(),"notification_connection_opt_in_default_off");
+        boolean[] ready={false};long settled=System.nanoTime()+TimeUnit.SECONDS.toNanos(15);
+        while(!ready[0]&&System.nanoTime()<settled){
+            if(!AuthUiIntegration.handlePrompts(test,LaunchActivity.instance,check))test.runOnMainSync(()->ready[0]=LaunchActivity.getLastFragment()!=null&&LaunchActivity.getLastFragment().getParentLayout()!=null&&!LaunchActivity.getLastFragment().getParentLayout().checkTransitionAnimation());
+            if(!ready[0])Thread.sleep(100);
+        }
+        check.verify(ready[0],"notification_connection_settings_parent_transition_settled");
         org.telegram.ui.NotificationsSettingsActivity screen=new org.telegram.ui.NotificationsSettingsActivity();
-        test.runOnMainSync(()->LaunchActivity.getLastFragment().presentFragment(screen));
+        boolean[] presented={false};test.runOnMainSync(()->presented[0]=LaunchActivity.getLastFragment().presentFragment(screen));
+        check.verify(presented[0],"notification_connection_settings_fragment_presented");
         java.lang.reflect.Field row=screen.getClass().getDeclaredField("notificationsServiceRow"),listField=screen.getClass().getDeclaredField("listView");row.setAccessible(true);listField.setAccessible(true);
         int position=row.getInt(screen);android.graphics.Rect bounds=new android.graphics.Rect();
         long deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(15);boolean[] visible={false},scrolled={false};
-        while(!visible[0]&&System.nanoTime()<deadline){test.runOnMainSync(()->{try{
-            org.telegram.ui.Components.RecyclerListView list=(org.telegram.ui.Components.RecyclerListView)listField.get(screen);if(list==null)return;
+        while(!visible[0]&&System.nanoTime()<deadline){if(AuthUiIntegration.handlePrompts(test,LaunchActivity.instance,check)){Thread.sleep(100);continue;}test.runOnMainSync(()->{try{
+            org.telegram.ui.Components.RecyclerListView list=(org.telegram.ui.Components.RecyclerListView)listField.get(screen);if(list==null||!list.isAttachedToWindow()||list.getHeight()==0||screen.getParentLayout().checkTransitionAnimation())return;
             androidx.recyclerview.widget.LinearLayoutManager layout=(androidx.recyclerview.widget.LinearLayoutManager)list.getLayoutManager();if(!scrolled[0]){layout.scrollToPositionWithOffset(position,org.telegram.messenger.AndroidUtilities.dp(80));scrolled[0]=true;return;}
-            android.view.View view=layout.findViewByPosition(position);visible[0]=view!=null&&!list.isLayoutRequested()&&!screen.getParentLayout().isTransitionAnimationInProgress()&&view.getGlobalVisibleRect(bounds)&&!bounds.isEmpty();
+            android.view.View view=layout.findViewByPosition(position);visible[0]=view!=null&&!list.isLayoutRequested()&&!screen.getParentLayout().checkTransitionAnimation()&&view.getGlobalVisibleRect(bounds)&&!bounds.isEmpty();
         }catch(Exception failure){throw new RuntimeException(failure);}});if(!visible[0])Thread.sleep(100);}
         check.verify(visible[0],"notification_connection_original_setting_visible");
         check.verify(AuthUiIntegration.touch(test,bounds),"notification_connection_original_setting_touched");
