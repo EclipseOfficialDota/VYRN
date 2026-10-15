@@ -1,5 +1,11 @@
 # Acceptance matrix
 
+## Current full two-native-client regression checkpoints — 2026-10-15
+
+On the current4b5a0f53 APK, group -PrivateKeys -Offline passes231 scenario checks plus independent native registration on both emulators: both-direction Send, native Edit/Done and live recipient, shared Delete/Cancel, cold deletion absence, real transport loss, durable offline Send and automatic cold recovery without duplicate/revival. PrivateComposerEditCold passes605 scenario checks with both actual offline encrypted edits, process stops, original intent/editor recovery, live recipient updates, same revision2 message identity and both cold offline views. Reports: android-two-client-private-keys.json and android-two-client-private-composer-edit-cold.json. TEST_REPORT records exact hashes/dates and wrapper cleanup exits; no script exit0 is inferred.
+
+These are two native emulators, not physical phones. Full account/device/key races, private read/media/background delivery, signed release/update/production and genuine external restore remain incomplete. Full objective stays active.
+
 ## Original offline group read recovers after process death — 2026-10-15
 
 Actual ChatActivity opened from its notification while local transport is offline persists its read intent. A changed Android process retains the same owner/session/ordinal; normal account recovery sends it after reconnection, records the server receipt/unread0 and clears only its own acknowledged intent. Foreign-user/session isolation and monotonic pending-max checks pass. Final pair31 and notification regression26 checks share APK4b5a0f53e284f1b96a8633b2face174b37a1320f91cf14bc6260c84af246c33c. See TEST_REPORT for paired wrapper cleanup exit1 vs actual worker/report evidence; regression script exits0.

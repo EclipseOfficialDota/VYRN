@@ -1,3 +1,14 @@
+## Two-native-client current regression — 2026-10-15
+
+With the matching local TLS APK/Core and preserved emulator-5560/5562 ready, run each suite separately:
+
+```powershell
+./scripts/test-two-client-messaging.ps1 -PrivateKeys -Offline
+./scripts/test-two-client-messaging.ps1 -PrivateComposerEditCold
+```
+
+Both scripts register from actual UI on the two dedicated emulators. The first includes native group Send/Edit/Delete and offline/cold recovery; the second includes actual encrypted offline Edit/Done and cold intent/editor recovery in both directions. Current4b5a0f53 APK reports have231 and605 recorded scenario checks respectively, with registration evidence separate. See TEST_REPORT for dates/limitations and exact worker/wrapper cleanup outcomes. A matching old check count or stale report is not current evidence. Physical-phone and full lifecycle acceptance remain separate.
+
 ## Original offline read after process death — 2026-10-15
 
 Run `./scripts/test-android-integration.ps1 -Phases @('read-cold-prepare','read-cold-recover')` against matching local Core/native TLS. Only this exact ordered pair is accepted. Prepare receives a real notification, disconnects transport before its original action opens ChatActivity and requires the original readHistory intent to be durable. The driver stops the app between phases without clearing data. Recovery requires a new PID/same identity/intent, restores transport, and waits for the existing account worker to confirm the receipt and clear the own intent while foreign test identities remain untouched. Report: artifacts/android-read-cold.json. No explicit queue drain/send is invoked by recovery. Run notification-ui separately as online/read-event regression.
