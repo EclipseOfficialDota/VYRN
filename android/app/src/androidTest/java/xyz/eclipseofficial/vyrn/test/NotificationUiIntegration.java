@@ -21,7 +21,7 @@ import xyz.eclipseofficial.vyrn.data.TokenVault;
 
 /** Live-process background delivery. Sender is a distinct REST fixture, not a second phone. */
 final class NotificationUiIntegration {
-    static void run(Instrumentation test,Activity activity,JSONObject fixture,AuthUiIntegration.Check check) throws Exception {
+    static void run(Instrumentation test,Activity activity,JSONObject fixture,AuthUiIntegration.Check check,boolean coldPrepare) throws Exception {
         AuthUiIntegration.registration(test,activity,fixture,check);
         AuthUiIntegration.handlePrompts(test,activity,check);
         int account=UserConfig.selectedAccount;RestRepository recipient=VyrnBridge.forAccount(account).repository;
@@ -54,10 +54,24 @@ final class NotificationUiIntegration {
                 java.nio.file.Files.write(new java.io.File(test.getTargetContext().getFilesDir(),"vyrn-test-notification.json").toPath(),diagnostic.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8));
             }
             check.verify(found!=null,"notification_actual_system_notification_received_screen_off");
+            int coldOrdinal=0;
+            if(coldPrepare){coldOrdinal=recipient.liveMessages(group.getString("id"),null,100).get(0).ordinal;check.verify(recipient.conversationDetails(group.getString("id")).conversation.unreadCount==1,"read_cold_server_unread_before_offline_open");AuthUiIntegration.networkStep(test,activity,"offline-load",check);}
             key(test,KeyEvent.KEYCODE_WAKEUP);found.getNotification().contentIntent.send();
             boolean[] opened={false};deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(30);
             while(!opened[0]&&System.nanoTime()<deadline){test.runOnMainSync(()->opened[0]=LaunchActivity.getLastFragment() instanceof ChatActivity&&((ChatActivity)LaunchActivity.getLastFragment()).getDialogId()==dialog);if(!opened[0])Thread.sleep(100);}
             check.verify(opened[0],"notification_original_content_action_opens_correct_conversation");
+            if(coldPrepare){
+                xyz.eclipseofficial.vyrn.data.ReadReceipts queue=new xyz.eclipseofficial.vyrn.data.ReadReceipts(test.getTargetContext(),account);
+                String user=recipient.vault.load().getString("user_id"),session=recipient.vault.cachedSession();deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(25);
+                while(queue.pending(user,session,group.getString("id"))!=coldOrdinal&&System.nanoTime()<deadline)Thread.sleep(100);
+                check.verify(queue.pending(user,session,group.getString("id"))==coldOrdinal,"read_cold_original_chat_read_persisted_offline");
+                String foreignSession=UUID.randomUUID().toString(),foreignUser=UUID.randomUUID().toString();
+                queue.enqueue(user,foreignSession,group.getString("id"),coldOrdinal+2);queue.enqueue(user,foreignSession,group.getString("id"),coldOrdinal);
+                queue.enqueue(foreignUser,session,group.getString("id"),coldOrdinal+3);
+                check.verify(queue.pending(user,foreignSession,group.getString("id"))==coldOrdinal+2&&queue.pending(user,session,group.getString("id"))==coldOrdinal,"read_cold_max_merge_and_foreign_session_separation");
+                JSONObject saved=new JSONObject().put("user",user).put("session",session).put("foreign_session",foreignSession).put("foreign_user",foreignUser).put("conversation",group.getString("id")).put("max",coldOrdinal).put("pid",android.os.Process.myPid());
+                java.nio.file.Files.write(new java.io.File(test.getTargetContext().getFilesDir(),"vyrn-test-read-cold.json").toPath(),saved.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8));return;
+            }
             boolean read=false;deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(25);
             while(!read&&System.nanoTime()<deadline){JSONArray history=(JSONArray)recipient.request("GET","/v1/conversations/"+group.getString("id")+"/messages",null,true);read=history.length()==1&&history.getJSONObject(0).getJSONObject("receipts").getBoolean("read_by_me");if(!read)Thread.sleep(500);}
             check.verify(read,"notification_open_original_chat_records_server_read_receipt");
@@ -81,6 +95,21 @@ final class NotificationUiIntegration {
                 check.verify(synchronizedRead[0],"notification_other_session_read_stream_clears_native_unread_and_notification");
             }finally{other.vault.clear();}
         }finally{key(test,KeyEvent.KEYCODE_WAKEUP);manager.cancelAll();sender.vault.clear();}
+    }
+    static void recover(Instrumentation test,Activity activity,AuthUiIntegration.Check check) throws Exception {
+        java.io.File file=new java.io.File(test.getTargetContext().getFilesDir(),"vyrn-test-read-cold.json");JSONObject saved=new JSONObject(new String(java.nio.file.Files.readAllBytes(file.toPath()),java.nio.charset.StandardCharsets.UTF_8));
+        int account=UserConfig.selectedAccount;RestRepository repository=VyrnBridge.forAccount(account).repository;
+        String user=saved.getString("user"),session=saved.getString("session"),conversation=saved.getString("conversation");
+        check.verify(android.os.Process.myPid()!=saved.getInt("pid")&&repository.vault.isUser(user)&&session.equals(repository.vault.cachedSession()),"read_cold_original_account_session_in_new_process");
+        xyz.eclipseofficial.vyrn.data.ReadReceipts queue=new xyz.eclipseofficial.vyrn.data.ReadReceipts(test.getTargetContext(),account);
+        check.verify(queue.pending(user,session,conversation)==saved.getInt("max"),"read_cold_journal_survives_process_death");
+        AuthUiIntegration.networkStep(test,activity,"online-retry",check);
+        long deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(40);while(queue.pending(user,session,conversation)!=0&&System.nanoTime()<deadline)Thread.sleep(100);
+        check.verify(queue.pending(user,session,conversation)==0,"read_cold_original_account_worker_confirms_and_clears_intent");
+        check.verify(queue.pending(user,saved.getString("foreign_session"),conversation)==saved.getInt("max")+2&&queue.pending(saved.getString("foreign_user"),session,conversation)==saved.getInt("max")+3,"read_cold_recovery_preserves_other_user_and_session_intents");
+        JSONArray history=(JSONArray)repository.requestForSession(user,session,"GET","/v1/conversations/"+conversation+"/messages",null);
+        check.verify(history.length()==1&&history.getJSONObject(0).getJSONObject("receipts").getBoolean("read_by_me")&&repository.conversationDetails(conversation).conversation.unreadCount==0,"read_cold_server_receipt_and_unread_count_recovered");
+        java.nio.file.Files.delete(file.toPath());
     }
     private static void key(Instrumentation test,int code) throws Exception {
         try(java.io.InputStream result=new android.os.ParcelFileDescriptor.AutoCloseInputStream(test.getUiAutomation().executeShellCommand("input keyevent "+code))){while(result.read()!=-1){}}

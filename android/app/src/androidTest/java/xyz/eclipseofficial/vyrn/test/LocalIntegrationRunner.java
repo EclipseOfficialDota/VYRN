@@ -60,7 +60,7 @@ public final class LocalIntegrationRunner extends Instrumentation {
         Bundle result=new Bundle();
         Thread diagnostic=null;
         boolean offlineChatReopen=phase.equals("chat-offline-reopen")||phase.equals("chat-failed-reopen")||phase.equals("chat-private-edit-cold")||phase.equals("chat-private-offline-view")||phase.equals("chat-private-deleted-offline-view")||phase.equals("chat-private-pending-reopen")||phase.equals("chat-private-composer-offline")||phase.equals("chat-private-composer-reopen");
-        boolean coldMediaRecovery=phase.equals("media-photo-chat-cold-recover")||phase.equals("media-voice-chat-cold-recover");
+        boolean coldMediaRecovery=phase.equals("read-cold-recover")||phase.equals("media-photo-chat-cold-recover")||phase.equals("media-voice-chat-cold-recover");
         boolean boundedChatStartup=coldMediaRecovery||offlineChatReopen||phase.startsWith("chat-private-composer-")||phase.equals("chat-private-fixture-send")||phase.equals("chat-private-auto-recover")||phase.equals("chat-private-manual-retry")||phase.equals("chat-private-cancel-recover");
         if(phase.startsWith("chat-")){
             diagnostic=new Thread(()->{try{Thread.sleep(50000);StringBuilder trace=new StringBuilder("stage=").append(stage).append('\n');for(java.util.Map.Entry<Thread,StackTraceElement[]> entry:Thread.getAllStackTraces().entrySet()){trace.append(entry.getKey().getName().equals("main")?"main":"worker").append(' ').append(entry.getKey().getState()).append('\n');for(StackTraceElement frame:entry.getValue())trace.append(frame).append('\n');}java.nio.file.Files.write(file("vyrn-test-thread-state.txt").toPath(),trace.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8));}catch(Exception ignored){}},"vyrn-test-diagnostic");diagnostic.setDaemon(true);diagnostic.start();
@@ -88,8 +88,10 @@ public final class LocalIntegrationRunner extends Instrumentation {
             check(foreground!=null,"foreground_activity");
             stage="foreground_idle";
             if(!boundedChatStartup)waitForIdleSync();
-            if(phase.equals("notification-ui")){
-                stage="notification_ui";NotificationUiIntegration.run(this,foreground,read("vyrn-test-fixture.json"),(condition,name)->{check(condition,name);passed.put(name);});
+            if(phase.equals("read-cold-recover")){
+                stage="read_cold_recover";NotificationUiIntegration.recover(this,foreground,(condition,name)->{check(condition,name);passed.put(name);});
+            }else if(phase.equals("notification-ui")||phase.equals("read-cold-prepare")){
+                stage="notification_ui";NotificationUiIntegration.run(this,foreground,read("vyrn-test-fixture.json"),(condition,name)->{check(condition,name);passed.put(name);},phase.equals("read-cold-prepare"));
             }else if(phase.equals("media-voice-storage")){
                 stage="media_voice_storage";MediaUiIntegration.voiceStorage(this,(condition,name)->{check(condition,name);passed.put(name);});
             }else if(phase.equals("media-voice-codec")){

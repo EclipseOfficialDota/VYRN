@@ -217,6 +217,7 @@ public final class VyrnBridge {
     public final RestRepository repository;
     private final IdMap ids;
     private final OutboxSender outbox;
+    private final xyz.eclipseofficial.vyrn.data.ReadReceipts readReceipts;
     private final RealtimeSync realtime;
     private final xyz.eclipseofficial.vyrn.data.UploadCancellations uploadCancellations;
     public static int connectionState(int account){RealtimeSync.State state=forAccount(account).realtime.state();return state==RealtimeSync.State.CONNECTED?org.telegram.tgnet.ConnectionsManager.ConnectionStateConnected:state==RealtimeSync.State.CONNECTING?org.telegram.tgnet.ConnectionsManager.ConnectionStateConnecting:org.telegram.tgnet.ConnectionsManager.ConnectionStateWaitingForNetwork;}
@@ -228,7 +229,7 @@ public final class VyrnBridge {
     private volatile String privateKeysSession;
     private volatile long privateKeysOwner;
     private final Map<Long,String> privateConversations=new HashMap<>();
-    private VyrnBridge(int account){this.account=account;repository=new RestRepository(new TokenVault(ApplicationLoader.applicationContext,account));ids=new IdMap(ApplicationLoader.applicationContext,account);uploadCancellations=new xyz.eclipseofficial.vyrn.data.UploadCancellations(ApplicationLoader.applicationContext,account);outbox=new OutboxSender(ApplicationLoader.applicationContext,account,repository);realtime=new RealtimeSync(ApplicationLoader.applicationContext,account,repository,this::applyEvent,()->AndroidUtilities.runOnUIThread(()->NotificationCenter.getInstance(account).postNotificationName(NotificationCenter.didUpdateConnectionState)));outbox.setUiListener(this::resolveUi);outbox.setRecoveryListener(()->{recoverPrivateSends();try{uploadCancellations.drain(repository);}catch(Exception unavailable){/* Preserve transfer cancellation until acknowledged. */}});}
+    private VyrnBridge(int account){this.account=account;repository=new RestRepository(new TokenVault(ApplicationLoader.applicationContext,account));ids=new IdMap(ApplicationLoader.applicationContext,account);readReceipts=new xyz.eclipseofficial.vyrn.data.ReadReceipts(ApplicationLoader.applicationContext,account);uploadCancellations=new xyz.eclipseofficial.vyrn.data.UploadCancellations(ApplicationLoader.applicationContext,account);outbox=new OutboxSender(ApplicationLoader.applicationContext,account,repository);realtime=new RealtimeSync(ApplicationLoader.applicationContext,account,repository,this::applyEvent,()->AndroidUtilities.runOnUIThread(()->NotificationCenter.getInstance(account).postNotificationName(NotificationCenter.didUpdateConnectionState)));outbox.setUiListener(this::resolveUi);outbox.setRecoveryListener(()->{recoverPrivateSends();try{readReceipts.drain(repository);}catch(Exception unavailable){/* Retain unacknowledged reads for the next account recovery tick. */}try{uploadCancellations.drain(repository);}catch(Exception unavailable){/* Preserve transfer cancellation until acknowledged. */}});}
     public boolean privateKeysReady(){return privateKeysOwner!=0&&privateKeysOwner==UserConfig.getInstance(account).getClientUserId()&&privateKeysSession!=null&&privateKeysSession.equals(repository.vault.cachedSession());}
     public synchronized java.util.concurrent.CompletableFuture<Void> preparePrivateKeys(){
         if(privateKeysReady())return java.util.concurrent.CompletableFuture.completedFuture(null);
@@ -1150,7 +1151,7 @@ public final class VyrnBridge {
         if(request instanceof TLRPC.TL_messages_readHistory){
             TLRPC.TL_messages_readHistory in=(TLRPC.TL_messages_readHistory)request;
             if(in.peer==null||in.peer.chat_id<=0||in.max_id<1)throw new UnsupportedOperationException();
-            repository.request("PUT","/v1/conversations/"+conversation(in.peer)+"/read",new JSONObject().put("max_id",in.max_id),true);
+            JSONObject tokens=repository.vault.load();readReceipts.send(repository,tokens.getString("user_id"),tokens.getString("session_id"),conversation(in.peer),in.max_id);
             TLRPC.TL_messages_affectedMessages result=new TLRPC.TL_messages_affectedMessages();result.pts=in.max_id;return result;
         }
         if(request instanceof TLRPC.TL_messages_getDialogs)return dialogs();

@@ -1,5 +1,11 @@
 # Acceptance matrix
 
+## Original offline group read recovers after process death — 2026-10-15
+
+Actual ChatActivity opened from its notification while local transport is offline persists its read intent. A changed Android process retains the same owner/session/ordinal; normal account recovery sends it after reconnection, records the server receipt/unread0 and clears only its own acknowledged intent. Foreign-user/session isolation and monotonic pending-max checks pass. Final pair31 and notification regression26 checks share APK4b5a0f53e284f1b96a8633b2face174b37a1320f91cf14bc6260c84af246c33c. See TEST_REPORT for paired wrapper cleanup exit1 vs actual worker/report evidence; regression script exits0.
+
+Session rotation/permanent failures/storage races, private read mapping, physical devices and delivery while the process stays killed remain pending. Full goal stays active.
+
 ## Group read from another session updates native notifications — 2026-10-15
 
 26 notification/read checks pass on APKd28d18853a791844f07b102dfa70238fe8aa7ecbc33fdc132191a065d4ed0f87, script exit0/no attach retry. A second message first produces native unread1 and an actual notification while the receiver is backgrounded/screen off. Reading in a distinct same-account API session clears both through the original read-history update pipeline. Both list/detail unread snapshots and existing receipt/permission/deletion/expiry/partial-read tests pass on PostgreSQL. See TEST_REPORT.

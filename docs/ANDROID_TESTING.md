@@ -1,3 +1,9 @@
+## Original offline read after process death — 2026-10-15
+
+Run `./scripts/test-android-integration.ps1 -Phases @('read-cold-prepare','read-cold-recover')` against matching local Core/native TLS. Only this exact ordered pair is accepted. Prepare receives a real notification, disconnects transport before its original action opens ChatActivity and requires the original readHistory intent to be durable. The driver stops the app between phases without clearing data. Recovery requires a new PID/same identity/intent, restores transport, and waits for the existing account worker to confirm the receipt and clear the own intent while foreign test identities remain untouched. Report: artifacts/android-read-cold.json. No explicit queue drain/send is invoked by recovery. Run notification-ui separately as online/read-event regression.
+
+This does not establish receipt delivery while the process stays killed, physical devices, long outage/revoked-session/storage-failure behavior or private chat read support. Unconfirmed read journals are scoped by original session and limited to1000 records; session-rotation reconciliation remains pending.
+
 ## Same-account other-session read event — 2026-10-15
 
 notification-ui now also logs into a distinct same-account API session, backgrounds/screens off the native receiver, posts a second message from the sender fixture and requires actual notification plus native unread1 before the remote read. The stream must clear that notification and native unread count without a direct native-update fixture or receiver dialog reload. Requires conversation.read events and unread_count in the authorized conversation detail response. Report: artifacts/android-notification-ui.json. This does not prove two native phones, offline/cold replay or adversarial identity races.
