@@ -51,6 +51,7 @@ All production endpoints require HTTPS. JSON uses UTF-8. Authentication is `Auth
 | GET/POST `/v1/conversations/{id}/members` | list or add/change member role; owner/admin permissions enforced; optional preserve_existing=true makes an authorized invitation leave an existing role unchanged atomically, while new members are inserted normally |
 | DELETE `/v1/conversations/{id}/members/{user}` | remove member/leave group |
 | GET `/v1/conversations/{id}/messages` | limit 1–100, before message UUID, optional plaintext group search q; live_only=true excludes deleted/expired messages before pagination; default preserves tombstones |
+| GET `/v1/conversations/{id}/messages?q=...&include_total=true` | opt-in group-text search envelope `{messages: [...], total: N}`; nonempty q, maximum100 code points; total covers all live matching messages before applying the page cursor, and shares one database snapshot with the page; omitted/false include_total keeps the existing array response; private search returns422 search_on_device |
 | POST `/v1/conversations/{id}/messages` | client_id, payload, encrypted, optional media_id/reply_to/forwarded_from |
 | DELETE `/v1/conversations/{id}/messages` | atomic group/private deletion of1–100 distinct message UUIDs in JSON ids; group member deletes own messages, owner/admin may delete other senders; either private participant may delete for both; returns204 after commit |
 | GET `/v1/messages/{id}` | current authorized message state, including deletion/expiry tombstones |

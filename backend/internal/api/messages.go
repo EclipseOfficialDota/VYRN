@@ -193,13 +193,19 @@ func (s *Server) getMessage(w http.ResponseWriter, r *http.Request) {
 func (s *Server) readMessages(w http.ResponseWriter, r *http.Request, conversation, single string) {
 	before := r.URL.Query().Get("before")
 	search := r.URL.Query().Get("q")
+	totalParam := r.URL.Query().Get("include_total")
+	if totalParam != "" && totalParam != "true" && totalParam != "false" {
+		fail(w, 400, "invalid_request")
+		return
+	}
+	includeTotal := totalParam == "true"
 	liveParam := r.URL.Query().Get("live_only")
 	if liveParam != "" && liveParam != "true" && liveParam != "false" {
 		fail(w, 400, "invalid_request")
 		return
 	}
 	liveOnly := single == "" && liveParam == "true"
-	if !validID(conversation) || (before != "" && !validID(before)) || utf8.RuneCountInString(search) > 100 {
+	if !validID(conversation) || (before != "" && !validID(before)) || utf8.RuneCountInString(search) > 100 || (includeTotal && (single != "" || search == "")) {
 		fail(w, 400, "invalid_request")
 		return
 	}
@@ -207,8 +213,19 @@ func (s *Server) readMessages(w http.ResponseWriter, r *http.Request, conversati
 	if n, e := strconv.Atoi(r.URL.Query().Get("limit")); e == nil && n > 0 && n <= 100 {
 		limit = n
 	}
+	query, queryRow := s.db.Query, s.db.QueryRow
+	if includeTotal {
+		// Count and page share one snapshot; the total excludes the page cursor.
+		tx, err := s.db.BeginTx(r.Context(), pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly})
+		if err != nil {
+			s.internal(w)
+			return
+		}
+		defer tx.Rollback(r.Context())
+		query, queryRow = tx.Query, tx.QueryRow
+	}
 	var kind string
-	if s.db.QueryRow(r.Context(), `SELECT c.kind FROM conversations c JOIN members m ON m.conversation_id=c.id WHERE c.id=$1 AND m.user_id=$2`, conversation, current(r).UserID).Scan(&kind) != nil {
+	if queryRow(r.Context(), `SELECT c.kind FROM conversations c JOIN members m ON m.conversation_id=c.id WHERE c.id=$1 AND m.user_id=$2`, conversation, current(r).UserID).Scan(&kind) != nil {
 		fail(w, 404, "not_found")
 		return
 	}
@@ -224,7 +241,7 @@ func (s *Server) readMessages(w http.ResponseWriter, r *http.Request, conversati
 	if single != "" {
 		messageID = single
 	}
-	rows, err := s.db.Query(r.Context(), `SELECT msg.id::text,client_id::text,sender_id::text,sender_device::text,payload,encrypted,media_id::text,reply_to::text,forwarded_from::text,revision,pinned,created_at,edited_at,deleted_at,expires_at,ordinal,
+	rows, err := query(r.Context(), `SELECT msg.id::text,client_id::text,sender_id::text,sender_device::text,payload,encrypted,media_id::text,reply_to::text,forwarded_from::text,revision,pinned,created_at,edited_at,deleted_at,expires_at,ordinal,
         CASE WHEN deleted_at IS NOT NULL THEN '[]'::jsonb ELSE COALESCE((SELECT jsonb_agg(summary ORDER BY summary->>'emoji') FROM (SELECT jsonb_build_object('emoji',emoji,'count',count(*),'mine',bool_or(user_id=$5)) AS summary FROM reactions WHERE message_id=msg.id GROUP BY emoji) AS grouped),'[]'::jsonb) END,
         CASE WHEN deleted_at IS NOT NULL THEN '{"delivered":0,"read":0,"delivered_by_me":false,"read_by_me":false}'::jsonb ELSE (SELECT jsonb_build_object('delivered',count(*),'read',count(read_at),'delivered_by_me',COALESCE(bool_or(user_id=$5),false),'read_by_me',COALESCE(bool_or(user_id=$5 AND read_at IS NOT NULL),false)) FROM receipts WHERE message_id=msg.id AND user_id<>msg.sender_id) END
         FROM messages msg WHERE conversation_id=$1 AND (expires_at IS NULL OR expires_at>now() OR deleted_at IS NOT NULL)
@@ -263,6 +280,20 @@ func (s *Server) readMessages(w http.ResponseWriter, r *http.Request, conversati
 			return
 		}
 		respond(w, 200, out[0])
+		return
+	}
+	if includeTotal {
+		rows.Close()
+		var total int
+		err = queryRow(r.Context(), `SELECT count(*) FROM messages msg WHERE conversation_id=$1
+			AND NOT encrypted AND deleted_at IS NULL AND (expires_at IS NULL OR expires_at>now())
+			AND position(lower($2) in lower(payload->>'text'))>0
+			AND EXISTS(SELECT 1 FROM members WHERE conversation_id=msg.conversation_id AND user_id=$3)`, conversation, search, current(r).UserID).Scan(&total)
+		if err != nil {
+			s.internal(w)
+			return
+		}
+		respond(w, 200, map[string]any{"messages": out, "total": total})
 		return
 	}
 	respond(w, 200, out)
