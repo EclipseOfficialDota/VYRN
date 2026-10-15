@@ -1,5 +1,11 @@
 # Acceptance matrix
 
+## Visible opt-in connection and activity task removal accepted locally — 2026-10-15
+
+The original notification setting controls a real, private foreground service with a persistent notification and working Turn off action; the unused Telegram push-connection toggle is hidden. On APKfb55f1be,33 checks pass including original task removal, screen-off message notification, correct chat opening and read synchronization. The offline-read/cold-recovery pair adds37 checks on the same APK; TEST_REPORT distinguishes actual PASS/report evidence from its childless-wrapper cleanup exit1.
+
+Instrumentation pins the process during the task-removal test. Independent process death/sticky restart, reboot, long Doze/OEM restrictions, failure/permission/account lifecycle, private/media delivery and physical devices remain pending. specialUse is declared for the self-hosted connection; Google Play approval is not established. Full objective stays active.
+
 ## Fresh ARM phone packaging verified — 2026-10-15
 
 Current e66e6a8 normal public-HTTPS ARM64, ARM32 and universal debug APKs build successfully. All three pass signature, minSdk26/Android8+, native ABI and network-policy checks; see TEST_REPORT for hashes. This covers packaging for the requested phone age range, not installation/runtime acceptance on every device. No ADB devices were connected. The Xiaomi installation issue remains unconfirmed, and final Release signing is pending.

@@ -19,7 +19,7 @@ import xyz.eclipseofficial.vyrn.data.IdMap;
 import xyz.eclipseofficial.vyrn.data.RestRepository;
 import xyz.eclipseofficial.vyrn.data.TokenVault;
 
-/** Live-process background delivery. Sender is a distinct REST fixture, not a second phone. */
+/** Visible connection service and screen-off delivery. Sender is a distinct REST fixture. */
 final class NotificationUiIntegration {
     static void run(Instrumentation test,Activity activity,JSONObject fixture,AuthUiIntegration.Check check,boolean coldPrepare) throws Exception {
         AuthUiIntegration.registration(test,activity,fixture,check);
@@ -34,6 +34,15 @@ final class NotificationUiIntegration {
         long permissionDeadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(15);
         while(!manager.areNotificationsEnabled()&&System.nanoTime()<permissionDeadline){AuthUiIntegration.handlePrompts(test,activity,check);Thread.sleep(200);}
         check.verify(manager.areNotificationsEnabled(),"notification_permission_enabled");manager.cancelAll();
+        enableConnection(test,check);
+        StatusBarNotification connection=connectionNotification(manager);
+        check.verify(connection!=null&&(connection.getNotification().flags&android.app.Notification.FLAG_FOREGROUND_SERVICE)!=0,"notification_connection_real_foreground_service");
+        if(!coldPrepare){
+            test.runOnMainSync(activity::finishAndRemoveTask);
+            long removedDeadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(10);
+            while(!activity.isDestroyed()&&System.nanoTime()<removedDeadline)Thread.sleep(100);
+            check.verify(activity.isDestroyed()&&connectionNotification(manager)!=null,"notification_connection_survives_original_activity_task_removal");
+        }
         PowerManager power=test.getTargetContext().getSystemService(PowerManager.class);
         test.getTargetContext().startActivity(new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
         key(test,KeyEvent.KEYCODE_SLEEP);
@@ -94,7 +103,34 @@ final class NotificationUiIntegration {
                 while(!synchronizedRead[0]&&System.nanoTime()<deadline){boolean notification=false;for(StatusBarNotification item:manager.getActiveNotifications())if(hasFixtureText(item.getNotification(),"Background notification test remote"))notification=true;boolean remains=notification;test.runOnMainSync(()->{org.telegram.tgnet.TLRPC.Dialog current=org.telegram.messenger.MessagesController.getInstance(account).dialogs_dict.get(dialog);synchronizedRead[0]=!remains&&current!=null&&current.unread_count==0;});if(!synchronizedRead[0])Thread.sleep(100);}
                 check.verify(synchronizedRead[0],"notification_other_session_read_stream_clears_native_unread_and_notification");
             }finally{other.vault.clear();}
-        }finally{key(test,KeyEvent.KEYCODE_WAKEUP);manager.cancelAll();sender.vault.clear();}
+        }finally{
+            key(test,KeyEvent.KEYCODE_WAKEUP);
+            StatusBarNotification connectionNow=connectionNotification(manager);
+            if(connectionNow!=null&&connectionNow.getNotification().actions!=null)connectionNow.getNotification().actions[0].actionIntent.send();
+            long stopDeadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(10);
+            while((xyz.eclipseofficial.vyrn.compat.VyrnNotificationsService.enabled()||connectionNotification(manager)!=null)&&System.nanoTime()<stopDeadline)Thread.sleep(100);
+            check.verify(!xyz.eclipseofficial.vyrn.compat.VyrnNotificationsService.enabled()&&connectionNotification(manager)==null,"notification_connection_stop_action_disables_and_removes_service_notification");
+            manager.cancelAll();sender.vault.clear();
+        }
+    }
+    private static StatusBarNotification connectionNotification(NotificationManager manager){for(StatusBarNotification item:manager.getActiveNotifications())if("vyrn_connection".equals(item.getNotification().getChannelId()))return item;return null;}
+    private static void enableConnection(Instrumentation test,AuthUiIntegration.Check check) throws Exception {
+        check.verify(!xyz.eclipseofficial.vyrn.compat.VyrnNotificationsService.enabled(),"notification_connection_opt_in_default_off");
+        org.telegram.ui.NotificationsSettingsActivity screen=new org.telegram.ui.NotificationsSettingsActivity();
+        test.runOnMainSync(()->LaunchActivity.getLastFragment().presentFragment(screen));
+        java.lang.reflect.Field row=screen.getClass().getDeclaredField("notificationsServiceRow"),listField=screen.getClass().getDeclaredField("listView");row.setAccessible(true);listField.setAccessible(true);
+        int position=row.getInt(screen);android.graphics.Rect bounds=new android.graphics.Rect();
+        long deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(15);boolean[] visible={false},scrolled={false};
+        while(!visible[0]&&System.nanoTime()<deadline){test.runOnMainSync(()->{try{
+            org.telegram.ui.Components.RecyclerListView list=(org.telegram.ui.Components.RecyclerListView)listField.get(screen);if(list==null)return;
+            androidx.recyclerview.widget.LinearLayoutManager layout=(androidx.recyclerview.widget.LinearLayoutManager)list.getLayoutManager();if(!scrolled[0]){layout.scrollToPositionWithOffset(position,org.telegram.messenger.AndroidUtilities.dp(80));scrolled[0]=true;return;}
+            android.view.View view=layout.findViewByPosition(position);visible[0]=view!=null&&!list.isLayoutRequested()&&!screen.getParentLayout().isTransitionAnimationInProgress()&&view.getGlobalVisibleRect(bounds)&&!bounds.isEmpty();
+        }catch(Exception failure){throw new RuntimeException(failure);}});if(!visible[0])Thread.sleep(100);}
+        check.verify(visible[0],"notification_connection_original_setting_visible");
+        check.verify(AuthUiIntegration.touch(test,bounds),"notification_connection_original_setting_touched");
+        deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(10);
+        while(connectionNotification(test.getTargetContext().getSystemService(NotificationManager.class))==null&&System.nanoTime()<deadline)Thread.sleep(100);
+        check.verify(xyz.eclipseofficial.vyrn.compat.VyrnNotificationsService.enabled(),"notification_connection_original_setting_enabled");
     }
     static void recover(Instrumentation test,Activity activity,AuthUiIntegration.Check check) throws Exception {
         java.io.File file=new java.io.File(test.getTargetContext().getFilesDir(),"vyrn-test-read-cold.json");JSONObject saved=new JSONObject(new String(java.nio.file.Files.readAllBytes(file.toPath()),java.nio.charset.StandardCharsets.UTF_8));

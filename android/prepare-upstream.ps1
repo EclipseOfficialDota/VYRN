@@ -994,6 +994,27 @@ Edit 'TMessagesProj/src/main/java/org/telegram/messenger/ApplicationLoader.java'
  $t=$t.Replace('BillingController.getInstance().startConnection();','// VYRN: Telegram billing disabled.')
  $t=$t.Replace('LauncherIconController.tryFixLauncherIconIfNeeded();','// VYRN: fixed placeholder icon until final assets supplied.')
  $t=$t.Replace('ProxyRotationController.init();','// VYRN: Telegram proxy rotation disabled.')
+ $start=$t.IndexOf('    public static void startPushService() {')
+ $end=$t.IndexOf('    @Override', $start)
+ if($start -lt 0 -or $end -lt 0){throw 'Pinned notification service startup missing'}
+ $t=$t.Substring(0,$start)+"    public static void startPushService() { xyz.eclipseofficial.vyrn.compat.VyrnNotificationsService.refresh(); }`n`n"+$t.Substring($end)
+ $t
+}
+Edit 'TMessagesProj/src/main/java/org/telegram/messenger/NotificationsService.java' {
+ param($t)
+ "package org.telegram.messenger;`npublic class NotificationsService extends xyz.eclipseofficial.vyrn.compat.VyrnNotificationsService {}`n"
+}
+Edit 'TMessagesProj/src/main/java/org/telegram/ui/NotificationsSettingsActivity.java' {
+ param($t)
+ $t=$t.Replace('notificationsServiceConnectionRow = rowCount++;','notificationsServiceConnectionRow = -1; // VYRN has one managed connection, not Telegram push transport.')
+ $t=$t.Replace('preferences.getBoolean("pushService", getMessagesController().keepAliveService)','preferences.getBoolean("pushService", false)')
+ $marker='} else if (position == notificationsServiceRow) {'
+ $start=$t.IndexOf($marker)
+ $end=$t.IndexOf('} else if (position == callsVibrateRow)', $start)
+ if($start -lt 0 -or $end -lt 0){throw 'Pinned notification service setting missing'}
+ $part=$t.Substring($start,$end-$start).Replace('MessagesController.getNotificationsSettings(currentAccount)','MessagesController.getGlobalNotificationsSettings()')
+ $t=$t.Substring(0,$start)+$part+$t.Substring($end)
+ $t=$t.Replace('checkCell.setTextAndValueAndCheck(getString("NotificationsService", R.string.NotificationsService), getString("NotificationsServiceInfo", R.string.NotificationsServiceInfo), preferences.getBoolean("pushService", false), true, true);','checkCell.setTextAndValueAndCheck("fa".equals(java.util.Locale.getDefault().getLanguage()) ? "اتصال پس‌زمینه" : "Background connection", "fa".equals(java.util.Locale.getDefault().getLanguage()) ? "با اعلان دائمی، دریافت پیام پس از بستن صفحهٔ اپ فعال می‌ماند و باتری بیشتری مصرف می‌کند. توقف اجباری یا محدودیت باتری می‌تواند دریافت را متوقف کند." : "Keeps messaging active after closing the app screen, with a persistent notification and additional battery use. Force stop or battery restrictions can prevent delivery.", xyz.eclipseofficial.vyrn.compat.VyrnNotificationsService.enabled(), true, true);')
  $t
 }
 Edit 'TMessagesProj/src/main/java/org/telegram/ui/Components/ImageUpdater.java' {

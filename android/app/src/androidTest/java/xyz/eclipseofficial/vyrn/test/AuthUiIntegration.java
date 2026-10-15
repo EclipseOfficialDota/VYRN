@@ -173,6 +173,9 @@ final class AuthUiIntegration {
         check.verify(started[0],"logout_ui_confirmation_dispatch");
     }
     private boolean touch(android.graphics.Rect row){
+        return touch(instrumentation,row);
+    }
+    static boolean touch(Instrumentation instrumentation,android.graphics.Rect row){
         long time=android.os.SystemClock.uptimeMillis();android.view.MotionEvent down=android.view.MotionEvent.obtain(time,time,android.view.MotionEvent.ACTION_DOWN,row.centerX(),row.centerY(),0),up=android.view.MotionEvent.obtain(time,time+50,android.view.MotionEvent.ACTION_UP,row.centerX(),row.centerY(),0);down.setSource(android.view.InputDevice.SOURCE_TOUCHSCREEN);up.setSource(android.view.InputDevice.SOURCE_TOUCHSCREEN);
         try{return instrumentation.getUiAutomation().injectInputEvent(down,true)&&instrumentation.getUiAutomation().injectInputEvent(up,true);}finally{down.recycle();up.recycle();}
     }
