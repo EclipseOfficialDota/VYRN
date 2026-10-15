@@ -28,11 +28,11 @@ foreach($line in $existing.Split("`n")){
 if($alreadyRunning){Write-Output 'Verified VYRN emulator is already running.';exit 0}
 $logName=if($Serial -eq 'emulator-5560'){'emulator'}elseif($Serial -eq 'emulator-5562'){'emulator-peer'}else{'emulator-api30'}
 $stdout=Join-Path $root ".local/$logName.log";$stderr=Join-Path $root ".local/$logName-error.log"
-$arguments=@('-avd',$avdName,'-port',$port,'-no-window','-no-audio','-no-boot-anim','-gpu',$GpuMode,'-feature','-Vulkan','-no-snapshot-save')
+$arguments=@('-avd',$avdName,'-port',$port,'-memory','1536','-cores','2','-no-window','-no-audio','-no-boot-anim','-gpu',$GpuMode,'-feature','-Vulkan','-no-snapshot-save')
 if($ColdBoot){$arguments+='-no-snapshot-load'}
-if($Serial -ne 'emulator-5560'){$arguments+=@('-memory','1536')}
 if($DnsServers){foreach($server in $DnsServers.Split(',')){$parsed=$null;if(![Net.IPAddress]::TryParse($server,[ref]$parsed)){throw 'Invalid emulator DNS server'}};$arguments+=@('-dns-server',$DnsServers)}
 $process=Start-Process -FilePath $emulator -ArgumentList $arguments -WindowStyle Hidden -RedirectStandardOutput $stdout -RedirectStandardError $stderr -PassThru
+$process.PriorityClass='BelowNormal'
 $ready=$false
 $deadline=[DateTimeOffset]::UtcNow.AddSeconds(180)
 while([DateTimeOffset]::UtcNow -lt $deadline){
