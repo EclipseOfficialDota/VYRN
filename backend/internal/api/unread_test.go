@@ -15,6 +15,16 @@ func TestIntegrationConversationUnread(t *testing.T) {
 	group := f.conversation(a, "group", b.User)
 	count := func(who account, want int) {
 		t.Helper()
+		if want < 0 {
+			f.request("GET", "/v1/conversations/"+group, who.Access, nil, 404)
+		} else {
+			var snapshot struct {
+				Unread *int `json:"unread_count"`
+			}
+			if err := json.Unmarshal(f.request("GET", "/v1/conversations/"+group, who.Access, nil, 200), &snapshot); err != nil || snapshot.Unread == nil || *snapshot.Unread != want {
+				t.Fatal("conversation snapshot unread count mismatch")
+			}
+		}
 		var rows []struct {
 			ID     string `json:"id"`
 			Unread int    `json:"unread_count"`

@@ -44,7 +44,7 @@ final class NotificationUiIntegration {
             check.verify(!power.isInteractive()&&org.telegram.messenger.ApplicationLoader.mainInterfacePaused,"notification_recipient_background_screen_off");
             sender.requestForUser(owner,"POST","/v1/conversations/"+group.getString("id")+"/messages",new JSONObject().put("client_id",UUID.randomUUID().toString()).put("encrypted",false).put("payload",new JSONObject().put("text","Background notification test")),true);
             StatusBarNotification found=null;long deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(35);
-            while(found==null&&System.nanoTime()<deadline){for(StatusBarNotification item:manager.getActiveNotifications())if(item.getNotification().contentIntent!=null&&(item.getNotification().flags&android.app.Notification.FLAG_GROUP_SUMMARY)==0&&hasFixtureText(item.getNotification())){found=item;break;}if(found==null)Thread.sleep(200);}
+            while(found==null&&System.nanoTime()<deadline){for(StatusBarNotification item:manager.getActiveNotifications())if(item.getNotification().contentIntent!=null&&(item.getNotification().flags&android.app.Notification.FLAG_GROUP_SUMMARY)==0&&hasFixtureText(item.getNotification(),"Background notification test")){found=item;break;}if(found==null)Thread.sleep(200);}
             if(found==null){
                 JSONObject diagnostic=new JSONObject().put("active_notifications",manager.getActiveNotifications().length).put("server_messages",recipient.liveMessages(group.getString("id"),null,100).size()).put("connection_state",VyrnBridge.connectionState(account));
                 diagnostic.put("native_time",org.telegram.tgnet.ConnectionsManager.getInstance(account).getCurrentTime()).put("global_notifications",org.telegram.messenger.NotificationsController.getInstance(account).isGlobalNotificationsEnabled(dialog,false,false));
@@ -63,16 +63,33 @@ final class NotificationUiIntegration {
             check.verify(read,"notification_open_original_chat_records_server_read_receipt");
             boolean cleared=false;for(xyz.eclipseofficial.vyrn.domain.Models.Conversation current:recipient.conversations())if(current.id.equals(group.getString("id")))cleared=current.unreadCount==0;
             check.verify(cleared,"notification_open_server_unread_cleared_for_dialog_reload");
+            RestRepository other=new RestRepository(new TokenVault(test.getTargetContext(),9006));
+            try{
+                other.vault.save((JSONObject)other.request("POST","/v1/auth/login",new JSONObject().put("email","registration-"+fixture.getString("email")).put("password",fixture.getString("password")).put("device_id",other.vault.device()).put("device_name","Read sync fixture"),false));
+                check.verify(other.me().id.equals(recipient.me().id)&&!other.vault.cachedSession().equals(recipient.vault.cachedSession()),"notification_read_other_session_same_account");
+                test.getTargetContext().startActivity(new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));key(test,KeyEvent.KEYCODE_SLEEP);
+                deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(15);while((power.isInteractive()||!org.telegram.messenger.ApplicationLoader.mainInterfacePaused)&&System.nanoTime()<deadline)Thread.sleep(100);
+                check.verify(!power.isInteractive()&&org.telegram.messenger.ApplicationLoader.mainInterfacePaused,"notification_remote_read_receiver_background");
+                JSONObject second=(JSONObject)sender.requestForUser(owner,"POST","/v1/conversations/"+group.getString("id")+"/messages",new JSONObject().put("client_id",UUID.randomUUID().toString()).put("encrypted",false).put("payload",new JSONObject().put("text","Background notification test remote")),true);
+                boolean[] visible={false};deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(35);
+                while(!visible[0]&&System.nanoTime()<deadline){boolean notification=false;for(StatusBarNotification item:manager.getActiveNotifications())if(hasFixtureText(item.getNotification(),"Background notification test remote"))notification=true;boolean shown=notification;test.runOnMainSync(()->{org.telegram.tgnet.TLRPC.Dialog current=org.telegram.messenger.MessagesController.getInstance(account).dialogs_dict.get(dialog);visible[0]=shown&&current!=null&&current.unread_count==1;});if(!visible[0])Thread.sleep(100);}
+                check.verify(visible[0],"notification_remote_read_has_unread_and_real_notification_before_read");
+                int ordinal=recipient.messageForUser(recipient.me().id,second.getString("id")).ordinal;
+                other.request("PUT","/v1/conversations/"+group.getString("id")+"/read",new JSONObject().put("max_id",ordinal),true);
+                boolean[] synchronizedRead={false};deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(35);
+                while(!synchronizedRead[0]&&System.nanoTime()<deadline){boolean notification=false;for(StatusBarNotification item:manager.getActiveNotifications())if(hasFixtureText(item.getNotification(),"Background notification test remote"))notification=true;boolean remains=notification;test.runOnMainSync(()->{org.telegram.tgnet.TLRPC.Dialog current=org.telegram.messenger.MessagesController.getInstance(account).dialogs_dict.get(dialog);synchronizedRead[0]=!remains&&current!=null&&current.unread_count==0;});if(!synchronizedRead[0])Thread.sleep(100);}
+                check.verify(synchronizedRead[0],"notification_other_session_read_stream_clears_native_unread_and_notification");
+            }finally{other.vault.clear();}
         }finally{key(test,KeyEvent.KEYCODE_WAKEUP);manager.cancelAll();sender.vault.clear();}
     }
     private static void key(Instrumentation test,int code) throws Exception {
         try(java.io.InputStream result=new android.os.ParcelFileDescriptor.AutoCloseInputStream(test.getUiAutomation().executeShellCommand("input keyevent "+code))){while(result.read()!=-1){}}
     }
-    private static boolean hasFixtureText(android.app.Notification notification){
+    private static boolean hasFixtureText(android.app.Notification notification,String target){
         CharSequence text=notification.extras.getCharSequence(android.app.Notification.EXTRA_TEXT);
-        if(text!=null&&text.toString().contains("Background notification test"))return true;
+        if(text!=null&&text.toString().contains(target))return true;
         android.os.Parcelable[] messages=notification.extras.getParcelableArray(android.app.Notification.EXTRA_MESSAGES);
-        if(messages!=null)for(android.os.Parcelable message:messages)if(message instanceof android.os.Bundle){text=((android.os.Bundle)message).getCharSequence("text");if(text!=null&&text.toString().contains("Background notification test"))return true;}
+        if(messages!=null)for(android.os.Parcelable message:messages)if(message instanceof android.os.Bundle){text=((android.os.Bundle)message).getCharSequence("text");if(text!=null&&text.toString().contains(target))return true;}
         return false;
     }
 }

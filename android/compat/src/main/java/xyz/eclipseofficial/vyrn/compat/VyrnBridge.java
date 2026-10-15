@@ -988,6 +988,7 @@ public final class VyrnBridge {
         if(!repository.vault.isUser(eventUser)||UserConfig.getInstance(account).getClientUserId()!=ids.local("user",eventUser))throw new SecurityException("event_account_changed");
         if(kind.equals("user.updated")){applyProfileEvent(eventUser,body.getString("user_id"));return;}
         if(kind.equals("block.updated")){applyBlockEvent(eventUser,body.getString("user_id"));return;}
+        if(kind.equals("conversation.read")){applyReadEvent(eventUser,body);return;}
         if(kind.equals("conversation.updated")){applyConversationEvent(eventUser,body.getString("id"),true);return;}
         if(kind.equals("member.updated")||kind.equals("member.removed")){applyConversationEvent(eventUser,body.getString("conversation_id"),false);return;}
         if(!kind.startsWith("message."))return;
@@ -1007,6 +1008,20 @@ public final class VyrnBridge {
         CountDownLatch complete=new CountDownLatch(1);boolean[] accepted={false};
         Utilities.stageQueue.postRunnable(()->{try{accepted[0]=MessagesController.getInstance(account).processUpdateArray(updates,users,chats,true,value.date);}finally{complete.countDown();}});
         if(!complete.await(20,TimeUnit.SECONDS)||!accepted[0])throw new IllegalStateException("telegram_update_rejected");
+    }
+    private void applyReadEvent(String owner,JSONObject body) throws Exception {
+        Models.Conversation model=conversationModel(body.getString("conversation_id"));
+        if(!model.kind.equals("group"))return; // Private read-history UI remains gated.
+        int max=body.getInt("max_id");if(max<1)throw new SecurityException("invalid_read_position");
+        List<Models.User> members=repository.members(model.id);
+        TL_update.TL_updateReadHistoryInbox read=new TL_update.TL_updateReadHistoryInbox();read.peer=peer(model,members);read.max_id=max;read.still_unread_count=model.unreadCount;read.pts=max;
+        ArrayList<TLRPC.Update> updates=new ArrayList<>();updates.add(read);
+        java.util.concurrent.CompletableFuture<Boolean> applied=new java.util.concurrent.CompletableFuture<>();
+        Utilities.stageQueue.postRunnable(()->{try{
+            if(!repository.vault.isUser(owner))throw new SecurityException("event_account_changed");
+            applied.complete(MessagesController.getInstance(account).processUpdateArray(updates,null,null,true,(int)(System.currentTimeMillis()/1000)));
+        }catch(Throwable failure){applied.completeExceptionally(failure);}});
+        if(!applied.get(20,TimeUnit.SECONDS))throw new IllegalStateException("read_update_rejected");
     }
     private void applyProfileEvent(String owner,String target) throws Exception {
         long origin=ids.local("user",owner),peer=ids.local("user",target);

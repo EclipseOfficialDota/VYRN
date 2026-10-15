@@ -1,3 +1,7 @@
+## Same-account other-session read event — 2026-10-15
+
+notification-ui now also logs into a distinct same-account API session, backgrounds/screens off the native receiver, posts a second message from the sender fixture and requires actual notification plus native unread1 before the remote read. The stream must clear that notification and native unread count without a direct native-update fixture or receiver dialog reload. Requires conversation.read events and unread_count in the authorized conversation detail response. Report: artifacts/android-notification-ui.json. This does not prove two native phones, offline/cold replay or adversarial identity races.
+
 ## Native group read acknowledgement — 2026-10-15
 
 The notification-ui phase also requires server read_by_me after its original notification action opens ChatActivity, then checks a fresh conversation DTO has unreadCount0. Run with local Core supporting PUT /v1/conversations/{id}/read. The fixture does not issue that PUT; the original native readHistory request must do it. Cold restoration, offline retry, cross-session read events, sender read ticks and private read mapping remain separate requirements.

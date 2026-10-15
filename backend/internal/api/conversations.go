@@ -279,13 +279,14 @@ func (s *Server) conversationDetails(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var kind, title, role string
-	var seconds int
+	var seconds, unread int
 	var created time.Time
 	var members json.RawMessage
 	err := s.db.QueryRow(r.Context(), `SELECT c.kind,c.title,m.role,c.disappearing_seconds,c.created_at,
 		(SELECT jsonb_agg(jsonb_build_object('id',u.id,'display_name',u.display_name,'first_name',COALESCE(u.first_name,u.display_name),'last_name',u.last_name,'role',all_members.role,'avatar_id',u.avatar_id,'joined_at',all_members.joined_at) ORDER BY all_members.joined_at,u.id)
-		 FROM members all_members JOIN users u ON u.id=all_members.user_id WHERE all_members.conversation_id=c.id)
-		FROM conversations c JOIN members m ON m.conversation_id=c.id WHERE c.id=$1 AND m.user_id=$2`, id, current(r).UserID).Scan(&kind, &title, &role, &seconds, &created, &members)
+		 FROM members all_members JOIN users u ON u.id=all_members.user_id WHERE all_members.conversation_id=c.id),
+        (SELECT count(*) FROM messages msg WHERE msg.conversation_id=c.id AND msg.sender_id<>$2 AND msg.deleted_at IS NULL AND (msg.expires_at IS NULL OR msg.expires_at>now()) AND NOT EXISTS(SELECT 1 FROM receipts rc WHERE rc.message_id=msg.id AND rc.user_id=$2 AND rc.read_at IS NOT NULL))
+		FROM conversations c JOIN members m ON m.conversation_id=c.id WHERE c.id=$1 AND m.user_id=$2`, id, current(r).UserID).Scan(&kind, &title, &role, &seconds, &created, &members, &unread)
 	if err == pgx.ErrNoRows {
 		fail(w, 404, "not_found")
 		return
@@ -294,7 +295,7 @@ func (s *Server) conversationDetails(w http.ResponseWriter, r *http.Request) {
 		s.internal(w)
 		return
 	}
-	respond(w, 200, map[string]any{"id": id, "kind": kind, "title": title, "role": role, "disappearing_seconds": seconds, "created_at": created, "members": members})
+	respond(w, 200, map[string]any{"id": id, "kind": kind, "title": title, "role": role, "disappearing_seconds": seconds, "created_at": created, "members": members, "unread_count": unread})
 }
 
 func (s *Server) createConversation(w http.ResponseWriter, r *http.Request) {

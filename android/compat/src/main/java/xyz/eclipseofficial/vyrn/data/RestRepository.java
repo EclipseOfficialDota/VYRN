@@ -75,7 +75,7 @@ public final class RestRepository implements Models.Repository {
     public Models.ConversationDetails conversationDetails(String id) throws Exception {
         JSONObject data=(JSONObject)request("GET","/v1/conversations/"+id,null,true);JSONArray raw=data.getJSONArray("members");List<Models.Member> members=new ArrayList<>();
         for(int i=0;i<raw.length();i++){JSONObject member=raw.getJSONObject(i);members.add(new Models.Member(user(member),member.getString("role"),(int)Timestamps.parse(member.getString("joined_at")).getEpochSecond()));}
-        Models.Conversation conversation=new Models.Conversation(data.getString("id"),data.getString("kind"),data.getString("title"),data.getString("role"),members.size(),data.getInt("disappearing_seconds"));
+        Models.Conversation conversation=new Models.Conversation(data.getString("id"),data.getString("kind"),data.getString("title"),data.getString("role"),members.size(),data.getInt("disappearing_seconds"),data.getInt("unread_count"));
         return new Models.ConversationDetails(conversation,members,(int)Timestamps.parse(data.getString("created_at")).getEpochSecond());
     }
     public List<Models.User> searchUsers(String query,int limit) throws Exception {

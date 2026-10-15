@@ -1,5 +1,11 @@
 # Acceptance matrix
 
+## Group read from another session updates native notifications — 2026-10-15
+
+26 notification/read checks pass on APKd28d18853a791844f07b102dfa70238fe8aa7ecbc33fdc132191a065d4ed0f87, script exit0/no attach retry. A second message first produces native unread1 and an actual notification while the receiver is backgrounded/screen off. Reading in a distinct same-account API session clears both through the original read-history update pipeline. Both list/detail unread snapshots and existing receipt/permission/deletion/expiry/partial-read tests pass on PostgreSQL. See TEST_REPORT.
+
+The second session/sender are REST fixtures. Two native/physical phones, offline/cold read replay, account/device races, sender ticks/private mapping and full background/release/offsite scope remain pending. Full goal stays active.
+
 ## Native online group read reaches server — 2026-10-15
 
 Original ChatActivity opened from the system notification records a server read receipt through its native readHistory request. A fresh server dialog DTO has unreadCount0. The updated notification scenario passes22 checks, script exit0/no attach retry, on APKdaaa3eacc74f9c32dacd2e9d84642ff4e27dd941a0e7c54c9f828114c59eb19f. PostgreSQL partial/full/repeated read, future-message/outsider isolation and existing message-permission tests pass. See TEST_REPORT.

@@ -45,7 +45,7 @@ All production endpoints require HTTPS. JSON uses UTF-8. Authentication is `Auth
 | GET `/v1/blocks/{id}` | authenticated owner's current blocked state for the target UUID |
 | PUT/DELETE `/v1/blocks/{id}` | block/unblock another user after commit; repeats are no-ops, self changes are rejected |
 | GET/POST `/v1/conversations` | list or create private/group conversation with members and title; groups accept optional disappearing_seconds from0 to31536000, committed atomically with members/events |
-| GET `/v1/conversations/{id}` | member-authorized snapshot of conversation metadata and members with roles/joined_at; independent of the bounded conversation list; removed members and outsiders receive404 |
+| GET `/v1/conversations/{id}` | member-authorized snapshot of conversation metadata, unread_count and members with roles/joined_at; independent of the bounded conversation list; removed members and outsiders receive404 |
 | PUT `/v1/conversations/{id}/read` | authenticated member; positive `max_id` ordinal; records read receipts for existing live incoming messages through that position, in one transaction; retries preserve read timestamps; own/deleted/expired/future messages are excluded; emits `conversation.read` to the reader's sessions only when receipts change |
 | PATCH `/v1/conversations/{id}` | title and/or disappearing_seconds; omitted fields are preserved atomically; an empty patch is invalid; zero explicitly disables auto-delete |
 | GET/POST `/v1/conversations/{id}/members` | list or add/change member role; owner/admin permissions enforced; optional preserve_existing=true makes an authorized invitation leave an existing role unchanged atomically, while new members are inserted normally |
