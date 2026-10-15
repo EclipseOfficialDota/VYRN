@@ -1,5 +1,11 @@
 # Acceptance matrix
 
+## Native online group read reaches server — 2026-10-15
+
+Original ChatActivity opened from the system notification records a server read receipt through its native readHistory request. A fresh server dialog DTO has unreadCount0. The updated notification scenario passes22 checks, script exit0/no attach retry, on APKdaaa3eacc74f9c32dacd2e9d84642ff4e27dd941a0e7c54c9f828114c59eb19f. PostgreSQL partial/full/repeated read, future-message/outsider isolation and existing message-permission tests pass. See TEST_REPORT.
+
+Cold restoration, durable offline read retry, other-session realtime read application, sender ticks and private read mapping remain pending. This is not complete receipt/background/physical-device acceptance; full goal stays active.
+
 ## Live-process screen-off notification accepted locally — 2026-10-15
 
 Actual app registration/system notification permission, Home/background and confirmed screen-off, distinct REST sender, real system notification and its original content action opening the correct native group pass20 checks on APK38f6d3e4388eefd999561de945d8ea36387ec1c320c54bb03e9ef06332e1e9eb. Script exits0/no attach retry. The reproduced zero-unread dialog model now receives authenticated server unread_count; PostgreSQL count/receipt/expiry/deletion/separation/101-message and existing message-permission tests pass. See TEST_REPORT.

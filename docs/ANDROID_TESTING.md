@@ -1,3 +1,7 @@
+## Native group read acknowledgement — 2026-10-15
+
+The notification-ui phase also requires server read_by_me after its original notification action opens ChatActivity, then checks a fresh conversation DTO has unreadCount0. Run with local Core supporting PUT /v1/conversations/{id}/read. The fixture does not issue that PUT; the original native readHistory request must do it. Cold restoration, offline retry, cross-session read events, sender read ticks and private read mapping remain separate requirements.
+
 ## Live-process background notification with screen off — 2026-10-15
 
 Run `./scripts/test-android-integration.ps1 -Phases notification-ui` on matching local TLS/Core supporting conversation unread_count. The dedicated emulator registers through real UI, accepts the Android notification prompt, goes Home and turns the screen off with Android input. A distinct REST fixture sends a group message. Require an active system notification containing that message and its original content PendingIntent opening the correct ChatActivity. The test wakes the emulator and cancels its fixture notifications in finally. Failure diagnostics contain counts/state only in app-private vyrn-test-notification.json. Report: artifacts/android-notification-ui.json.

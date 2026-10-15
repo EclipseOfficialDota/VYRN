@@ -68,9 +68,26 @@ func TestIntegrationConversationUnread(t *testing.T) {
 	count(b, 0)
 	count(a, 1)
 	count(a, 1)
+	var firstUnread string
 	for i := 0; i < 101; i++ {
-		send(a)
+		id := send(a)
+		if i == 0 {
+			firstUnread = id
+		}
 	}
 	count(b, 101)
+	var firstOrdinal int
+	if err := f.db.QueryRow(context.Background(), `SELECT ordinal FROM messages WHERE id=$1`, firstUnread).Scan(&firstOrdinal); err != nil {
+		t.Fatal(err)
+	}
+	f.request("PUT", "/v1/conversations/"+group+"/read", b.Access, map[string]int{"max_id": firstOrdinal}, 204)
+	count(b, 100)
+	f.request("PUT", "/v1/conversations/"+group+"/read", outsider.Access, map[string]int{"max_id": 2147483647}, 404)
+	f.request("PUT", "/v1/conversations/"+group+"/read", b.Access, map[string]int{"max_id": 0}, 400)
+	f.request("PUT", "/v1/conversations/"+group+"/read", b.Access, map[string]int{"max_id": 2147483647}, 204)
+	count(b, 0)
+	f.request("PUT", "/v1/conversations/"+group+"/read", b.Access, map[string]int{"max_id": 2147483647}, 204)
+	send(a)
+	count(b, 1)
 	count(a, 1)
 }

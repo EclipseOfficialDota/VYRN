@@ -1132,6 +1132,12 @@ public final class VyrnBridge {
             if(created.disappearingSeconds>0){TL_update.TL_updatePeerHistoryTTL update=new TL_update.TL_updatePeerHistoryTTL();TLRPC.TL_peerChat peer=new TLRPC.TL_peerChat();peer.chat_id=ids.local("conversation",created.id);update.peer=peer;update.flags=1;update.ttl_period=created.disappearingSeconds;updates.updates.add(update);}
             for(Models.User member:repository.members(created.id))updates.users.add(mapUser(member));TLRPC.TL_messages_invitedUsers result=new TLRPC.TL_messages_invitedUsers();result.updates=updates;return result;
         }
+        if(request instanceof TLRPC.TL_messages_readHistory){
+            TLRPC.TL_messages_readHistory in=(TLRPC.TL_messages_readHistory)request;
+            if(in.peer==null||in.peer.chat_id<=0||in.max_id<1)throw new UnsupportedOperationException();
+            repository.request("PUT","/v1/conversations/"+conversation(in.peer)+"/read",new JSONObject().put("max_id",in.max_id),true);
+            TLRPC.TL_messages_affectedMessages result=new TLRPC.TL_messages_affectedMessages();result.pts=in.max_id;return result;
+        }
         if(request instanceof TLRPC.TL_messages_getDialogs)return dialogs();
         if(request instanceof TLRPC.TL_messages_getPeerDialogs){
             java.util.Set<Long> requested=new java.util.HashSet<>();

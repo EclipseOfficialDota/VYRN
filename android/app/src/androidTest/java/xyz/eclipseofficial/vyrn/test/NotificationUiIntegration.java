@@ -58,6 +58,11 @@ final class NotificationUiIntegration {
             boolean[] opened={false};deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(30);
             while(!opened[0]&&System.nanoTime()<deadline){test.runOnMainSync(()->opened[0]=LaunchActivity.getLastFragment() instanceof ChatActivity&&((ChatActivity)LaunchActivity.getLastFragment()).getDialogId()==dialog);if(!opened[0])Thread.sleep(100);}
             check.verify(opened[0],"notification_original_content_action_opens_correct_conversation");
+            boolean read=false;deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(25);
+            while(!read&&System.nanoTime()<deadline){JSONArray history=(JSONArray)recipient.request("GET","/v1/conversations/"+group.getString("id")+"/messages",null,true);read=history.length()==1&&history.getJSONObject(0).getJSONObject("receipts").getBoolean("read_by_me");if(!read)Thread.sleep(500);}
+            check.verify(read,"notification_open_original_chat_records_server_read_receipt");
+            boolean cleared=false;for(xyz.eclipseofficial.vyrn.domain.Models.Conversation current:recipient.conversations())if(current.id.equals(group.getString("id")))cleared=current.unreadCount==0;
+            check.verify(cleared,"notification_open_server_unread_cleared_for_dialog_reload");
         }finally{key(test,KeyEvent.KEYCODE_WAKEUP);manager.cancelAll();sender.vault.clear();}
     }
     private static void key(Instrumentation test,int code) throws Exception {
