@@ -1,5 +1,11 @@
 # Acceptance matrix
 
+## Group and private-text process-death delivery accepted on API30 — 2026-10-16
+
+This supersedes the independent-process/private-text limitation in the older visible-service checkpoint below only for these scenarios. After actual SIGKILL to the recipient app, Android automatically restarted its enabled foreground service; an external sender caused screen-off system notifications, and real notification touches opened matching original chats and recorded server reads. Private mode used real Signal device identities/keys and a ciphertext body prepared before death, sent after restart and decrypted by recipient UI. Server GET excluded plaintext; notification content excluded ciphertext prefixes. Private preparation27/external12 and group regression preparation26/external10 recorded checks passed with actual script exits0. Reports, hashes, PIDs and failed-attempt explanations are in TEST_REPORT. Sender is a fixture, not a second phone UI.
+
+Doze, reboot, OEM restrictions, notification denial/account lifecycle, media notifications, two physical devices, final signed Release/update installation and offsite backup still require acceptance. Phone automation was discontinued at the user's request; the user reported manual installation of the prior ARM64 build, without ADB runtime confirmation. Full objective remains active.
+
 ## Visible opt-in connection and activity task removal accepted locally — 2026-10-15
 
 The original notification setting controls a real, private foreground service with a persistent notification and working Turn off action; the unused Telegram push-connection toggle is hidden. On APKfb55f1be,33 checks pass including original task removal, screen-off message notification, correct chat opening and read synchronization. The offline-read/cold-recovery pair adds37 checks on the same APK; TEST_REPORT distinguishes actual PASS/report evidence from its childless-wrapper cleanup exit1.

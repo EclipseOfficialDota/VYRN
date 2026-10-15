@@ -1,5 +1,5 @@
 # Owned emulator only. No instrumentation runs during process death/delivery observation.
-param([ValidateSet('emulator-5560','emulator-5562','emulator-5564')][string]$Serial='emulator-5560')
+param([ValidateSet('emulator-5560','emulator-5562','emulator-5564')][string]$Serial='emulator-5560',[switch]$PrivateChat)
 $ErrorActionPreference='Stop'
 $root=Split-Path $PSScriptRoot -Parent
 $adb=Join-Path $root '.tools/android-sdk/platform-tools/adb.exe'
@@ -43,7 +43,8 @@ Assert-Check ((Read-Adb @('emu','avd','name')) -match "(?m)^$expected\r*$") 'own
 Assert-Check ((Read-Adb @('shell','id','-u')).Trim() -eq '0') 'owned_emulator_root_signal_capability'
 $null=Read-Adb @('shell','input','keyevent','224')
 $null=Read-Adb @('shell','wm','dismiss-keyguard')
-& (Join-Path $PSScriptRoot 'test-android-integration.ps1') -Serial $Serial -Phases notification-process-prepare
+$phase=if($PrivateChat){'notification-private-process-prepare'}else{'notification-process-prepare'}
+& (Join-Path $PSScriptRoot 'test-android-integration.ps1') -Serial $Serial -Phases $phase
 if(!$?){throw 'Native background preparation failed'}
 $privateFile='files/vyrn-test-background.json'
 try{$fixture=Read-Adb @('shell','run-as',$package,'cat',$privateFile)|ConvertFrom-Json}catch{throw 'Private background fixture unavailable'}
@@ -53,7 +54,8 @@ if(!$proxy -or $proxy.ExecutablePath -ne (Join-Path $root '.local/devtls-native.
 $api=$Matches[1]
 $senderHeaders=@{Authorization='Bearer '+$fixture.sender.access_token}
 $recipientHeaders=@{Authorization='Bearer '+$fixture.recipient.access_token}
-$marker='Background-'+[guid]::NewGuid().ToString('N')
+$marker=if($PrivateChat){$fixture.marker}else{'Background-'+[guid]::NewGuid().ToString('N')}
+$notificationText=if($PrivateChat){$fixture.title}else{$marker}
 try {
     # Instrumentation completion may terminate its target. Establish an ordinary
     # user launch before the controlled kill; never launch again until delivery.
@@ -72,16 +74,23 @@ try {
     $processes=Read-Adb @('shell','dumpsys','activity','processes',$package)
     Assert-Check ($processes -notmatch 'mInstr=ActiveInstrumentation|instrumentationClass=') 'no_app_instrumentation_after_restart'
     Assert-Check ((Read-Adb @('shell','dumpsys','power')) -match 'mWakefulness=Asleep') 'screen_off_before_external_message'
-    $body=@{client_id=[guid]::NewGuid().ToString();encrypted=$false;payload=@{text=$marker}}|ConvertTo-Json -Compress
+    $body=if($PrivateChat){$fixture.body|ConvertTo-Json -Depth 20 -Compress}else{@{client_id=[guid]::NewGuid().ToString();encrypted=$false;payload=@{text=$marker}}|ConvertTo-Json -Compress}
     try{$message=Invoke-RestMethod "$api/v1/conversations/$($fixture.conversation)/messages" -Method Post -Headers $senderHeaders -ContentType 'application/json' -Body $body -TimeoutSec 15}catch{throw 'External local fixture message send failed'}
-    Wait-For { (Read-Adb @('shell','dumpsys','notification','--noredact')).Contains($marker) } 45 'No system notification after process recovery'
+    Wait-For { (Read-Adb @('shell','dumpsys','notification','--noredact')).Contains($notificationText) } 45 'No system notification after process recovery'
+    if($PrivateChat){
+        try{$storedMessage=Invoke-RestMethod "$api/v1/messages/$($message.id)" -Headers $recipientHeaders -TimeoutSec 10}catch{throw 'Private server message observation failed'}
+        Assert-Check ($storedMessage.encrypted -and !(($storedMessage|ConvertTo-Json -Depth 20 -Compress).Contains($marker))) 'private_server_message_contains_ciphertext_without_plaintext'
+        $notifications=Read-Adb @('shell','dumpsys','notification','--noredact')
+        $ciphertexts=@($fixture.body.payload.devices.PSObject.Properties|ForEach-Object {$_.Value.ciphertext})
+        Assert-Check ($ciphertexts.Count -gt 0 -and @($ciphertexts|Where-Object {$notifications.Contains($_.Substring(0,[Math]::Min(64,$_.Length)))}).Count -eq 0) 'private_notification_does_not_display_ciphertext'
+    }
     Assert-Check ((Read-AppPid) -eq $after) 'notification_delivered_in_restarted_process_without_app_launch'
     Assert-Check ((Read-Adb @('shell','dumpsys','power')) -match 'mWakefulness=Asleep') 'notification_arrived_while_screen_off'
     $null=Read-Adb @('shell','input','keyevent','224')
     $null=Read-Adb @('shell','wm','dismiss-keyguard')
     $null=Read-Adb @('shell','cmd','statusbar','expand-notifications')
     $script:messageNode=$null
-    Wait-For { $ui=Read-Ui;$script:messageNode=@($ui.SelectNodes('//node')|Where-Object {$_.text -like "*$marker*"})|Select-Object -First 1; $null -ne $script:messageNode } 15 'Actual notification row not visible'
+    Wait-For { $ui=Read-Ui;$script:messageNode=@($ui.SelectNodes('//node')|Where-Object {$_.text -like "*$notificationText*" -or $_.'content-desc' -like "*$notificationText*"})|Select-Object -First 1; $null -ne $script:messageNode } 15 'Actual notification row not visible'
     Tap-Node $script:messageNode
     Wait-For {
         $ui=Read-Ui
@@ -93,7 +102,9 @@ try {
     Assert-Check $true 'system_notification_touch_opens_unique_matching_chat_and_message'
     Wait-For { try{$history=Invoke-RestMethod "$api/v1/conversations/$($fixture.conversation)/messages" -Headers $recipientHeaders -TimeoutSec 10;@($history|Where-Object {$_.id -eq $message.id -and $_.receipts.read_by_me}).Count -eq 1}catch{return $false} } 20 'Original chat did not record read receipt'
     Assert-Check $true 'native_chat_open_after_process_recovery_records_server_read'
-    @{date=[DateTimeOffset]::Now.ToString('o');result='passed';apk_sha256=(Get-FileHash (Join-Path $root 'artifacts/VyrnApp-dev-x86_64-debug-local-tls.apk')).Hash.ToLowerInvariant();device=$expected;serial=$Serial;before_pid=$before;after_pid=$after;checks=$script:checks;scope='Native UI registration/opt-in; external actual process kill, automatic sticky restart, external REST sender, screen-off real system notification, system UI notification touch and original chat read; no app instrumentation during kill/delivery. Not Doze/reboot/physical phone/private media.'}|ConvertTo-Json -Depth 5|Set-Content (Join-Path $root "artifacts/android-background-process-$Serial.json") -Encoding utf8
+    $kind=if($PrivateChat){'private'}else{'group'}
+    $suffix=if($PrivateChat){"private-$Serial"}else{$Serial}
+    @{date=[DateTimeOffset]::Now.ToString('o');result='passed';chat_kind=$kind;apk_sha256=(Get-FileHash (Join-Path $root 'artifacts/VyrnApp-dev-x86_64-debug-local-tls.apk')).Hash.ToLowerInvariant();test_apk_sha256=(Get-FileHash (Join-Path $root 'artifacts/VyrnApp-dev-debug-androidTest.apk')).Hash.ToLowerInvariant();device=$expected;serial=$Serial;before_pid=$before;after_pid=$after;checks=$script:checks;scope='Native UI registration/opt-in; external actual process kill, automatic sticky restart, external REST sender, screen-off real system notification, system UI notification touch and original chat read; no app instrumentation during kill/delivery. Private mode uses Signal prepared before process death, posted after restart, decrypted only by original recipient UI. Not Doze/reboot/physical phone/private media.'}|ConvertTo-Json -Depth 5|Set-Content (Join-Path $root "artifacts/android-background-process-$suffix.json") -Encoding utf8
     Write-Output "PASS: $($script:checks.Count) external background process-recovery checks"
 } catch {
     try{$failureUi=Read-Ui;[IO.File]::WriteAllText((Join-Path $root '.local/background-process-failure.xml'),$failureUi.OuterXml)}catch{}

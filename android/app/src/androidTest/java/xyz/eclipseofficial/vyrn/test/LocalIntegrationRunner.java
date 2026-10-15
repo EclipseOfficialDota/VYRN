@@ -90,8 +90,8 @@ public final class LocalIntegrationRunner extends Instrumentation {
             if(!boundedChatStartup)waitForIdleSync();
             if(phase.equals("read-cold-recover")){
                 stage="read_cold_recover";NotificationUiIntegration.recover(this,foreground,(condition,name)->{check(condition,name);passed.put(name);});
-            }else if(phase.equals("notification-process-prepare")){
-                stage="notification_process_prepare";NotificationUiIntegration.run(this,foreground,read("vyrn-test-fixture.json"),(condition,name)->{check(condition,name);passed.put(name);},false,true);
+            }else if(phase.equals("notification-process-prepare")||phase.equals("notification-private-process-prepare")){
+                stage="notification_process_prepare";NotificationUiIntegration.run(this,foreground,read("vyrn-test-fixture.json"),(condition,name)->{check(condition,name);passed.put(name);},false,true,phase.equals("notification-private-process-prepare"));
             }else if(phase.equals("notification-ui")||phase.equals("read-cold-prepare")){
                 stage="notification_ui";NotificationUiIntegration.run(this,foreground,read("vyrn-test-fixture.json"),(condition,name)->{check(condition,name);passed.put(name);},phase.equals("read-cold-prepare"));
             }else if(phase.equals("media-voice-storage")){

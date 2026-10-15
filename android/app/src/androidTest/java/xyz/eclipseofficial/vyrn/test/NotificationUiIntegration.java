@@ -25,15 +25,31 @@ final class NotificationUiIntegration {
         run(test,activity,fixture,check,coldPrepare,false);
     }
     static void run(Instrumentation test,Activity activity,JSONObject fixture,AuthUiIntegration.Check check,boolean coldPrepare,boolean processPrepare) throws Exception {
+        run(test,activity,fixture,check,coldPrepare,processPrepare,false);
+    }
+    static void run(Instrumentation test,Activity activity,JSONObject fixture,AuthUiIntegration.Check check,boolean coldPrepare,boolean processPrepare,boolean privateChat) throws Exception {
         AuthUiIntegration.registration(test,activity,fixture,check);
         AuthUiIntegration.handlePrompts(test,activity,check);
         int account=UserConfig.selectedAccount;RestRepository recipient=VyrnBridge.forAccount(account).repository;
         RestRepository sender=new RestRepository(new TokenVault(test.getTargetContext(),9005));
-        JSONObject tokens=(JSONObject)sender.request("POST","/v1/auth/register",new JSONObject().put("email","notification-"+UUID.randomUUID()+"@vyrn.local").put("password",fixture.getString("password")).put("invite_code",fixture.getString("invite")).put("display_name","Notification sender").put("device_id",UUID.randomUUID().toString()).put("device_name","Notification fixture"),false);
+        String senderName=privateChat?"Private "+UUID.randomUUID().toString().substring(0,8):"Notification sender";
+        JSONObject tokens=(JSONObject)sender.request("POST","/v1/auth/register",new JSONObject().put("email","notification-"+UUID.randomUUID()+"@vyrn.local").put("password",fixture.getString("password")).put("invite_code",fixture.getString("invite")).put("display_name",senderName).put("device_id",UUID.randomUUID().toString()).put("device_name","Notification fixture"),false);
         sender.vault.save(tokens);String owner=tokens.getString("user_id");
         String title=processPrepare?"Background "+UUID.randomUUID().toString().substring(0,8):"Notification test";
-        JSONObject group=(JSONObject)sender.requestForUser(owner,"POST","/v1/conversations",new JSONObject().put("kind","group").put("title",title).put("members",new JSONArray().put(recipient.me().id)),true);
-        long dialog;try(IdMap ids=new IdMap(test.getTargetContext(),account)){dialog=-ids.local("conversation",group.getString("id"));}
+        JSONObject input=new JSONObject().put("kind",privateChat?"private":"group").put("members",new JSONArray().put(recipient.me().id));
+        if(!privateChat)input.put("title",title);else title=senderName;
+        JSONObject group=(JSONObject)sender.requestForUser(owner,"POST","/v1/conversations",input,true);
+        long dialog;try(IdMap ids=new IdMap(test.getTargetContext(),account)){dialog=privateChat?ids.local("user",owner):-ids.local("conversation",group.getString("id"));}
+        String privateMarker=null;JSONObject privateBody=null;
+        if(privateChat){
+            privateMarker="Private-background-"+UUID.randomUUID();
+            try(xyz.eclipseofficial.vyrn.data.SignalDeviceKeys recipientKeys=new xyz.eclipseofficial.vyrn.data.SignalDeviceKeys(test.getTargetContext(),recipient);
+                xyz.eclipseofficial.vyrn.data.SignalDeviceKeys senderKeys=new xyz.eclipseofficial.vyrn.data.SignalDeviceKeys(test.getTargetContext(),sender)){
+                recipientKeys.publishInitial();senderKeys.publishInitial();
+                privateBody=new JSONObject(new xyz.eclipseofficial.vyrn.data.SignalMessages(senderKeys).prepare(recipient.me().id,group.getString("id"),UUID.randomUUID().toString(),privateMarker));
+                check.verify(privateBody.getBoolean("encrypted")&&!privateBody.toString().contains(privateMarker),"notification_private_prepared_signal_ciphertext_without_plaintext");
+            }
+        }
         NotificationManager manager=test.getTargetContext().getSystemService(NotificationManager.class);
         long permissionDeadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(15);
         while(!manager.areNotificationsEnabled()&&System.nanoTime()<permissionDeadline){AuthUiIntegration.handlePrompts(test,activity,check);Thread.sleep(200);}
@@ -51,6 +67,7 @@ final class NotificationUiIntegration {
         PowerManager power=test.getTargetContext().getSystemService(PowerManager.class);
         if(processPrepare){
             JSONObject saved=new JSONObject().put("sender",sender.vault.load()).put("recipient",recipient.vault.load()).put("conversation",group.getString("id")).put("title",title).put("pid",android.os.Process.myPid());
+            if(privateChat)saved.put("body",privateBody).put("marker",privateMarker);
             java.nio.file.Files.write(new java.io.File(test.getTargetContext().getFilesDir(),"vyrn-test-background.json").toPath(),saved.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8));
             key(test,KeyEvent.KEYCODE_SLEEP);
             check.verify(connectionNotification(manager)!=null,"notification_process_fixture_ready_with_connection_service");
