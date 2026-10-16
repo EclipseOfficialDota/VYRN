@@ -1,5 +1,11 @@
 # Acceptance matrix
 
+## Group-search Core active and normal test APKs rebuilt — 2026-10-16
+
+This supersedes the local-only rollout limitation in the preceding search checkpoint. Core source4476f2d is active on the VPS after a real snapshot/isolated restore rehearsal and fresh-snapshot activation, with schema9 unchanged. The first DNS-check failure actually triggered rollback; old image/health were verified, then the corrected retry exited0. Six authenticated public HTTPS search/cursor/legacy/deletion/session checks pass. Core/PostgreSQL health, image/binary, private binding and unchanged PostgreSQL start time were checked. Full38 top-level API tests plus subtests, vet/security/update checks passed before deployment. See TEST_REPORT/DEPLOYMENT for hashes and scope.
+
+Normal ARM64/ARM32/universal Debug APKs are freshly built and packaging-verified (about122/108/159MB). Actual phone runtime, final Release signing, safe update installation, external backup, private on-device/global/hashtag search and remaining full-goal acceptance are not complete. No emulator ran during this stage; no offsite-backup or full-project completion claim is made.
+
 ## Original group-text search navigation accepted locally — 2026-10-16
 
 The native search request is connected to group-text API search with real total/cursor pagination and immutable account/session-bound request capture. Two consecutive API30 UI runs pass77 recorded checks each: native registration, real Search menu touch, exact query through EditText IME, rendered24-result count,23 actual next-control touches crossing the server page and previous-result navigation. Private server search is rejected before HTTP; unsupported sender/date controls are disabled. Empty native reset no longer raises a false network error. See TEST_REPORT for hashes, reports, failed-attempt limits and local Core identity.
