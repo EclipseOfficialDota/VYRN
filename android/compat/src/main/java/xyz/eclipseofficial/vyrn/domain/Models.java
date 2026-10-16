@@ -41,6 +41,10 @@ public final class Models {
         public Message(String id,String sender,String text,int date,int ordinal,boolean encrypted,boolean deleted,String conversation,int revision,int editedDate){this(id,sender,text,date,ordinal,encrypted,deleted,conversation,revision,editedDate,null);}
         public Message(String id,String sender,String text,int date,int ordinal,boolean encrypted,boolean deleted,String conversation,int revision,int editedDate,Attachment attachment){this.id=id;this.sender=sender;this.text=text;this.date=date;this.ordinal=ordinal;this.encrypted=encrypted;this.deleted=deleted;this.conversation=conversation;this.revision=revision;this.editedDate=editedDate;this.attachment=attachment;}
     }
+    public static final class SearchPage {
+        public final List<Message> messages;public final int total;
+        public SearchPage(List<Message> messages,int total){this.messages=messages;this.total=total;}
+    }
     public static final class Attachment {
         public final String id,conversation,kind,filename,contentType,sha256;public final long size,durationMs;public final boolean encrypted;
         public final int width,height;

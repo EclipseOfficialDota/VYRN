@@ -168,6 +168,15 @@ public final class RestRepository implements Models.Repository {
         return messages(conversation,before,limit,false);
     }
     public List<Models.Message> liveMessages(String conversation,String before,int limit) throws Exception{return messages(conversation,before,limit,true);}
+    public Models.SearchPage searchMessages(String user,String session,String conversation,String query,String before,int limit) throws Exception {synchronized(vault.guard()){
+        if(query==null||query.isEmpty()||query.codePointCount(0,query.length())>100||limit<1||limit>100)throw new IllegalArgumentException("invalid_search");
+        String path="/v1/conversations/"+conversation+"/messages?include_total=true&live_only=true&limit="+limit+"&q="+java.net.URLEncoder.encode(query,StandardCharsets.UTF_8.name());
+        if(before!=null)path+="&before="+before;
+        JSONObject response=(JSONObject)requestForSession(user,session,"GET",path,null);JSONArray data=response.getJSONArray("messages");int total=response.getInt("total");
+        if(total<data.length()||data.length()>limit)throw new SecurityException("search_page_changed");
+        List<Models.Message> result=new ArrayList<>();for(int i=0;i<data.length();i++){Models.Message row=message(data.getJSONObject(i));if(!conversation.equals(row.conversation)||row.encrypted||row.deleted)throw new SecurityException("search_context_changed");result.add(row);}
+        return new Models.SearchPage(result,total);
+    }}
     private List<Models.Message> messages(String conversation,String before,int limit,boolean liveOnly) throws Exception{
         String path="/v1/conversations/"+conversation+"/messages?limit="+Math.max(1,Math.min(limit,100))+"&live_only="+liveOnly;if(before!=null)path+="&before="+before;
         JSONArray data=(JSONArray)request("GET",path,null,true);List<Models.Message> result=new ArrayList<>();for(int i=0;i<data.length();i++)result.add(message(data.getJSONObject(i)));return result;

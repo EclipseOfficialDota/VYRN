@@ -875,11 +875,46 @@ Edit 'TMessagesProj/src/main/java/org/telegram/messenger/MediaDataController.jav
   if(!$t.Contains($write)){throw 'Pinned draft write marker missing'}
   $t=$t.Replace($write,"putString($record, xyz.eclipseofficial.vyrn.data.DraftVault.encode(currentAccount, $record, serializedData.toByteArray()))")
  }
+ $searchResult="                    reqId = 0;`n                    if (!jumpToMessage)"
+ if(!$t.Contains($searchResult)){throw 'Pinned search completion marker missing'}
+ $searchFailure=@'
+                    reqId = 0;
+                    if (error != null) {
+                        loadingMoreSearchMessages = false;
+                        messagesSearchEndReached[0] = messagesSearchEndReached[1] = true;
+                        messagesSearchCount[0] = messagesSearchCount[1] = messagesLocalSearchCount = 0;
+                        searchServerResultMessages.clear();
+                        searchLocalResultMessages.clear();
+                        searchServerResultMessagesMap[0].clear();
+                        searchServerResultMessagesMap[1].clear();
+                        updateSearchResults();
+                        getNotificationCenter().postNotificationName(NotificationCenter.chatSearchResultsAvailable, guid, 0, getMask(), dialogId, 0, 0, false);
+                        boolean unavailable = "VYRN_FEATURE_UNAVAILABLE".equals(error.text);
+                        android.widget.Toast.makeText(ApplicationLoader.applicationContext, LocaleController.isRTL ? (unavailable ? "این روش جست‌وجو هنوز آماده نیست." : "جست‌وجو انجام نشد؛ اتصال را بررسی کنید و دوباره جست‌وجو کنید.") : (unavailable ? "This search option is not available yet." : "Search failed. Check your connection and search again."), android.widget.Toast.LENGTH_LONG).show();
+                        return;
+                    }
+                    if (!jumpToMessage)
+'@
+ $t=$t.Replace($searchResult,$searchFailure)
  $t
 }
 Edit 'TMessagesProj/src/main/java/org/telegram/ui/ChatActivity.java' {
  param($t)
  $t=(& git -c "safe.directory=$($upstream.Replace('\','/'))" -C $upstream show "${pin}:TMessagesProj/src/main/java/org/telegram/ui/ChatActivity.java") -join "`n"
+ $openSearch='    public void openSearchWithText(String text) {'
+ if(!$t.Contains($openSearch)){throw 'Pinned chat search marker missing'}
+ $t=$t.Replace($openSearch,$openSearch+"`n        if (dialog_id >= 0) { android.widget.Toast.makeText(getContext(), LocaleController.isRTL ? `"جست‌وجوی خصوصی روی دستگاه هنوز آماده نیست.`" : `"Private on-device search is not available yet.`", android.widget.Toast.LENGTH_LONG).show(); return; }")
+ $searchIcon='searchIconItem.setContentDescription(LocaleController.getString(R.string.Search));'
+ if(!$t.Contains($searchIcon)){throw 'Pinned chat search icon marker missing'}
+ $t=$t.Replace($searchIcon,$searchIcon+"`n            searchIconItem.setEnabled(dialog_id < 0); searchIconItem.setAlpha(dialog_id < 0 ? 1f : .4f);")
+ $searchMenu='headerItem.lazilyAddSubItem(search, R.drawable.msg_search, LocaleController.getString(R.string.Search));'
+ if(!$t.Contains($searchMenu)){throw 'Pinned chat search menu marker missing'}
+ $t=$t.Replace($searchMenu,'if (dialog_id < 0) '+$searchMenu)
+ foreach($button in @('searchUserButton','searchCalendarButton')){
+  $click="$button.setOnClickListener("
+  if(!$t.Contains($click)){throw 'Pinned search filter control marker missing'}
+  $t=$t.Replace($click,"$button.setEnabled(false); $button.setAlpha(.4f);`n            "+$click)
+ }
  foreach($hintRunnable in @('    private final Runnable showScheduledOrNoSoundRunnable = () -> {','    private final Runnable showScheduledHintRunnable = () -> {')){
   if(!$t.Contains($hintRunnable)){throw 'Pinned unsupported private hint marker missing'}
   $t=$t.Replace($hintRunnable,$hintRunnable+"`n        if (xyz.eclipseofficial.vyrn.compat.VyrnBridge.privateSendUnavailable(dialog_id)) return;")

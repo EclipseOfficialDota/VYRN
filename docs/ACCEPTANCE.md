@@ -1,5 +1,11 @@
 # Acceptance matrix
 
+## Original group-text search navigation accepted locally — 2026-10-16
+
+The native search request is connected to group-text API search with real total/cursor pagination and immutable account/session-bound request capture. Two consecutive API30 UI runs pass77 recorded checks each: native registration, real Search menu touch, exact query through EditText IME, rendered24-result count,23 actual next-control touches crossing the server page and previous-result navigation. Private server search is rejected before HTTP; unsupported sender/date controls are disabled. Empty native reset no longer raises a false network error. See TEST_REPORT for hashes, reports, failed-attempt limits and local Core identity.
+
+This supersedes only the group plain-text search part of the older search/drafts row. Private on-device/global/media/sender/date search, full offline/error/clear/no-match UI and adversarial lifecycle cases remain pending. Backend and client are verified locally; VPS and normal ARM APKs are not updated with this change. Full objective remains incomplete.
+
 ## Private-text boot recovery accepted on API30 without PIN — 2026-10-16
 
 The existing system boot receiver started the opted-in VYRN foreground service after an actual kernel-UUID-verified Android reboot. No app launch or instrumentation occurred after reboot before screen-off private Signal delivery. Real notification touch opened the correct native private chat with decrypted text and confirmed server read. Preparation27/external14 recorded checks passed, script exit0; see TEST_REPORT and artifacts/android-background-process-reboot-private-emulator-5564.json. ADB-local TLS was restored after boot; the emulator has no PIN.

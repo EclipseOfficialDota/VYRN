@@ -683,6 +683,27 @@ public final class VyrnBridge {
     public static boolean dispatch(int account,TLObject request,RequestDelegate callback,RequestDelegateTimestamp timestamp,int token){
         PendingRequest pending=new PendingRequest(account,token,request instanceof TLRPC.TL_messages_sendMessage||request instanceof TLRPC.TL_messages_sendMedia,callback,timestamp);
         if(token!=0 && REQUESTS.putIfAbsent(requestKey(account,token),pending)!=null)throw new IllegalStateException("duplicate_request_token");
+        if(request instanceof TLRPC.TL_messages_search){
+            TLRPC.TL_messages_search in=(TLRPC.TL_messages_search)request;VyrnBridge bridge=forAccount(account);
+            pending.bridge=bridge;pending.sessionOrigin=UserConfig.getInstance(account).getClientUserId();pending.boundSession=bridge.repository.vault.cachedSession();
+            final long chat=in.peer instanceof TLRPC.TL_inputPeerChat?in.peer.chat_id:0;
+            final String query=in.q;final int offset=in.offset_id,limit=in.limit;
+            final boolean supported=in.flags==0&&chat>0&&in.from_id==null&&in.saved_peer_id==null&&(in.saved_reaction==null||in.saved_reaction.isEmpty())&&in.top_msg_id==0&&in.filter instanceof TLRPC.TL_inputMessagesFilterEmpty&&in.min_date==0&&in.max_date==0&&in.add_offset==0&&in.max_id==0&&in.min_id==0&&in.hash==0&&offset>=0;
+            execute(()->{try{synchronized(bridge.repository.vault.guard()){
+                if(pending.sessionOrigin==0||pending.boundSession==null||UserConfig.getInstance(account).getClientUserId()!=pending.sessionOrigin||!pending.boundSession.equals(bridge.repository.vault.cachedSession()))throw new SecurityException("account_changed");
+                String user=bridge.ids.remote("user",pending.sessionOrigin);pending.user=user;
+                if(!supported)throw new UnsupportedOperationException("search_options_unavailable");
+                if(query==null||query.isEmpty()){pending.complete(new TLRPC.TL_messages_messagesSlice(),null);return;}
+                String conversation=bridge.ids.remote("conversation",chat),before=offset>0?bridge.ids.remote("message",offset):null;
+                Models.SearchPage page=bridge.repository.searchMessages(user,pending.boundSession,conversation,query,before,limit);
+                TLRPC.TL_messages_messagesSlice result=new TLRPC.TL_messages_messagesSlice();result.count=page.total;
+                TLRPC.TL_peerChat peer=new TLRPC.TL_peerChat();peer.chat_id=chat;
+                for(Models.User member:bridge.repository.members(conversation))result.users.add(bridge.mapUser(member));
+                result.chats.add(bridge.chat(bridge.conversationModel(conversation)));
+                for(Models.Message row:page.messages)result.messages.add(bridge.message(row,peer));
+                pending.complete(result,null);
+            }}catch(Exception failure){pending.complete(null,failure);}});return true;
+        }
         if(request instanceof UploadPartRequest){
             UploadPartRequest part=(UploadPartRequest)request;pending.bridge=forAccount(account);pending.user=part.identity.owner;pending.sessionOrigin=part.identity.origin;pending.boundSession=part.identity.session;
             UPLOAD.execute(()->uploadPart(account,pending,part,0));return true;
