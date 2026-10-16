@@ -361,21 +361,44 @@ public final class SignalMessages {
     /** Validate the native row's complete context before returning volatile text; never write this into native messageOwner. */
     public JSONObject display(String peer,String conversation,String message,String sender,int revision,int ordinal) throws Exception {synchronized(keys.guard()){
         keys.requireSession();id(peer);id(conversation);id(message);id(sender);
+        return store.transaction(()->displayRecord(peer,conversation,message,sender,revision,ordinal,load("private-head",message)));
+    }}
+    /** Shared authenticated cache reader; caller holds the encrypted-store transaction. */
+    private JSONObject displayRecord(String peer,String conversation,String message,String sender,int revision,int ordinal,JSONObject head) throws Exception {
         if(peer.equals(keys.user)||!sender.equals(peer)&&!sender.equals(keys.user)||revision<1||ordinal<1)throw new SecurityException("signal_display_context_changed");
-        return store.transaction(()->{
-            JSONObject head=load("private-head",message);if(head==null||head.optBoolean("deleted"))return null;
-            if(expired(head)){retire(head);return null;}
-            if(!conversation.equals(head.getString("conversation"))||!sender.equals(head.getString("owner"))||revision!=head.getInt("revision")||ordinal!=head.getInt("ordinal"))throw new SecurityException("signal_display_context_changed");
-            JSONObject cached=load("private-cache",message+"_"+revision);if(cached==null)return null;JSONObject inner=cached.getJSONObject("inner");
-            if(!conversation.equals(string(inner,"conversation_id"))||!head.getString("client").equals(string(inner,"client_id"))||revision!=number(inner,"revision")||!participants(peer).toString().equals(inner.getJSONArray("participants").toString())||!sender.equals(inner.getJSONObject("sender").getString("user_id")))throw new SecurityException("signal_display_context_changed");
-            JSONObject result=new JSONObject().put("text",string(inner,"text")).put("expires_at",head.get("expires_at"));
-            if(keys.user.equals(sender)){
-                JSONObject pending=load("private-edit",message+"_"+revision);
-                if(pending!=null&&peer.equals(pending.optString("peer"))&&conversation.equals(pending.optString("conversation"))&&message.equals(pending.optString("message"))&&head.getString("client").equals(pending.optString("client"))&&keys.sessionId().equals(pending.optString("session"))&&pending.has("text")){
-                    String draft=string(pending,"text");text(draft);result.put("edit_text",draft);
-                }
+        if(head==null||head.optBoolean("deleted"))return null;
+        if(!message.equals(head.getString("message_id"))||!conversation.equals(head.getString("conversation"))||!sender.equals(head.getString("owner"))||revision!=head.getInt("revision")||ordinal!=head.getInt("ordinal"))throw new SecurityException("signal_display_context_changed");
+        if(expired(head)){retire(head);return null;}
+        JSONObject cached=load("private-cache",message+"_"+revision);if(cached==null)return null;JSONObject inner=cached.getJSONObject("inner");
+        if(!conversation.equals(string(inner,"conversation_id"))||!head.getString("client").equals(string(inner,"client_id"))||revision!=number(inner,"revision")||!participants(peer).toString().equals(inner.getJSONArray("participants").toString())||!sender.equals(inner.getJSONObject("sender").getString("user_id")))throw new SecurityException("signal_display_context_changed");
+        JSONObject result=new JSONObject().put("text",string(inner,"text")).put("expires_at",head.get("expires_at"));
+        if(keys.user.equals(sender)){
+            JSONObject pending=load("private-edit",message+"_"+revision);
+            if(pending!=null&&peer.equals(pending.optString("peer"))&&conversation.equals(pending.optString("conversation"))&&message.equals(pending.optString("message"))&&head.getString("client").equals(pending.optString("client"))&&keys.sessionId().equals(pending.optString("session"))&&pending.has("text")){
+                String draft=string(pending,"text");text(draft);result.put("edit_text",draft);
             }
-            return result;
+        }
+        return result;
+    }
+    /** Offline search of already authenticated/decrypted history. Returns metadata, never text. */
+    public JSONObject searchCached(String peer,String conversation,String query,int before,int limit) throws Exception {synchronized(keys.guard()){
+        keys.requireSession();id(peer);id(conversation);
+        if(peer.equals(keys.user)||query==null||query.isEmpty()||query.codePointCount(0,query.length())>100||before<0||limit<1||limit>100)throw new IllegalArgumentException("invalid_signal_search");
+        String needle=query.toLowerCase(Locale.ROOT);
+        return store.transaction(()->{
+            int total=0;PriorityQueue<JSONObject> page=new PriorityQueue<>(Comparator.comparingInt((JSONObject row)->row.optInt("ordinal")));
+            // ponytail: scan encrypted heads; add a conversation index after measured large-history latency.
+            for(String name:store.valueNames("private-head")){
+                JSONObject head=load("private-head",name);if(head==null||!conversation.equals(head.getString("conversation")))continue;
+                String sender=id(head.getString("owner"));id(name);int revision=head.getInt("revision"),ordinal=head.getInt("ordinal");
+                JSONObject shown=displayRecord(peer,conversation,name,sender,revision,ordinal,head);
+                if(shown==null||!shown.getString("text").toLowerCase(Locale.ROOT).contains(needle))continue;
+                total++;if(before>0&&ordinal>=before)continue;
+                JSONObject row=new JSONObject().put("message",name).put("conversation",conversation).put("sender",sender).put("revision",revision).put("ordinal",ordinal).put("expires_at",head.get("expires_at"));
+                if(page.size()<limit)page.add(row);else if(ordinal>page.peek().getInt("ordinal")){page.remove();page.add(row);}
+            }
+            ArrayList<JSONObject> rows=new ArrayList<>(page);rows.sort(Comparator.comparingInt((JSONObject row)->row.optInt("ordinal")).reversed());
+            return new JSONObject().put("total",total).put("messages",new JSONArray(rows));
         });
     }}
     /** Adapter only: forget cached plaintext after an authenticated shared deletion is confirmed. */

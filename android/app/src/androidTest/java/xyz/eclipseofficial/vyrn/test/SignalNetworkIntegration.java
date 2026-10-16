@@ -25,7 +25,7 @@ final class SignalNetworkIntegration {
         if(ciphertext.getInt("type")==CiphertextMessage.WHISPER_TYPE)return cipher.decrypt(new SignalMessage(bytes));
         throw new IllegalArgumentException("unsupported_signal_type");
     }
-    private static RestRepository register(Context context,JSONObject fixture,int slot,String suffix) throws Exception {
+    static RestRepository register(Context context,JSONObject fixture,int slot,String suffix) throws Exception {
         RestRepository repo=new RestRepository(new TokenVault(context,slot));repo.vault.clear();
         JSONObject tokens=(JSONObject)repo.request("POST","/v1/auth/register",new JSONObject().put("email",fixture.getString("email").replace("@",suffix+"@"))
             .put("password",fixture.getString("password")).put("invite_code",fixture.getString("invite")).put("display_name","Signal test "+suffix)

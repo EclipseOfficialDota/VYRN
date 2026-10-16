@@ -1,5 +1,11 @@
 # Acceptance matrix
 
+## Local private-cache search engine accepted, UI still gated — 2026-10-16
+
+The encrypted-cache search engine passes21 actual Signal/JNI/API30 checks for authenticated current-revision text, cache/session/peer/conversation isolation, cursor totals, literal/Persian matching, metadata-only output, invalid-network-token operation, deletion/edit/learned-expiry cleanup and shared display validation. It adds no HTTP query or plaintext index. Native private notification after actual process death also regresses successfully (27 preparation/12 external checks) on the same APKs. See TEST_REPORT for hashes, fixtures and limits; emulator shut down.
+
+Private search UI is not enabled or accepted by this checkpoint. Native integration/navigation/highlighting, full cache/history scope, offline/error controls, races and large-history performance remain pending. Production Core and normal ARM artifacts remain at the preceding verified rollout. The full objective is incomplete.
+
 ## Group-search Core active and normal test APKs rebuilt — 2026-10-16
 
 This supersedes the local-only rollout limitation in the preceding search checkpoint. Core source4476f2d is active on the VPS after a real snapshot/isolated restore rehearsal and fresh-snapshot activation, with schema9 unchanged. The first DNS-check failure actually triggered rollback; old image/health were verified, then the corrected retry exited0. Six authenticated public HTTPS search/cursor/legacy/deletion/session checks pass. Core/PostgreSQL health, image/binary, private binding and unchanged PostgreSQL start time were checked. Full38 top-level API tests plus subtests, vet/security/update checks passed before deployment. See TEST_REPORT/DEPLOYMENT for hashes and scope.

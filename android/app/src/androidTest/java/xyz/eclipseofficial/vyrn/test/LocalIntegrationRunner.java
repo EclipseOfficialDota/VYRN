@@ -88,7 +88,9 @@ public final class LocalIntegrationRunner extends Instrumentation {
             check(foreground!=null,"foreground_activity");
             stage="foreground_idle";
             if(!boundedChatStartup)waitForIdleSync();
-            if(phase.equals("search-ui")){
+            if(phase.equals("private-search")){
+                stage="private_search";PrivateSearchIntegration.run(getTargetContext(),read("vyrn-test-fixture.json"),(condition,name)->{check(condition,name);passed.put(name);});
+            }else if(phase.equals("search-ui")){
                 stage="search_ui";SearchUiIntegration.run(this,foreground,read("vyrn-test-fixture.json"),(condition,name)->{check(condition,name);passed.put(name);});
             }else if(phase.equals("read-cold-recover")){
                 stage="read_cold_recover";NotificationUiIntegration.recover(this,foreground,(condition,name)->{check(condition,name);passed.put(name);});
