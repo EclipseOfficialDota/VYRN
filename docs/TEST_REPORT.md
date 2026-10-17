@@ -1,3 +1,15 @@
+## Normal ARM artifacts include the search-clear fix — 2026-10-17
+
+Source39fe688 was rebuilt with normal public HTTPS and ARM64+ARM32 after the group/private UI checks below. Build succeeded in3m42s, exit0; verify-apks.ps1 exited0 for all three debug signatures/packages/API26/ABI/manifest and TLS policies. Emulator stayed off during the one-worker/two-processor/3GB-heap build. No Java/emulator workers remained afterward. The verified childless RTK wrapper20224 from the completed private test was stopped after PASS/report and no-child checks; this cleanup is not a clean test-script-exit assertion. No backend/VPS, final signing or physical-phone test was performed.
+
+| APK | Bytes | SHA256 |
+| --- | ---: | --- |
+| VyrnApp-dev-arm64-v8a-debug.apk | 122510793 | 3361bc6908218563d35f095d84210db19af454d72e53049d67f18d65ddd0c6cf |
+| VyrnApp-dev-armeabi-v7a-debug.apk | 108224179 | 2e2836b34585f7890a830abd009395c754a5ea01beab3b0a00e7cae1b85df0aa |
+| VyrnApp-dev-universal-debug.apk | 158736290 | 1548717350da50446f71464f3d0a94ef2775990822ee1bb59b65bd307f848392 |
+
+These current Debug artifacts supersede the identities in the previous artifact checkpoint. The full objective is still incomplete.
+
 ## Native search clear/no-match/retry — 2026-10-17
 
 An extended original-UI scenario reproduced a stale-results bug before the fix: the actual Search clear control emptied the field but retained the previous24-result count. No-match rendering and re-search had already passed in that failed run. The failure was specifically search_clear_control_resets_without_enter; app-private numeric diagnostics recorded count24/index0. Sanitized failure evidence is retained in .local/android-search-clear-before-fix.log. Previous successful reports are preserved as artifacts/android-search-ui-api30-before-clear.json and artifacts/android-private-search-ui-api30-before-clear.json.
