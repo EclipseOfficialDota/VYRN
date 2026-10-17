@@ -54,12 +54,22 @@ final class SearchUiIntegration {
         TLRPC.messages_Messages empty=reset.get(20,TimeUnit.SECONDS);check.verify(empty.count==0&&empty.messages.isEmpty(),"search_empty_input_resets_without_false_network_failure");
         TLRPC.TL_messages_search privateSearch=request(local,query);TLRPC.TL_inputPeerUser peer=new TLRPC.TL_inputPeerUser();peer.user_id=UserConfig.getInstance(account).getClientUserId();privateSearch.peer=peer;
         CompletableFuture<String> denied=new CompletableFuture<>();ConnectionsManager.getInstance(account).sendRequest(privateSearch,(value,error)->denied.complete(error==null?"":error.text));
-        check.verify("VYRN_FEATURE_UNAVAILABLE".equals(denied.get(20,TimeUnit.SECONDS)),"search_private_query_rejected_before_server_search");
+        check.verify("VYRN_FEATURE_UNAVAILABLE".equals(denied.get(20,TimeUnit.SECONDS)),"search_self_dialog_rejected_before_server_search");
+        verifyUi(test,local,false,query,expected,check);
+    }
+    static void verifyUi(Instrumentation test,long local,boolean privatePeer,String query,ArrayList<Integer> expected,AuthUiIntegration.Check check) throws Exception {
+        int account=UserConfig.selectedAccount;
         await(test,()->LaunchActivity.getLastFragment()!=null&&!LaunchActivity.getLastFragment().getParentLayout().checkTransitionAnimation(),check,"search_parent_transition_ready");
-        Bundle args=new Bundle();args.putLong("chat_id",local);ChatActivity chat=new ChatActivity(args);current=chat;
+        Bundle args=new Bundle();args.putLong(privatePeer?"user_id":"chat_id",local);ChatActivity chat=new ChatActivity(args);current=chat;
         test.runOnMainSync(()->{if(!LaunchActivity.getLastFragment().presentFragment(chat))throw new AssertionError("search_chat_present");});
         await(test,()->chat.getFragmentView()!=null&&!chat.getParentLayout().checkTransitionAnimation(),check,"search_original_chat_ready");
         AuthUiIntegration.handlePrompts(test,LaunchActivity.instance,check);
+        if(privatePeer){
+            await(test,()->!(Boolean)value(chat,"firstLoading")&&expected.stream().allMatch(id->chat.messages.stream().anyMatch(row->row.getId()==id)),check,"private_search_native_history_loaded_before_disconnect");
+            await(test,()->VyrnBridge.privateTextReady(account,local),check,"private_search_native_device_ready");
+            AuthUiIntegration.networkStep(test,LaunchActivity.instance,"offline-load",check);
+        }
+        try {
         View icon=(View)value(chat,"searchIconItem");
         if(!tap(test,icon)){
             check.verify(tap(test,(View)value(chat,"headerItem")),"search_original_header_menu_touched");
@@ -69,15 +79,21 @@ final class SearchUiIntegration {
         }else check.verify(true,"search_original_icon_touched");
         ActionBarMenuItem field=(ActionBarMenuItem)value(chat,"searchItem");
         await(test,()->field.getSearchField().hasFocus(),check,"search_original_text_field_focused");
+        Thread.sleep(650); // Let the original search expansion's delayed IME show finish.
         boolean[] entered={false};test.runOnMainSync(()->{
             android.view.inputmethod.InputConnection input=field.getSearchField().onCreateInputConnection(new android.view.inputmethod.EditorInfo());
-            entered[0]=input!=null&&input.commitText(query,1)&&query.contentEquals(field.getSearchField().getText())&&input.performEditorAction(android.view.inputmethod.EditorInfo.IME_ACTION_SEARCH);
+            entered[0]=input!=null&&input.commitText(query,1)&&query.contentEquals(field.getSearchField().getText());
         });
-        check.verify(entered[0],"search_native_ime_commits_complete_query_and_search_action");
-        test.runOnMainSync(()->org.telegram.messenger.AndroidUtilities.hideKeyboard(field.getSearchField()));
+        check.verify(entered[0],"search_native_ime_commits_complete_query");
+        // Upstream listens for a non-null ENTER/SEARCH KeyEvent, not a bare editor action.
+        test.sendKeyDownUpSync(android.view.KeyEvent.KEYCODE_ENTER);
         await(test,()->query.contentEquals(field.getSearchField().getText())&&query.equals(org.telegram.messenger.MediaDataController.getInstance(account).getLastSearchQuery())&&(int)value(chat,"searchLastCount")==24&&(int)value(chat,"searchLastIndex")==0&&chat.highlightMessageId==expected.get(23),check,"search_original_count_and_newest_result");
+        // Search expansion posts a delayed keyboard show. Close the actual IME after it settles.
+        Thread.sleep(500);boolean[] keyboard={false};test.runOnMainSync(()->keyboard[0]=android.os.Build.VERSION.SDK_INT>=30&&chat.getFragmentView().getRootWindowInsets()!=null&&chat.getFragmentView().getRootWindowInsets().isVisible(android.view.WindowInsets.Type.ime()));
+        if(keyboard[0])test.sendKeyDownUpSync(android.view.KeyEvent.KEYCODE_BACK);
+        else test.runOnMainSync(()->org.telegram.messenger.AndroidUtilities.hideKeyboard(field.getSearchField()));
         await(test,()->android.os.Build.VERSION.SDK_INT<30||chat.getFragmentView().getRootWindowInsets()!=null&&!chat.getFragmentView().getRootWindowInsets().isVisible(android.view.WindowInsets.Type.ime()),check,"search_keyboard_closed_before_navigation");
-        check.verify(value(chat,"searchUserButton") instanceof View&&!((View)value(chat,"searchUserButton")).isEnabled()&&!((View)value(chat,"searchCalendarButton")).isEnabled(),"search_unsupported_sender_date_filters_disabled");
+        check.verify((value(chat,"searchUserButton")==null||!((View)value(chat,"searchUserButton")).isEnabled())&&!((View)value(chat,"searchCalendarButton")).isEnabled(),"search_unsupported_sender_date_filters_disabled");
         for(int i=1;i<24;i++){
             View next=button(chat,chat.reversed?org.telegram.ui.Components.chat.layouts.ChatActivitySideControlsButtonsLayout.BUTTON_SEARCH_DOWN:org.telegram.ui.Components.chat.layouts.ChatActivitySideControlsButtonsLayout.BUTTON_SEARCH_UP);
             check.verify(tap(test,next),"search_next_control_touched_"+i);
@@ -87,6 +103,19 @@ final class SearchUiIntegration {
         check.verify(((org.telegram.ui.Components.AnimatedTextView)value(chat,"searchCountText")).getText().toString().contains("24"),"search_counter_rendered_after_crossing_server_page");
         check.verify(tap(test,button(chat,chat.reversed?org.telegram.ui.Components.chat.layouts.ChatActivitySideControlsButtonsLayout.BUTTON_SEARCH_UP:org.telegram.ui.Components.chat.layouts.ChatActivitySideControlsButtonsLayout.BUTTON_SEARCH_DOWN)),"search_previous_control_touched");
         await(test,()->(int)value(chat,"searchLastIndex")==22&&chat.highlightMessageId==expected.get(1),check,"search_previous_result_uses_native_navigation");
+        if(privatePeer){
+            check.verify(VyrnBridge.privateSearchLabel().contentEquals(field.getSearchField().getHint()),"private_search_scope_visible_in_field");
+            await(test,()->{
+                android.view.ViewGroup list=(android.view.ViewGroup)value(chat,"chatListView");
+                for(int i=0;i<list.getChildCount();i++)if(list.getChildAt(i) instanceof org.telegram.ui.Cells.ChatMessageCell){
+                    org.telegram.messenger.MessageObject object=((org.telegram.ui.Cells.ChatMessageCell)list.getChildAt(i)).getMessageObject();
+                    if(object!=null&&object.getId()==chat.highlightMessageId&&object.messageText!=null&&object.messageText.toString().contains(query)&&!object.messageOwner.message.contains(query))return true;
+                }
+                return false;
+            },check,"private_search_selected_result_decrypted_in_visible_native_cell");
+            check.verify(!org.telegram.messenger.HashtagSearchController.getInstance(account).history.contains(query)&&!test.getTargetContext().getSharedPreferences("hashtag_search_history"+account,0).getAll().containsValue(query),"private_search_hashtag_not_saved_to_public_history");
+        }
+        } finally {if(privatePeer)AuthUiIntegration.networkStep(test,LaunchActivity.instance,"online-retry",check);}
     }
     private static TLRPC.TL_messages_search request(long chat,String query){TLRPC.TL_messages_search value=new TLRPC.TL_messages_search();TLRPC.TL_inputPeerChat peer=new TLRPC.TL_inputPeerChat();peer.chat_id=chat;value.peer=peer;value.q=query;value.limit=21;value.filter=new TLRPC.TL_inputMessagesFilterEmpty();return value;}
     private static Object value(Object object,String name){try{java.lang.reflect.Field field=object.getClass().getDeclaredField(name);field.setAccessible(true);return field.get(object);}catch(Exception failure){throw new IllegalStateException(name,failure);}}

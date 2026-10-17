@@ -316,6 +316,9 @@ public final class VyrnBridge {
     public static void execute(Runnable task){IO.execute(task);}
     /** No VYRN backend implements the upstream AI compose/style protocol. */
     public static boolean aiEditorAvailable(){return false;}
+    public static boolean globalSearchAvailable(){return false;}
+    public static boolean chatSearchAvailable(int account,long dialog){long owner=UserConfig.getInstance(account).getClientUserId();return owner>0&&(dialog<0&&dialog>=Integer.MIN_VALUE||dialog>0&&dialog<=Integer.MAX_VALUE&&dialog!=owner);}
+    public static String privateSearchLabel(){return org.telegram.messenger.LocaleController.isRTL?"پیام‌های این دستگاه":"Messages on this device";}
     /** The encrypted native outbox is not connected yet; reject before native plaintext persistence. */
     public static boolean privateSendUnavailable(long dialog){return org.telegram.messenger.DialogObject.isUserDialog(dialog)||org.telegram.messenger.DialogObject.isEncryptedDialog(dialog);}
     public static boolean privateTextReady(int account,long dialog){
@@ -687,13 +690,18 @@ public final class VyrnBridge {
             TLRPC.TL_messages_search in=(TLRPC.TL_messages_search)request;VyrnBridge bridge=forAccount(account);
             pending.bridge=bridge;pending.sessionOrigin=UserConfig.getInstance(account).getClientUserId();pending.boundSession=bridge.repository.vault.cachedSession();
             final long chat=in.peer instanceof TLRPC.TL_inputPeerChat?in.peer.chat_id:0;
+            final long privatePeer=in.peer instanceof TLRPC.TL_inputPeerUser?in.peer.user_id:0;
             final String query=in.q;final int offset=in.offset_id,limit=in.limit;
-            final boolean supported=in.flags==0&&chat>0&&in.from_id==null&&in.saved_peer_id==null&&(in.saved_reaction==null||in.saved_reaction.isEmpty())&&in.top_msg_id==0&&in.filter instanceof TLRPC.TL_inputMessagesFilterEmpty&&in.min_date==0&&in.max_date==0&&in.add_offset==0&&in.max_id==0&&in.min_id==0&&in.hash==0&&offset>=0;
+            final boolean supported=in.flags==0&&(chat>0||privatePeer>0&&privatePeer!=pending.sessionOrigin)&&in.from_id==null&&in.saved_peer_id==null&&(in.saved_reaction==null||in.saved_reaction.isEmpty())&&in.top_msg_id==0&&in.filter instanceof TLRPC.TL_inputMessagesFilterEmpty&&in.min_date==0&&in.max_date==0&&in.add_offset==0&&in.max_id==0&&in.min_id==0&&in.hash==0&&offset>=0;
             execute(()->{try{synchronized(bridge.repository.vault.guard()){
                 if(pending.sessionOrigin==0||pending.boundSession==null||UserConfig.getInstance(account).getClientUserId()!=pending.sessionOrigin||!pending.boundSession.equals(bridge.repository.vault.cachedSession()))throw new SecurityException("account_changed");
                 String user=bridge.ids.remote("user",pending.sessionOrigin);pending.user=user;
                 if(!supported)throw new UnsupportedOperationException("search_options_unavailable");
                 if(query==null||query.isEmpty()){pending.complete(new TLRPC.TL_messages_messagesSlice(),null);return;}
+                if(query.codePointCount(0,query.length())>100||limit<1||limit>100)throw new IllegalArgumentException("invalid_search");
+                if(privatePeer>0){
+                    pending.complete(bridge.searchPrivate(user,pending.boundSession,privatePeer,query,offset,limit),null);return;
+                }
                 String conversation=bridge.ids.remote("conversation",chat),before=offset>0?bridge.ids.remote("message",offset):null;
                 Models.SearchPage page=bridge.repository.searchMessages(user,pending.boundSession,conversation,query,before,limit);
                 TLRPC.TL_messages_messagesSlice result=new TLRPC.TL_messages_messagesSlice();result.count=page.total;
@@ -957,6 +965,29 @@ public final class VyrnBridge {
     private String conversation(TLRPC.InputPeer peer) throws Exception{
         if(peer.chat_id!=0)return ids.remote("conversation",peer.chat_id);
         String id=privateConversations.get(peer.user_id);if(id==null){dialogs();id=privateConversations.get(peer.user_id);}if(id==null)throw new UnsupportedOperationException();return id;
+    }
+    /** Never serialize a private search query into HTTP or native persisted message text. */
+    private TLRPC.TL_messages_messagesSlice searchPrivate(String user,String session,long peerId,String query,int before,int limit) throws Exception {
+        String peer=ids.remote("user",peerId);requirePrivateOrigin(user,session,UserConfig.getInstance(account).getClientUserId(),peer,peerId);
+        TLRPC.TL_messages_messagesSlice result=new TLRPC.TL_messages_messagesSlice();JSONObject page;
+        try(SignalDeviceKeys keys=SignalDeviceKeys.openLocal(ApplicationLoader.applicationContext,repository)){
+            if(!user.equals(keys.user)||!session.equals(repository.vault.cachedSession()))throw new SecurityException("account_changed");
+            SignalMessages messages=new SignalMessages(keys);String conversation=messages.cachedConversation(peer);
+            if(conversation==null)return result;
+            page=messages.searchCached(peer,conversation,query,before,limit);
+        }
+        TLRPC.User target=MessagesController.getInstance(account).getUser(peerId),self=UserConfig.getInstance(account).getCurrentUser();
+        if(target==null||self==null)throw new SecurityException("private_search_peer_cache_missing");
+        result.users.add(target);result.users.add(self);result.count=page.getInt("total");
+        TLRPC.TL_peerUser destination=new TLRPC.TL_peerUser();destination.user_id=peerId;
+        org.json.JSONArray rows=page.getJSONArray("messages");
+        for(int i=0;i<rows.length();i++){
+            JSONObject row=rows.getJSONObject(i),metadata=ids.privateContext(row.getInt("ordinal"));
+            if(metadata==null||metadata.getInt("date")<=0||!row.getString("message").equals(metadata.getString("message"))||!row.getString("conversation").equals(metadata.getString("conversation"))||!row.getString("sender").equals(metadata.getString("sender"))||row.getInt("revision")!=metadata.getInt("revision"))throw new SecurityException("private_search_metadata_changed");
+            Models.Message value=new Models.Message(row.getString("message"),row.getString("sender"),"",metadata.getInt("date"),row.getInt("ordinal"),true,false,row.getString("conversation"),row.getInt("revision"),metadata.getInt("edited"));
+            result.messages.add(message(value,destination));
+        }
+        return result;
     }
     private TLRPC.Message message(Models.Message m,TLRPC.Peer peer){
         if(m.deleted)throw new IllegalStateException("tombstone_is_not_a_live_message");

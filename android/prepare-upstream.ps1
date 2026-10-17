@@ -903,13 +903,21 @@ Edit 'TMessagesProj/src/main/java/org/telegram/ui/ChatActivity.java' {
  $t=(& git -c "safe.directory=$($upstream.Replace('\','/'))" -C $upstream show "${pin}:TMessagesProj/src/main/java/org/telegram/ui/ChatActivity.java") -join "`n"
  $openSearch='    public void openSearchWithText(String text) {'
  if(!$t.Contains($openSearch)){throw 'Pinned chat search marker missing'}
- $t=$t.Replace($openSearch,$openSearch+"`n        if (dialog_id >= 0) { android.widget.Toast.makeText(getContext(), LocaleController.isRTL ? `"جست‌وجوی خصوصی روی دستگاه هنوز آماده نیست.`" : `"Private on-device search is not available yet.`", android.widget.Toast.LENGTH_LONG).show(); return; }")
+ $t=$t.Replace($openSearch,$openSearch+"`n        if (!xyz.eclipseofficial.vyrn.compat.VyrnBridge.chatSearchAvailable(currentAccount, dialog_id)) return;`n        if (dialog_id > 0) android.widget.Toast.makeText(getContext(), LocaleController.isRTL ? `"فقط پیام‌های موجود در این دستگاه جست‌وجو می‌شوند.`" : `"Only messages already on this device are searched.`", android.widget.Toast.LENGTH_LONG).show();")
  $searchIcon='searchIconItem.setContentDescription(LocaleController.getString(R.string.Search));'
  if(!$t.Contains($searchIcon)){throw 'Pinned chat search icon marker missing'}
- $t=$t.Replace($searchIcon,$searchIcon+"`n            searchIconItem.setEnabled(dialog_id < 0); searchIconItem.setAlpha(dialog_id < 0 ? 1f : .4f);")
+ $t=$t.Replace($searchIcon,$searchIcon+"`n            searchIconItem.setEnabled(xyz.eclipseofficial.vyrn.compat.VyrnBridge.chatSearchAvailable(currentAccount, dialog_id)); searchIconItem.setAlpha(searchIconItem.isEnabled() ? 1f : .4f);")
  $searchMenu='headerItem.lazilyAddSubItem(search, R.drawable.msg_search, LocaleController.getString(R.string.Search));'
  if(!$t.Contains($searchMenu)){throw 'Pinned chat search menu marker missing'}
- $t=$t.Replace($searchMenu,'if (dialog_id < 0) '+$searchMenu)
+ $t=$t.Replace($searchMenu,'if (xyz.eclipseofficial.vyrn.compat.VyrnBridge.chatSearchAvailable(currentAccount, dialog_id)) '+$searchMenu)
+ $hint='isSupportedTags() ? LocaleController.getString(R.string.SavedTagSearchHint) : LocaleController.getString(R.string.Search)'
+ if(!$t.Contains($hint)){throw 'Pinned search hint marker missing'}
+ $t=$t.Replace($hint,'dialog_id > 0 ? xyz.eclipseofficial.vyrn.compat.VyrnBridge.privateSearchLabel() : ('+$hint+')')
+ $hashtag='    public void openHashtagSearch(String hashtag, boolean forcePublic) {'
+ $hashtagSubmit='if (!TextUtils.isEmpty(searchingQuery) && (searchingQuery.startsWith("$") || searchingQuery.startsWith("#"))) {'
+ if(!$t.Contains($hashtag) -or !$t.Contains($hashtagSubmit)){throw 'Pinned hashtag search markers missing'}
+ $t=$t.Replace($hashtag,$hashtag+"`n        if (dialog_id > 0 || !xyz.eclipseofficial.vyrn.compat.VyrnBridge.globalSearchAvailable()) { openSearchWithText(hashtag); return; }")
+ $t=$t.Replace($hashtagSubmit,'if (dialog_id < 0 && xyz.eclipseofficial.vyrn.compat.VyrnBridge.globalSearchAvailable() && !TextUtils.isEmpty(searchingQuery) && (searchingQuery.startsWith("$") || searchingQuery.startsWith("#"))) {')
  foreach($button in @('searchUserButton','searchCalendarButton')){
   $click="$button.setOnClickListener("
   if(!$t.Contains($click)){throw 'Pinned search filter control marker missing'}

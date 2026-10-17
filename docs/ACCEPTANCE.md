@@ -1,5 +1,11 @@
 # Acceptance matrix
 
+## Native private cached-text search accepted locally — 2026-10-17
+
+This supersedes the preceding private-search UI gate for cached text: private ChatActivity search/count/page/navigation and volatile decrypted selected-cell display pass two independent84-check API30 runs with the dedicated local transport actually disconnected. Own-sent other-peer isolation, a clear device-cache scope label, no public hashtag history and actual native SQLite rows without private text/query are verified. The shared group search passes77 checks; the component cache phase passes24. See TEST_REPORT for hashes, failed-input attempts, fixture scope and process limits.
+
+This does not accept uncached/undecrypted history, full clear/no-match/error controls, session/deletion races, large-history performance or physical-device behavior. Global/media/sender/date search and the rest of the full objective remain unfinished. One emulator only; no phone automation or VPS change.
+
 ## Local private-cache search engine accepted, UI still gated — 2026-10-16
 
 The encrypted-cache search engine passes21 actual Signal/JNI/API30 checks for authenticated current-revision text, cache/session/peer/conversation isolation, cursor totals, literal/Persian matching, metadata-only output, invalid-network-token operation, deletion/edit/learned-expiry cleanup and shared display validation. It adds no HTTP query or plaintext index. Native private notification after actual process death also regresses successfully (27 preparation/12 external checks) on the same APKs. See TEST_REPORT for hashes, fixtures and limits; emulator shut down.

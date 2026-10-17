@@ -380,6 +380,27 @@ public final class SignalMessages {
         }
         return result;
     }
+    /** Resolve a peer only from authenticated local history, without fetching dialogs. */
+    public String cachedConversation(String peer) throws Exception {synchronized(keys.guard()){
+        keys.requireSession();id(peer);if(peer.equals(keys.user))throw new IllegalArgumentException("signal_private_peer_required");
+        return store.transaction(()->{
+            String conversation=null,participants=participants(peer).toString();
+            for(String name:store.valueNames("private-head")){
+                JSONObject head=load("private-head",name);if(head==null||head.optBoolean("deleted")||expired(head))continue;
+                String sender=id(head.getString("owner"));if(!sender.equals(peer)&&!sender.equals(keys.user))continue;
+                int revision=head.getInt("revision");JSONObject cached=load("private-cache",name+"_"+revision);if(cached==null)continue;
+                if(!participants.equals(cached.getJSONObject("inner").getJSONArray("participants").toString())){
+                    if(sender.equals(peer))throw new SecurityException("signal_display_context_changed");
+                    continue; // A valid own-sent row can belong to a different private peer.
+                }
+                String current=id(head.getString("conversation"));id(name);
+                if(displayRecord(peer,current,name,sender,revision,head.getInt("ordinal"),head)==null)continue;
+                if(conversation!=null&&!conversation.equals(current))throw new SecurityException("signal_private_conversation_changed");
+                conversation=current;
+            }
+            return conversation;
+        });
+    }}
     /** Offline search of already authenticated/decrypted history. Returns metadata, never text. */
     public JSONObject searchCached(String peer,String conversation,String query,int before,int limit) throws Exception {synchronized(keys.guard()){
         keys.requireSession();id(peer);id(conversation);

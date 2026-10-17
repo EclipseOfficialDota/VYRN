@@ -23,7 +23,9 @@ final class PrivateSearchIntegration {
                 messages[i]=(JSONObject)b.request("GET","/v1/messages/"+id,null,true);
             }
             check.verify(receiver.searchCached(alice.user,conversation,"lookup",0,10).getInt("total")==0,"private_search_undecrypted_ciphertext_has_no_hits");
+            check.verify(receiver.cachedConversation(alice.user)==null,"private_search_discovery_requires_authenticated_cached_history");
             for(int i=0;i<messages.length;i++)check.verify(texts[i].equals(receiver.receive(alice.user,conversation,messages[i])),"private_search_real_signal_receive_"+i);
+            check.verify(conversation.equals(receiver.cachedConversation(alice.user))&&receiver.cachedConversation(UUID.randomUUID().toString())==null,"private_search_discovery_bound_to_peer");
             JSONObject page=receiver.searchCached(alice.user,conversation,"LOOKUP",0,1);
             check.verify(page.getInt("total")==2&&page.getJSONArray("messages").length()==1&&messages[2].getString("id").equals(page.getJSONArray("messages").getJSONObject(0).getString("message")),"private_search_case_insensitive_total_and_newest_page");
             JSONObject second=receiver.searchCached(alice.user,conversation,"lookup",messages[2].getInt("ordinal"),1);
@@ -37,6 +39,7 @@ final class PrivateSearchIntegration {
             try{
                 b.vault.save(new JSONObject(original.toString()).put("access_token","invalid-offline-fixture").put("refresh_token","invalid-offline-fixture"));
                 try(SignalDeviceKeys offline=SignalDeviceKeys.openLocal(context,b)){
+                    check.verify(conversation.equals(new SignalMessages(offline).cachedConversation(alice.user)),"private_search_discovery_reopens_without_network");
                     check.verify(new SignalMessages(offline).searchCached(alice.user,conversation,"lookup",0,1).getInt("total")==2,"private_search_reopened_store_works_without_valid_network_tokens");
                 }
                 b.vault.save(new JSONObject(original.toString()).put("session_id",UUID.randomUUID().toString()));
