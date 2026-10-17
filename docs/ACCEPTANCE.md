@@ -1,5 +1,11 @@
 # Acceptance matrix
 
+## Backend authorization fixes active on VPS — 2026-10-17
+
+Source a05831a is deployed after a final full42-test API run, a real consistent snapshot/isolated database+media restore/candidate-start rehearsal and fresh-snapshot activation, all exit0. Schema stays9; exact image/binary, health, protected snapshot permissions, unchanged PostgreSQL start timestamp and loopback bindings were independently verified. Nine ordinary-account public HTTPS selection/replay/replace/clear/legacy/deletion/login/logout checks pass; synthetic message/session cleanup completed. The previous4476f2d image/release is retained for rollback. See TEST_REPORT and DEPLOYMENT for identities and precise limits.
+
+This supersedes the undeployed-backend statements in older checkpoints. Native reaction controls remain disabled pending complete Android wiring; no new APK or actual phone acceptance is claimed. Same-VPS snapshots are not external backups; Release signing, safe updates, broader device/lifecycle/load/security and the full objective remain unfinished.
+
 ## Stale membership/role/deadline after lock waits fixed locally — 2026-10-17
 
 Five actual PostgreSQL/HTTP failure cases were reproduced before the fix and pass afterward: removed/demoted users waiting on message/conversation locks and a message expiring during the wait. Shared membership and message-mutation helpers now read fresh authorization after locking in conversation-before-message order; expiry uses the database wall clock. Full41 top-level API tests/subtests pass, plus a subsequent actual mutation/removal lock-serialization test and full Go vet. See TEST_REPORT for logs, fixture limits and scope. This supersedes the named membership-wait prerequisite for those tested paths only.
