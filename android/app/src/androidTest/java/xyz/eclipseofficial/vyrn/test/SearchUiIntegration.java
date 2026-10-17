@@ -115,7 +115,26 @@ final class SearchUiIntegration {
             },check,"private_search_selected_result_decrypted_in_visible_native_cell");
             check.verify(!org.telegram.messenger.HashtagSearchController.getInstance(account).history.contains(query)&&!test.getTargetContext().getSharedPreferences("hashtag_search_history"+account,0).getAll().containsValue(query),"private_search_hashtag_not_saved_to_public_history");
         }
+        String missing=query+"Absent";
+        enter(test,field,missing,check,"search_no_match_query_entered");
+        await(test,()->missing.equals(org.telegram.messenger.MediaDataController.getInstance(account).getLastSearchQuery())&&(int)value(chat,"searchLastCount")==0&&org.telegram.messenger.MediaDataController.getInstance(account).getFoundMessageObjects().isEmpty(),check,"search_no_match_clears_previous_results");
+        await(test,()->org.telegram.messenger.LocaleController.getString(org.telegram.messenger.R.string.NoResult).contentEquals(((org.telegram.ui.Components.AnimatedTextView)value(chat,"searchCountText")).getText())&&!button(chat,org.telegram.ui.Components.chat.layouts.ChatActivitySideControlsButtonsLayout.BUTTON_SEARCH_UP).isEnabled()&&!button(chat,org.telegram.ui.Components.chat.layouts.ChatActivitySideControlsButtonsLayout.BUTTON_SEARCH_DOWN).isEnabled(),check,"search_no_match_visible_counter_and_navigation_disabled");
+        enter(test,field,query,check,"search_after_no_match_query_entered");
+        await(test,()->(int)value(chat,"searchLastCount")==24&&(int)value(chat,"searchLastIndex")==0&&chat.highlightMessageId==expected.get(23),check,"search_after_no_match_recovers_first_result");
+        check.verify(tap(test,field.getSearchClearButton()),"search_original_clear_control_touched");
+        await(test,()->field.getSearchField().length()==0&&"".equals(org.telegram.messenger.MediaDataController.getInstance(account).getLastSearchQuery())&&(int)value(chat,"searchLastCount")==0&&org.telegram.messenger.MediaDataController.getInstance(account).getFoundMessageObjects().isEmpty(),check,"search_clear_control_resets_without_enter");
+        enter(test,field,query,check,"search_after_clear_query_entered");
+        await(test,()->(int)value(chat,"searchLastCount")==24&&(int)value(chat,"searchLastIndex")==0&&chat.highlightMessageId==expected.get(23),check,"search_after_clear_recovers_first_result");
+        if(privatePeer)check.verify(!org.telegram.messenger.HashtagSearchController.getInstance(account).history.contains(missing)&&!test.getTargetContext().getSharedPreferences("hashtag_search_history"+account,0).getAll().containsValue(missing),"private_search_no_match_query_not_in_public_history");
         } finally {if(privatePeer)AuthUiIntegration.networkStep(test,LaunchActivity.instance,"online-retry",check);}
+    }
+    private static void enter(Instrumentation test,ActionBarMenuItem field,String text,AuthUiIntegration.Check check,String name) throws Exception {
+        boolean[] entered={false};test.runOnMainSync(()->{
+            field.getSearchField().requestFocus();
+            android.view.inputmethod.InputConnection input=field.getSearchField().onCreateInputConnection(new android.view.inputmethod.EditorInfo());
+            entered[0]=input!=null&&input.setSelection(0,field.getSearchField().length())&&input.commitText(text,1)&&text.contentEquals(field.getSearchField().getText());
+        });
+        check.verify(entered[0],name);test.sendKeyDownUpSync(android.view.KeyEvent.KEYCODE_ENTER);
     }
     private static TLRPC.TL_messages_search request(long chat,String query){TLRPC.TL_messages_search value=new TLRPC.TL_messages_search();TLRPC.TL_inputPeerChat peer=new TLRPC.TL_inputPeerChat();peer.chat_id=chat;value.peer=peer;value.q=query;value.limit=21;value.filter=new TLRPC.TL_inputMessagesFilterEmpty();return value;}
     private static Object value(Object object,String name){try{java.lang.reflect.Field field=object.getClass().getDeclaredField(name);field.setAccessible(true);return field.get(object);}catch(Exception failure){throw new IllegalStateException(name,failure);}}

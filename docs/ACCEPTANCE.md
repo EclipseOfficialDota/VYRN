@@ -1,5 +1,9 @@
 # Acceptance matrix
 
+## Native search clear/no-match/retry accepted locally — 2026-10-17
+
+An actual Search clear-control test first reproduced the stale24-result count after the field became empty. The shared original-chat listener now resets/cancels through the native search path. Group86/private94 recorded checks pass on the same fixed APKs, including localized no-match feedback, disabled no-result navigation, successful search after no-match, actual clear touch with zero results without Enter, and successful re-search after clear. Private checks run with local transport down and retain query/storage privacy assertions. See TEST_REPORT for before/after evidence and hashes. The one emulator was shut down; no phone or production acceptance is claimed. Transport-error UI, races and the full remaining objective are still open.
+
 ## Normal debug artifacts refreshed — 2026-10-17
 
 The accepted local private-cache UI changes are included in new public-HTTPS ARM64/ARM32/universal Debug APKs built from d9612d0. Packaging/signature/API26/TLS/ABI checks pass; artifact code markers confirm the new implementation is present. Sizes remain approximately123/108/159MB. See TEST_REPORT for exact hashes. Actual phone runtime, final Release signing and safe update installation remain pending; no backend rollout was required.

@@ -918,6 +918,16 @@ Edit 'TMessagesProj/src/main/java/org/telegram/ui/ChatActivity.java' {
  if(!$t.Contains($hashtag) -or !$t.Contains($hashtagSubmit)){throw 'Pinned hashtag search markers missing'}
  $t=$t.Replace($hashtag,$hashtag+"`n        if (dialog_id > 0 || !xyz.eclipseofficial.vyrn.compat.VyrnBridge.globalSearchAvailable()) { openSearchWithText(hashtag); return; }")
  $t=$t.Replace($hashtagSubmit,'if (dialog_id < 0 && xyz.eclipseofficial.vyrn.compat.VyrnBridge.globalSearchAvailable() && !TextUtils.isEmpty(searchingQuery) && (searchingQuery.startsWith("$") || searchingQuery.startsWith("#"))) {')
+ $searchText='        public void onTextChanged(EditText editText) {'
+ if(([regex]::Matches($t,[regex]::Escape($searchText))).Count -ne 1){throw 'Pinned chat search text listener changed'}
+ $t=$t.Replace($searchText,$searchText+@'
+
+            if (TextUtils.isEmpty(editText.getText()) && !TextUtils.isEmpty(searchingQuery) && searchingUserMessages == null && searchingChatMessages == null && searchingReaction == null && xyz.eclipseofficial.vyrn.compat.VyrnBridge.chatSearchAvailable(currentAccount, dialog_id)) {
+                searchingQuery = "";
+                searchingHashtag = null;
+                getMediaDataController().searchMessagesInChat(searchingQuery, dialog_id, mergeDialogId, classGuid, 0, threadMessageId, searchingUserMessages, searchingChatMessages, searchingReaction);
+            }
+'@)
  foreach($button in @('searchUserButton','searchCalendarButton')){
   $click="$button.setOnClickListener("
   if(!$t.Contains($click)){throw 'Pinned search filter control marker missing'}
