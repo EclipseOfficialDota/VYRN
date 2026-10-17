@@ -1,5 +1,9 @@
 # Acceptance matrix
 
+## Normal debug artifacts refreshed — 2026-10-17
+
+The accepted local private-cache UI changes are included in new public-HTTPS ARM64/ARM32/universal Debug APKs built from d9612d0. Packaging/signature/API26/TLS/ABI checks pass; artifact code markers confirm the new implementation is present. Sizes remain approximately123/108/159MB. See TEST_REPORT for exact hashes. Actual phone runtime, final Release signing and safe update installation remain pending; no backend rollout was required.
+
 ## Native private cached-text search accepted locally — 2026-10-17
 
 This supersedes the preceding private-search UI gate for cached text: private ChatActivity search/count/page/navigation and volatile decrypted selected-cell display pass two independent84-check API30 runs with the dedicated local transport actually disconnected. Own-sent other-peer isolation, a clear device-cache scope label, no public hashtag history and actual native SQLite rows without private text/query are verified. The shared group search passes77 checks; the component cache phase passes24. See TEST_REPORT for hashes, failed-input attempts, fixture scope and process limits.

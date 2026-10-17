@@ -1,3 +1,15 @@
+## Normal ARM debug APKs with private-cache search — 2026-10-17
+
+Source checkpoint d9612d0 was built with public HTTPS, ARM64+ARM32, no local test configuration, one worker/two JVM processors/3GB heap and emulator off. Build succeeded in3m43s, script exit0. verify-apks.ps1 exited0 for all three debug signatures, packages, API26 minimum, manifest/TLS policies, ABI and Signal packaging. DEX entries in the actual universal artifact contain the new private-search label, cache conversation discovery, native search method and metadata guard; this is not the preceding artifact. Actual ARM installation/runtime is not tested, and these remain Debug builds rather than a final signed Release or verified update installation.
+
+| APK | Bytes | SHA256 |
+| --- | ---: | --- |
+| VyrnApp-dev-arm64-v8a-debug.apk | 122510801 | 6500121acc3f558c6c5c8187d16837b65b336d97fe9c01ecd4cdcab6039ff18a |
+| VyrnApp-dev-armeabi-v7a-debug.apk | 108224187 | b87b06511ccd5bca4649e976ba1b51532175ef8cb80ef9d5247bff6820882325 |
+| VyrnApp-dev-universal-debug.apk | 158736298 | 0b39eb88d3576a1647b7d6bc220a0b8e64bbdec14147937cf1ef7f480372f619 |
+
+No backend, DNS, VPS, signing credential, TURN or offsite-backup change was needed. The full objective remains incomplete.
+
 ## Native private-cache search with disconnected transport — 2026-10-17
 
 Private ChatActivity search now dispatches through the same original search controls to authenticated Signal cache queries. Conversation discovery reads validated local history, including after reopening the encrypted store, without fetching dialogs or publishing keys. Own-sent cache rows for other peers cannot select a conversation. Native requests snapshot peer/query/cursor/limit and retain account/session guards; invalid options and self-dialog search fail closed. Results contain only bound metadata and require matching native identity/revision/date records. Existing volatile hydration supplies text to the native message cell; serialized message owners retain placeholders. The field says “Messages on this device” (with Persian translation); it does not claim uncached or undecrypted history. Sender/date filters remain disabled.
