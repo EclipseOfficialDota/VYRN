@@ -242,7 +242,12 @@ func recipients(ctx context.Context, tx pgx.Tx, conversation string) ([]string, 
 	return out, rows.Err()
 }
 func memberRole(ctx context.Context, tx pgx.Tx, conversation, user string) (kind, role string, err error) {
-	err = tx.QueryRow(ctx, `SELECT c.kind,m.role FROM conversations c JOIN members m ON m.conversation_id=c.id WHERE c.id=$1 AND m.user_id=$2 FOR UPDATE OF c`, conversation, user).Scan(&kind, &role)
+	err = tx.QueryRow(ctx, `SELECT kind FROM conversations WHERE id=$1 FOR UPDATE`, conversation).Scan(&kind)
+	if err != nil {
+		return
+	}
+	// A joined role read before waiting on the conversation lock can retain a revoked role.
+	err = tx.QueryRow(ctx, `SELECT role FROM members WHERE conversation_id=$1 AND user_id=$2`, conversation, user).Scan(&role)
 	return
 }
 

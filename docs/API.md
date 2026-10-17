@@ -6,6 +6,8 @@
 
 This candidate endpoint has been tested locally, not deployed. Native reaction selection/read-model/failure handling is not connected yet; the Android capability remains disabled until that work and rollout are verified.
 
+Shared message mutations lock the conversation before the message and read current membership/role/live deadline after those waits. Removal/demotion committed during a wait cannot authorize a later mutation; a message that expires while waiting is rejected. Membership-changing APIs hold the same conversation lock through commit. These backend guarantees have local PostgreSQL concurrency tests; they do not establish native reaction or production rollout acceptance.
+
 ## Resumable media uploads
 
 All four `/v1/media-uploads` endpoints require authentication. Upload UUIDs belong to the creating user and session; refresh of that session is allowed, another session returns409. This version completes only into group conversations; private completion returns422 `e2ee_required`.

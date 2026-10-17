@@ -1,5 +1,11 @@
 # Acceptance matrix
 
+## Stale membership/role/deadline after lock waits fixed locally — 2026-10-17
+
+Five actual PostgreSQL/HTTP failure cases were reproduced before the fix and pass afterward: removed/demoted users waiting on message/conversation locks and a message expiring during the wait. Shared membership and message-mutation helpers now read fresh authorization after locking in conversation-before-message order; expiry uses the database wall clock. Full41 top-level API tests/subtests pass, plus a subsequent actual mutation/removal lock-serialization test and full Go vet. See TEST_REPORT for logs, fixture limits and scope. This supersedes the named membership-wait prerequisite for those tested paths only.
+
+The backend candidate is not deployed and native reactions remain gated. No Android build/emulator/phone was needed; existing APKs remain unchanged. Additional lifecycle/concurrency/load/security and full objective requirements are not complete.
+
 ## Reaction prerequisite tested; native controls gated — 2026-10-17
 
 An atomic complete-selection API prerequisite now passes real PostgreSQL replacement/replay/clear/isolation/permission/rollback/concurrency tests. All39 top-level API tests plus subtests and full Go vet pass. The candidate route is not deployed. Native MessageObject reaction capability and the send-helper entry are disabled until selection, read models and failure recovery are wired. Actual live-message capability plus existing search checks pass group87/private95 on one API30 emulator; see TEST_REPORT for hashes and limits.

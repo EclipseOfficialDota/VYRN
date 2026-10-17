@@ -473,9 +473,27 @@ func (s *Server) mutateMessage(w http.ResponseWriter, r *http.Request, event str
 		return
 	}
 	defer tx.Rollback(ctx)
+	// Keep the same conversation-before-message lock order as batch deletion and membership changes.
+	// Read authorization and the live deadline in a fresh statement after these row locks.
+	// ponytail: serialize mutations per conversation; narrow locks after measured contention.
+	for _, statement := range []string{
+		`SELECT id::text FROM conversations WHERE id=(SELECT conversation_id FROM messages WHERE id=$1) FOR UPDATE`,
+		`SELECT id::text FROM messages WHERE id=$1 FOR UPDATE`,
+	} {
+		var locked string
+		err = tx.QueryRow(ctx, statement, id).Scan(&locked)
+		if err == pgx.ErrNoRows {
+			fail(w, 404, "not_found")
+			return
+		}
+		if err != nil {
+			s.internal(w)
+			return
+		}
+	}
 	var conversation, sender, role, kind string
 	var enc bool
-	err = tx.QueryRow(ctx, `SELECT msg.conversation_id::text,msg.sender_id::text,m.role,c.kind,msg.encrypted FROM messages msg JOIN conversations c ON c.id=msg.conversation_id JOIN members m ON m.conversation_id=msg.conversation_id WHERE msg.id=$1 AND m.user_id=$2 AND msg.deleted_at IS NULL AND (msg.expires_at IS NULL OR msg.expires_at>now()) FOR UPDATE OF msg`, id, current(r).UserID).Scan(&conversation, &sender, &role, &kind, &enc)
+	err = tx.QueryRow(ctx, `SELECT msg.conversation_id::text,msg.sender_id::text,m.role,c.kind,msg.encrypted FROM messages msg JOIN conversations c ON c.id=msg.conversation_id JOIN members m ON m.conversation_id=msg.conversation_id WHERE msg.id=$1 AND m.user_id=$2 AND msg.deleted_at IS NULL AND (msg.expires_at IS NULL OR msg.expires_at>clock_timestamp())`, id, current(r).UserID).Scan(&conversation, &sender, &role, &kind, &enc)
 	if err == pgx.ErrNoRows {
 		fail(w, 404, "not_found")
 		return
