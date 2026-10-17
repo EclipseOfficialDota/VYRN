@@ -6,6 +6,8 @@ An atomic complete-selection API prerequisite now passes real PostgreSQL replace
 
 Reactions are not complete. Native reaction UI, history/realtime models, failed/uncertain selection recovery, membership-wait races, deployment and multi-device acceptance remain open. Existing encrypted DraftVault was found during inspection; no new draft acceptance is claimed. Full objective remains active.
 
+The capability gate is included in normal public-HTTPS ARM64/ARM32/universal Debug artifacts rebuilt from d00def6; all packaging/signature/API26/TLS/ABI checks pass. Sizes remain approximately123/108/159MB; exact current hashes are in TEST_REPORT. This does not establish final Release, actual ARM runtime or safe-update acceptance.
+
 ## Native search clear/no-match/retry accepted locally — 2026-10-17
 
 An actual Search clear-control test first reproduced the stale24-result count after the field became empty. The shared original-chat listener now resets/cancels through the native search path. Group86/private94 recorded checks pass on the same fixed APKs, including localized no-match feedback, disabled no-result navigation, successful search after no-match, actual clear touch with zero results without Enter, and successful re-search after clear. Private checks run with local transport down and retain query/storage privacy assertions. See TEST_REPORT for before/after evidence and hashes. The one emulator was shut down; no phone or production acceptance is claimed. Transport-error UI, races and the full remaining objective are still open.

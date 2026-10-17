@@ -1,3 +1,15 @@
+## Normal ARM artifacts with unavailable-reaction gate — 2026-10-17
+
+Source d00def6 was built with public HTTPS, ARM64+ARM32 and no local test configuration. Build succeeded in3m48s, script exit0, emulator off, one worker/two JVM processors/3GB heap. verify-apks.ps1 exited0 for all3 debug signatures/packages/API26/ABI/manifest and TLS policies. No Java/emulator workers remained afterward. Verified childless completed-private-test RTK wrapper20368 was stopped after PASS/report/no-worker checks; this is cleanup, not a clean test-script-exit claim. The new selection endpoint remains undeployed and unused by this client; reactions remain gated until native implementation and rollout are accepted. No phone, release-signing, VPS, DNS, TURN or offsite-backup change occurred.
+
+| APK | Bytes | SHA256 |
+| --- | ---: | --- |
+| VyrnApp-dev-arm64-v8a-debug.apk | 122510781 | a06433e5207152f2748cad047ed8ca9a6ca102d0d417fb09de625c362467482e |
+| VyrnApp-dev-armeabi-v7a-debug.apk | 108224167 | 57cf6787989ed738fca8775ff15c4d9d8492d02cd7d6c958da6cc17d21b720b6 |
+| VyrnApp-dev-universal-debug.apk | 158736278 | dd1391202c19543c898e5d6ff848df2888a15eee2ce1853ef91f99a00d733f48 |
+
+These supersede the preceding normal artifact identities. Full objective remains active and incomplete.
+
 ## Atomic reaction-selection prerequisite and native capability gate — 2026-10-17
 
 The original SendMessagesHelper sends a complete selected-reactions array, while the existing backend accepted only individual add/remove mutations. A new PUT /v1/messages/{id}/reactions/selection replaces only the caller's selection in one existing message-locked transaction. Explicit empty arrays clear it; missing/null arrays, more than3 entries, duplicates, empty strings and values over16 code points are rejected. Other users' rows and the legacy routes remain intact. Event emission commits with the entire set. The contract is in API.md. It is not a completed native reaction feature or a production deployment.
