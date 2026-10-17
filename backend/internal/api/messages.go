@@ -500,6 +500,40 @@ func (s *Server) mutateMessage(w http.ResponseWriter, r *http.Request, event str
 }
 func (s *Server) react(w http.ResponseWriter, r *http.Request)   { s.reaction(w, r, true) }
 func (s *Server) unreact(w http.ResponseWriter, r *http.Request) { s.reaction(w, r, false) }
+func (s *Server) selectReactions(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		Emojis []string `json:"emojis"`
+	}
+	if !decode(w, r, &in) {
+		return
+	}
+	if in.Emojis == nil || len(in.Emojis) > 3 {
+		fail(w, 400, "invalid_reactions")
+		return
+	}
+	seen := make(map[string]bool, len(in.Emojis))
+	for _, emoji := range in.Emojis {
+		if utf8.RuneCountInString(emoji) < 1 || utf8.RuneCountInString(emoji) > 16 || seen[emoji] {
+			fail(w, 400, "invalid_reactions")
+			return
+		}
+		seen[emoji] = true
+	}
+	// The native client sends the complete selection; never expose a partially replaced set.
+	s.mutateMessage(w, r, "message.reaction", func(tx pgx.Tx, id, conversation, sender, role, kind string, enc bool) bool {
+		if _, err := tx.Exec(r.Context(), `DELETE FROM reactions WHERE message_id=$1 AND user_id=$2`, id, current(r).UserID); err != nil {
+			s.internal(w)
+			return false
+		}
+		for _, emoji := range in.Emojis {
+			if _, err := tx.Exec(r.Context(), `INSERT INTO reactions(message_id,user_id,emoji) VALUES($1,$2,$3)`, id, current(r).UserID, emoji); err != nil {
+				s.internal(w)
+				return false
+			}
+		}
+		return true
+	})
+}
 func (s *Server) reaction(w http.ResponseWriter, r *http.Request, add bool) {
 	var in struct {
 		Emoji string `json:"emoji"`

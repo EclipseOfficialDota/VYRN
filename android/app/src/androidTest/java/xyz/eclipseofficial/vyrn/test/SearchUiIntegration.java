@@ -64,6 +64,7 @@ final class SearchUiIntegration {
         test.runOnMainSync(()->{if(!LaunchActivity.getLastFragment().presentFragment(chat))throw new AssertionError("search_chat_present");});
         await(test,()->chat.getFragmentView()!=null&&!chat.getParentLayout().checkTransitionAnimation(),check,"search_original_chat_ready");
         AuthUiIntegration.handlePrompts(test,LaunchActivity.instance,check);
+        await(test,()->chat.messages.stream().anyMatch(row->row.getId()>0&&!row.isDateObject)&&chat.messages.stream().filter(row->row.getId()>0&&!row.isDateObject).noneMatch(org.telegram.messenger.MessageObject::canSetReaction),check,"native_chat_unwired_reaction_capability_disabled");
         if(privatePeer){
             await(test,()->!(Boolean)value(chat,"firstLoading")&&expected.stream().allMatch(id->chat.messages.stream().anyMatch(row->row.getId()==id)),check,"private_search_native_history_loaded_before_disconnect");
             await(test,()->VyrnBridge.privateTextReady(account,local),check,"private_search_native_device_ready");

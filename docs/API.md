@@ -1,5 +1,11 @@
 # VYRN Core API v1
 
+## Complete reaction selection
+
+`PUT /v1/messages/{id}/reactions/selection`, body `{"emojis":["👍","❤️"]}`, replaces only the authenticated user's complete selection in one message-locked transaction. An explicit empty array clears it. The array is required, non-null, at most3 distinct nonempty strings, each at most16 Unicode code points. This shares the existing reaction-string contract; it is not a Unicode emoji whitelist. Invalid input returns400 `invalid_reactions`, missing authentication401 and a nonmember/deleted/expired/unknown message404. Success is204. Other users' reactions are preserved. The existing `message.reaction` event is committed with the whole replacement; any database failure rolls back both the selection and event. Repeating a selection preserves row/count state but may emit another event. Legacy individual PUT/DELETE reactions remain supported.
+
+This candidate endpoint has been tested locally, not deployed. Native reaction selection/read-model/failure handling is not connected yet; the Android capability remains disabled until that work and rollout are verified.
+
 ## Resumable media uploads
 
 All four `/v1/media-uploads` endpoints require authentication. Upload UUIDs belong to the creating user and session; refresh of that session is allowed, another session returns409. This version completes only into group conversations; private completion returns422 `e2ee_required`.
@@ -58,6 +64,7 @@ All production endpoints require HTTPS. JSON uses UTF-8. Authentication is `Auth
 | PATCH `/v1/messages/{id}` | payload, encrypted, expected revision; stale edit returns 409 |
 | DELETE `/v1/messages/{id}` | replace message with a tombstone |
 | PUT/DELETE `/v1/messages/{id}/reactions` | emoji |
+| PUT `/v1/messages/{id}/reactions/selection` | complete own emojis array,0–3 distinct values; atomic replacement |
 | PUT `/v1/messages/{id}/receipt` | read boolean; delivered state is recorded |
 | PUT `/v1/messages/{id}/pin` | pinned boolean, permission checked |
 | GET/PUT `/v1/conversations/{id}/draft` | payload and encrypted flag |

@@ -636,6 +636,9 @@ Edit 'TMessagesProj/src/main/java/org/telegram/ui/PrivacyUsersActivity.java' {
 Edit 'TMessagesProj/src/main/java/org/telegram/messenger/SendMessagesHelper.java' {
  param($t)
  $t=(& git -c "safe.directory=$($upstream.Replace('\','/'))" -C $upstream show "${pin}:TMessagesProj/src/main/java/org/telegram/messenger/SendMessagesHelper.java") -join "`n"
+ $reaction='TLRPC.TL_messages_sendReaction req = new TLRPC.TL_messages_sendReaction();'
+ if(([regex]::Matches($t,[regex]::Escape($reaction))).Count -ne 1){throw 'Pinned reaction send marker changed'}
+ $t=$t.Replace($reaction,"if (!xyz.eclipseofficial.vyrn.compat.VyrnBridge.reactionsAvailable()) return;`n        "+$reaction)
  $mediaConstructor='new TLRPC.TL_messages_sendMedia()'
  if(!$t.Contains($mediaConstructor)){throw 'Pinned media request constructor missing'}
  $t=$t.Replace($mediaConstructor,'xyz.eclipseofficial.vyrn.compat.VyrnBridge.mediaRequest(currentAccount)')
@@ -856,6 +859,9 @@ foreach($aiFile in @('Components/CaptionPhotoViewer.java','Components/ChatAttach
 Edit 'TMessagesProj/src/main/java/org/telegram/messenger/MessageObject.java' {
  param($t)
  $t=(& git -c "safe.directory=$($upstream.Replace('\','/'))" -C $upstream show "${pin}:TMessagesProj/src/main/java/org/telegram/messenger/MessageObject.java") -join "`n"
+ $reaction='public boolean canSetReaction() {'
+ if(([regex]::Matches($t,[regex]::Escape($reaction))).Count -ne 1){throw 'Pinned reaction capability marker changed'}
+ $t=$t.Replace($reaction,$reaction+"`n        if (!xyz.eclipseofficial.vyrn.compat.VyrnBridge.reactionsAvailable()) return false;")
  $marker="        if (checkMediaExists) {`n            checkMediaExistance();`n        }"
  if(!$t.Contains($marker)){throw 'Pinned private text constructor marker missing'}
  foreach($edit in @('public static boolean canEditMessage(int currentAccount, TLRPC.Message message, TLRPC.Chat chat, boolean scheduled) {','public static boolean canEditMessageAnytime(int currentAccount, TLRPC.Message message, TLRPC.Chat chat) {')){

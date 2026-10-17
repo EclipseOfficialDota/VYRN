@@ -316,6 +316,8 @@ public final class VyrnBridge {
     public static void execute(Runnable task){IO.execute(task);}
     /** No VYRN backend implements the upstream AI compose/style protocol. */
     public static boolean aiEditorAvailable(){return false;}
+    /** Enable after native reaction selection, read models and failure recovery are connected. */
+    public static boolean reactionsAvailable(){return false;}
     public static boolean globalSearchAvailable(){return false;}
     public static boolean chatSearchAvailable(int account,long dialog){long owner=UserConfig.getInstance(account).getClientUserId();return owner>0&&(dialog<0&&dialog>=Integer.MIN_VALUE||dialog>0&&dialog<=Integer.MAX_VALUE&&dialog!=owner);}
     public static String privateSearchLabel(){return org.telegram.messenger.LocaleController.isRTL?"پیام‌های این دستگاه":"Messages on this device";}
