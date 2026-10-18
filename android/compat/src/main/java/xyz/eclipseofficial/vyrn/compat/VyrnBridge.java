@@ -991,10 +991,21 @@ public final class VyrnBridge {
         }
         return result;
     }
+    private static TLRPC.TL_messageReactions reactions(List<Models.Reaction> rows){
+        if(rows==null)throw new IllegalStateException("reaction_metadata_unavailable");
+        TLRPC.TL_messageReactions result=new TLRPC.TL_messageReactions();int chosen=0;
+        for(Models.Reaction row:rows){
+            TLRPC.TL_reactionCount count=new TLRPC.TL_reactionCount();TLRPC.TL_reactionEmoji emoji=new TLRPC.TL_reactionEmoji();emoji.emoticon=row.emoji;count.reaction=emoji;count.count=row.count;
+            if(row.mine){count.chosen=true;count.flags|=1;count.chosen_order=chosen++;}result.results.add(count);
+        }
+        return result;
+    }
     private TLRPC.Message message(Models.Message m,TLRPC.Peer peer){
         if(m.deleted)throw new IllegalStateException("tombstone_is_not_a_live_message");
         ids.observe(m);
+        // Reaction metadata remains separate from authenticated private text and edit revisions.
         TLRPC.TL_message out=new TLRPC.TL_message();String snapshot=editSnapshot(m);if(snapshot!=null){out.params=new HashMap<>();out.params.put(EDIT_SNAPSHOT,snapshot);}out.id=ids.message(m.id,m.ordinal);out.peer_id=peer;TLRPC.TL_peerUser sender=new TLRPC.TL_peerUser();sender.user_id=ids.local("user",m.sender);out.from_id=sender;out.flags|=256;out.date=m.date;out.message=m.deleted?"":m.encrypted?(org.telegram.messenger.LocaleController.isRTL?"این پیام در این دستگاه قابل نمایش نیست.":"This message cannot be displayed on this device."):m.text;out.out=sender.user_id==UserConfig.getInstance(account).getClientUserId();out.media=new TLRPC.TL_messageMediaEmpty();out.edit_date=m.editedDate;if(m.editedDate>0)out.flags|=TLRPC.MESSAGE_FLAG_EDITED;
+        if(m.reactions!=null){out.reactions=reactions(m.reactions);out.flags|=1<<20;}
         if(m.attachment!=null){
             Models.Attachment value=m.attachment;
             if(m.encrypted||value.encrypted||!m.conversation.equals(value.conversation))throw new SecurityException("media_message_changed");
@@ -1048,6 +1059,7 @@ public final class VyrnBridge {
         if(kind.equals("member.updated")||kind.equals("member.removed")){applyConversationEvent(eventUser,body.getString("conversation_id"),false);return;}
         if(!kind.startsWith("message."))return;
         String conversation=body.getString("conversation_id"),messageId=body.getString("message_id");Models.Message value=repository.messageForUser(eventUser,messageId);
+        if(!conversation.equals(value.conversation)||!messageId.equals(value.id))throw new SecurityException("message_event_context_changed");
         Models.Conversation model=conversationModel(conversation);List<Models.User> members=repository.members(conversation);TLRPC.Peer destination=peer(model,members);
         ArrayList<TLRPC.User> users=new ArrayList<>();for(Models.User user:members)users.add(mapUser(user));ArrayList<TLRPC.Chat> chats=new ArrayList<>();if(model.kind.equals("group"))chats.add(chat(model));
         ArrayList<TLRPC.Update> updates=new ArrayList<>();
@@ -1055,6 +1067,8 @@ public final class VyrnBridge {
             ids.observe(value);
             fenceDeleted(eventUser,destination.chat_id!=0?-destination.chat_id:destination.user_id,java.util.Collections.singletonList(ids.message(value.id,value.ordinal)));
             TL_update.TL_updateDeleteMessages update=new TL_update.TL_updateDeleteMessages();update.messages.add(ids.message(value.id,value.ordinal));update.pts=value.ordinal;update.pts_count=1;updates.add(update);
+        }else if(kind.equals("message.reaction")){
+            ids.observe(value);TL_update.TL_updateMessageReactions update=new TL_update.TL_updateMessageReactions();update.peer=destination;update.msg_id=ids.message(value.id,value.ordinal);update.reactions=reactions(value.reactions);update.updateUnreadState=false;updates.add(update);
         }else{
             TLRPC.Message mapped=message(value,destination);
             if(kind.equals("message.created")){TL_update.TL_updateNewMessage update=new TL_update.TL_updateNewMessage();update.message=mapped;update.pts=value.ordinal;update.pts_count=1;updates.add(update);}

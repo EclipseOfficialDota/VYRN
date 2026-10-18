@@ -34,12 +34,19 @@ public final class Models {
     }
     public static final class Message {
         public final Attachment attachment;
+        /** Null means unavailable metadata, an empty list means no reactions. */
+        public final List<Reaction> reactions;
         public final String id, sender, text, conversation;
         public final int date, ordinal, revision, editedDate;
         public final boolean encrypted, deleted;
         public Message(String id,String sender,String text,int date,int ordinal,boolean encrypted,boolean deleted){this(id,sender,text,date,ordinal,encrypted,deleted,null,0,0);}
         public Message(String id,String sender,String text,int date,int ordinal,boolean encrypted,boolean deleted,String conversation,int revision,int editedDate){this(id,sender,text,date,ordinal,encrypted,deleted,conversation,revision,editedDate,null);}
-        public Message(String id,String sender,String text,int date,int ordinal,boolean encrypted,boolean deleted,String conversation,int revision,int editedDate,Attachment attachment){this.id=id;this.sender=sender;this.text=text;this.date=date;this.ordinal=ordinal;this.encrypted=encrypted;this.deleted=deleted;this.conversation=conversation;this.revision=revision;this.editedDate=editedDate;this.attachment=attachment;}
+        public Message(String id,String sender,String text,int date,int ordinal,boolean encrypted,boolean deleted,String conversation,int revision,int editedDate,Attachment attachment){this(id,sender,text,date,ordinal,encrypted,deleted,conversation,revision,editedDate,attachment,null);}
+        public Message(String id,String sender,String text,int date,int ordinal,boolean encrypted,boolean deleted,String conversation,int revision,int editedDate,Attachment attachment,List<Reaction> reactions){this.id=id;this.sender=sender;this.text=text;this.date=date;this.ordinal=ordinal;this.encrypted=encrypted;this.deleted=deleted;this.conversation=conversation;this.revision=revision;this.editedDate=editedDate;this.attachment=attachment;this.reactions=reactions==null?null:java.util.Collections.unmodifiableList(new java.util.ArrayList<>(reactions));}
+    }
+    public static final class Reaction {
+        public final String emoji;public final int count;public final boolean mine;
+        public Reaction(String emoji,int count,boolean mine){this.emoji=emoji;this.count=count;this.mine=mine;}
     }
     public static final class SearchPage {
         public final List<Message> messages;public final int total;

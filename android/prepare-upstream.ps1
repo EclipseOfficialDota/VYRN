@@ -856,6 +856,14 @@ foreach($aiFile in @('Components/CaptionPhotoViewer.java','Components/ChatAttach
   $t
  }
 }
+Edit 'TMessagesProj/src/main/java/org/telegram/ui/Components/Reactions/ReactionsLayoutInBubble.java' {
+ param($t)
+ $t=(& git -c "safe.directory=$($upstream.Replace('\','/'))" -C $upstream show "${pin}:TMessagesProj/src/main/java/org/telegram/ui/Components/Reactions/ReactionsLayoutInBubble.java") -join "`n"
+ $image='                        imageReceiver.setImage(ImageLocation.getForDocument(r.center_icon), "40_40_lastreactframe", svgThumb, "webp", r, 1);'
+ $marker=$image+"`n                    }"
+ if(([regex]::Matches($t,[regex]::Escape($marker))).Count -ne 1){throw 'Pinned standard reaction image marker changed'}
+ $t.Replace($marker,$image+"`n                    } else {`n                        // Only the local glyph lookup drops the presentation selector; server identity stays exact.`n                        imageReceiver.setImageBitmap(org.telegram.messenger.Emoji.getEmojiBigDrawable(visibleReaction.emojicon.replace(`"\uFE0F`", `"`")));`n                    }")
+}
 Edit 'TMessagesProj/src/main/java/org/telegram/messenger/MessageObject.java' {
  param($t)
  $t=(& git -c "safe.directory=$($upstream.Replace('\','/'))" -C $upstream show "${pin}:TMessagesProj/src/main/java/org/telegram/messenger/MessageObject.java") -join "`n"

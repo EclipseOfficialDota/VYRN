@@ -1,0 +1,108 @@
+package xyz.eclipseofficial.vyrn.test;
+
+import android.app.Activity;
+import android.app.Instrumentation;
+import android.os.Bundle;
+import android.view.ViewGroup;
+import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
+import java.util.function.BooleanSupplier;
+import org.json.JSONArray;
+import org.json.JSONObject;
+import org.telegram.messenger.MessagesController;
+import org.telegram.messenger.MessagesStorage;
+import org.telegram.messenger.UserConfig;
+import org.telegram.tgnet.ConnectionsManager;
+import org.telegram.tgnet.TLRPC;
+import org.telegram.ui.ChatActivity;
+import org.telegram.ui.LaunchActivity;
+import org.telegram.ui.Cells.ChatMessageCell;
+import xyz.eclipseofficial.vyrn.compat.VyrnBridge;
+import xyz.eclipseofficial.vyrn.data.IdMap;
+import xyz.eclipseofficial.vyrn.data.RestRepository;
+import xyz.eclipseofficial.vyrn.domain.Models;
+
+/** Real native history/cells/SQLite and automatic WebSocket updates; no reaction selection UI claim. */
+final class ReactionReadIntegration {
+    static void run(Instrumentation test,Activity activity,JSONObject fixture,AuthUiIntegration.Check check) throws Exception {
+        AuthUiIntegration.registration(test,activity,fixture,check);
+        int account=UserConfig.selectedAccount;VyrnBridge bridge=VyrnBridge.forAccount(account);RestRepository repository=bridge.repository;
+        RestRepository other=SignalNetworkIntegration.register(test.getTargetContext(),fixture,9181,"-reaction-reader");
+        try{
+            String group=((JSONObject)repository.request("POST","/v1/conversations",new JSONObject().put("kind","group").put("title","Reaction read model").put("members",new JSONArray().put(other.me().id)),true)).getString("id");
+            String message=((JSONObject)other.request("POST","/v1/conversations/"+group+"/messages",new JSONObject().put("client_id",UUID.randomUUID().toString()).put("encrypted",false).put("payload",new JSONObject().put("text","Reaction read model")),true)).getString("id");
+            String path="/v1/messages/"+message+"/reactions";
+            other.request("PUT",path,new JSONObject().put("emoji","👍"),true);
+            repository.request("PUT",path,new JSONObject().put("emoji","❤️"),true);
+            Models.Message domain=repository.message(message);
+            check.verify(domain.reactions.size()==2&&domain.reactions.stream().filter(row->row.mine).count()==1&&domain.reactions.stream().anyMatch(row->row.mine&&row.emoji.equals("❤️")&&row.count==1),"reaction_repository_maps_viewer_specific_selection_and_counts");
+            JSONObject raw=(JSONObject)repository.request("GET","/v1/messages/"+message,null,true);
+            java.lang.reflect.Method parse=RestRepository.class.getDeclaredMethod("message",JSONObject.class);parse.setAccessible(true);
+            JSONArray[] invalid={new JSONArray().put(summary("👍",0,false)),new JSONArray().put(summary("👍",1,false)).put(summary("👍",1,true)),new JSONArray().put(summary("👍",1.5,false)),new JSONArray().put(summary("👍",1,true)).put(summary("❤️",1,true)).put(summary("🔥",1,true)).put(summary("🎉",1,true))};
+            for(int i=0;i<invalid.length;i++){
+                boolean denied=false;try{parse.invoke(repository,new JSONObject(raw.toString()).put("reactions",invalid[i]));}catch(java.lang.reflect.InvocationTargetException failure){denied=failure.getCause() instanceof SecurityException;}
+                check.verify(denied,"reaction_malformed_summary_rejected_"+i);
+            }
+            CompletableFuture<TLRPC.TL_messages_dialogs> dialogs=new CompletableFuture<>();
+            ConnectionsManager.getInstance(account).sendRequest(new TLRPC.TL_messages_getDialogs(),(value,error)->{if(error==null)dialogs.complete((TLRPC.TL_messages_dialogs)value);else dialogs.completeExceptionally(new AssertionError("reaction_dialogs"));});
+            TLRPC.TL_messages_dialogs loaded=dialogs.get(30,TimeUnit.SECONDS);
+            test.runOnMainSync(()->{MessagesController.getInstance(account).putUsers(loaded.users,false);MessagesController.getInstance(account).putChats(loaded.chats,false);});
+            long local;try(IdMap ids=new IdMap(test.getTargetContext(),account)){local=ids.local("conversation",group);}
+            await(test,()->LaunchActivity.getLastFragment()!=null&&!LaunchActivity.getLastFragment().getParentLayout().checkTransitionAnimation(),check,"reaction_parent_ready");
+            Bundle args=new Bundle();args.putLong("chat_id",local);ChatActivity chat=new ChatActivity(args);
+            test.runOnMainSync(()->{if(!LaunchActivity.getLastFragment().presentFragment(chat))throw new AssertionError("reaction_chat_present");});
+            await(test,()->chat.getFragmentView()!=null&&!chat.getParentLayout().checkTransitionAnimation()&&matches(message(chat,domain.ordinal),new String[]{"👍","❤️"},new int[]{1,1},new boolean[]{false,true}),check,"reaction_native_history_has_counts_and_own_selection");
+            AuthUiIntegration.handlePrompts(test,LaunchActivity.instance,check);
+            await(test,()->{
+                ViewGroup list=(ViewGroup)field(chat,"chatListView");
+                for(int i=0;i<list.getChildCount();i++)if(list.getChildAt(i) instanceof ChatMessageCell){
+                    ChatMessageCell cell=(ChatMessageCell)list.getChildAt(i);if(cell.getMessageObject()==null||cell.getMessageObject().getId()!=domain.ordinal)continue;
+                    boolean heart=false,thumb=false;
+                    for(var button:cell.reactionsLayoutInBubble.reactionButtons){
+                        TLRPC.ReactionCount row=(TLRPC.ReactionCount)field(button,"reactionCount");
+                        if(!(row.reaction instanceof TLRPC.TL_reactionEmoji)||button.imageReceiver.getStaticThumb()==null||button.realCount!=1)continue;
+                        String emoji=((TLRPC.TL_reactionEmoji)row.reaction).emoticon;if(emoji.equals("❤️"))heart=true;if(emoji.equals("👍"))thumb=true;
+                    }
+                    if(cell.isShown()&&cell.getHeight()>0&&heart&&thumb&&cell.reactionsLayoutInBubble.reactionButtons.size()==2)return true;
+                }
+                return false;
+            },check,"reaction_original_visible_cell_has_two_reaction_glyphs");
+            capture(test);
+            check.verify(stored(account,-local,domain.ordinal,new String[]{"👍","❤️"},new int[]{1,1},new boolean[]{false,true}),"reaction_actual_native_sqlite_serializes_selection_flags");
+            await(test,()->VyrnBridge.connectionState(account)==ConnectionsManager.ConnectionStateConnected,check,"reaction_automatic_stream_connected");
+            long cursor=bridge.syncCursor();
+            other.request("PUT",path,new JSONObject().put("emoji","❤️"),true);
+            await(test,()->matches(message(chat,domain.ordinal),new String[]{"👍","❤️"},new int[]{1,2},new boolean[]{false,true}),check,"reaction_other_account_update_reaches_native_chat");
+            other.request("DELETE",path,new JSONObject().put("emoji","👍"),true);
+            await(test,()->matches(message(chat,domain.ordinal),new String[]{"❤️"},new int[]{2},new boolean[]{true}),check,"reaction_other_account_removal_clears_old_native_count");
+            check.verify(stored(account,-local,domain.ordinal,new String[]{"❤️"},new int[]{2},new boolean[]{true}),"reaction_realtime_change_persisted_in_native_sqlite");
+            repository.request("DELETE",path,new JSONObject().put("emoji","❤️"),true);other.request("DELETE",path,new JSONObject().put("emoji","❤️"),true);
+            await(test,()->matches(message(chat,domain.ordinal),new String[]{},new int[]{},new boolean[]{}),check,"reaction_empty_server_summary_clears_native_reactions");
+            check.verify(stored(account,-local,domain.ordinal,new String[]{},new int[]{},new boolean[]{}),"reaction_empty_summary_persisted_in_native_sqlite");
+            check.verify(bridge.syncCursor()>cursor&&bridge.syncDead()==0,"reaction_updates_acknowledged_without_dead_events");
+            test.runOnMainSync(()->{TLRPC.Message current=message(chat,domain.ordinal);check.verify(current!=null&&current.message.equals("Reaction read model")&&current.edit_date==0,"reaction_metadata_updates_preserve_original_text_and_edit_date");});
+        }finally{try{other.request("POST","/v1/auth/logout",new JSONObject(),true);}finally{other.vault.clear();}}
+    }
+    private static JSONObject summary(String emoji,Number count,boolean mine) throws Exception {return new JSONObject().put("emoji",emoji).put("count",count).put("mine",mine);}
+    private static TLRPC.Message message(ChatActivity chat,int id){for(var value:chat.messages)if(value.getId()==id)return value.messageOwner;return null;}
+    private static boolean matches(TLRPC.Message message,String[] emojis,int[] counts,boolean[] mine){
+        if(message==null||message.reactions==null||message.reactions.results.size()!=emojis.length)return false;
+        for(int i=0;i<emojis.length;i++){boolean found=false;for(var row:message.reactions.results)if(row.reaction instanceof TLRPC.TL_reactionEmoji&&emojis[i].equals(((TLRPC.TL_reactionEmoji)row.reaction).emoticon)&&row.count==counts[i]&&row.chosen==mine[i]&&((row.flags&1)!=0)==mine[i])found=true;if(!found)return false;}return true;
+    }
+    private static boolean stored(int account,long dialog,int message,String[] emojis,int[] counts,boolean[] mine) throws Exception {
+        MessagesStorage storage=MessagesStorage.getInstance(account);CompletableFuture<Boolean> result=new CompletableFuture<>();
+        storage.getStorageQueue().postRunnable(()->{try{
+            org.telegram.SQLite.SQLiteCursor cursor=storage.getDatabase().queryFinalized("SELECT data FROM messages_v2 WHERE uid="+dialog+" AND mid="+message);
+            try{if(!cursor.next()){result.complete(false);return;}var data=cursor.byteBufferValue(0);try{result.complete(matches(TLRPC.Message.TLdeserialize(data,data.readInt32(true),true),emojis,counts,mine));}finally{data.reuse();}}finally{cursor.dispose();}
+        }catch(Throwable failure){result.completeExceptionally(failure);}});return result.get(20,TimeUnit.SECONDS);
+    }
+    private static Object field(Object object,String name){
+        for(Class<?> type=object.getClass();type!=null;type=type.getSuperclass())try{var field=type.getDeclaredField(name);field.setAccessible(true);return field.get(object);}catch(NoSuchFieldException inherited){/* Search the original button's parent class. */}catch(Exception failure){throw new IllegalStateException(name,failure);}
+        throw new IllegalStateException(name);
+    }
+    private static void await(Instrumentation test,BooleanSupplier condition,AuthUiIntegration.Check check,String name) throws Exception {
+        boolean[] ready={false};RuntimeException[] failure={null};long end=System.nanoTime()+TimeUnit.SECONDS.toNanos(30);while(!ready[0]&&System.nanoTime()<end){test.runOnMainSync(()->{try{ready[0]=condition.getAsBoolean();}catch(RuntimeException problem){failure[0]=problem;}});if(failure[0]!=null){capture(test);throw failure[0];}if(!ready[0])Thread.sleep(100);}if(!ready[0])capture(test);check.verify(ready[0],name);
+    }
+    private static void capture(Instrumentation test) throws Exception {var bitmap=test.getUiAutomation().takeScreenshot();if(bitmap!=null)try(var output=new java.io.FileOutputStream(new java.io.File(test.getTargetContext().getFilesDir(),"vyrn-test-reaction-read.png"))){bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG,100,output);}finally{bitmap.recycle();}}
+}

@@ -186,7 +186,13 @@ public final class RestRepository implements Models.Repository {
         int revision=m.getInt("revision");if(revision<1)throw new IllegalStateException("invalid_message_revision");
         Models.Attachment attachment=null;
         if(!encrypted&&m.isNull("deleted_at")&&!m.isNull("media_id")){attachment=attachmentForUser(vault.load().getString("user_id"),m.getString("media_id"));if(attachment.encrypted||!m.getString("conversation_id").equals(attachment.conversation))throw new SecurityException("media_message_changed");}
-        return new Models.Message(m.getString("id"),m.getString("sender_id"),encrypted?"":m.getJSONObject("payload").optString("text",m.getJSONObject("payload").optString("caption")),(int)Timestamps.parse(m.getString("created_at")).getEpochSecond(),ordinal,encrypted,!m.isNull("deleted_at"),m.getString("conversation_id"),revision,m.isNull("edited_at")?0:(int)Timestamps.parse(m.getString("edited_at")).getEpochSecond(),attachment);
+        JSONArray summaries=m.getJSONArray("reactions");List<Models.Reaction> reactions=new ArrayList<>();java.util.HashSet<String> seen=new java.util.HashSet<>();int chosen=0;
+        for(int i=0;i<summaries.length();i++){
+            JSONObject row=summaries.getJSONObject(i);String emoji=row.getString("emoji");long count=row.getLong("count");boolean mine=row.getBoolean("mine");
+            if(!(row.get("emoji") instanceof String)||!(row.get("mine") instanceof Boolean)||!(row.get("count") instanceof Integer||row.get("count") instanceof Long)||emoji.isEmpty()||emoji.codePointCount(0,emoji.length())>16||count<1||count>Integer.MAX_VALUE||!seen.add(emoji)||mine&&++chosen>3)throw new SecurityException("reaction_summary_changed");
+            reactions.add(new Models.Reaction(emoji,(int)count,mine));
+        }
+        return new Models.Message(m.getString("id"),m.getString("sender_id"),encrypted?"":m.getJSONObject("payload").optString("text",m.getJSONObject("payload").optString("caption")),(int)Timestamps.parse(m.getString("created_at")).getEpochSecond(),ordinal,encrypted,!m.isNull("deleted_at"),m.getString("conversation_id"),revision,m.isNull("edited_at")?0:(int)Timestamps.parse(m.getString("edited_at")).getEpochSecond(),attachment,reactions);
     }
     public Models.Message message(String id) throws Exception {return message((JSONObject)request("GET","/v1/messages/"+id,null,true));}
     public Models.Message editText(String user,String id,int revision,String text) throws Exception { synchronized(vault.guard()) {

@@ -1,5 +1,11 @@
 # Acceptance matrix
 
+## Native reaction display and read-model sync accepted locally — 2026-10-18
+
+Original group ChatActivity history/chips and native SQLite now carry actual counts and viewer-specific selection. A33-check API30 run proves both visible emoji glyphs, serialized chosen flags, automatic other-account WebSocket count/removal updates, empty-state persistence, unchanged message text/edit date and malformed-summary rejection. A real empty Unicode-heart glyph defect was reproduced in a screenshot and fixed in local asset lookup while retaining exact server identity. Final image was visually inspected; see TEST_REPORT for hashes, harness failures and limits. Shared group/private-search regressions pass87/95 on the same APKs.
+
+This is read-model/display acceptance with an API fixture as the second account, not native reaction selection or two Android clients. Controls remain gated; mutation UI/recovery, populated private reactions and cold/lifecycle/adversarial acceptance are still pending. No normal ARM rebuild, phone test or production change occurred at this checkpoint. Full objective remains active.
+
 ## Backend authorization fixes active on VPS — 2026-10-17
 
 Source a05831a is deployed after a final full42-test API run, a real consistent snapshot/isolated database+media restore/candidate-start rehearsal and fresh-snapshot activation, all exit0. Schema stays9; exact image/binary, health, protected snapshot permissions, unchanged PostgreSQL start timestamp and loopback bindings were independently verified. Nine ordinary-account public HTTPS selection/replay/replace/clear/legacy/deletion/login/logout checks pass; synthetic message/session cleanup completed. The previous4476f2d image/release is retained for rollback. See TEST_REPORT and DEPLOYMENT for identities and precise limits.
