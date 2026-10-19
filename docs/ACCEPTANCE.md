@@ -1,5 +1,11 @@
 # Acceptance matrix
 
+## Local text drafts and offline cold clearing accepted — 2026-10-19
+
+The native group/private composer and Back save drafts; a real new process restores both offline, and clearing plus another process death leaves them empty. API30 passes77 checks across36/20/21 stages with three distinct PIDs. Private draft preferences retain an owner-bound Keystore envelope and no plaintext/hex copy. Shared network-driver fixes also pass the107-check reaction regression. TEST_REPORT records exact hashes, failures and limits.
+
+This is local text-draft acceptance using original controls and existing persistence. Cross-device/cloud sync, reply/media drafts, locked-device/reboot/account races and arbitrary crash timing are unproven. No product-source or downloadable-APK change was required. The full objective remains active.
+
 ## Go1.26.9 production rollout accepted — 2026-10-19
 
 The clean28aa513/Go1.26.9 Linux binary is active after verified archive/image/executable hashes, a real isolated database/media restore rehearsal, a second fresh validated snapshot and Core-only activation with retained rollback. Schema9 and PostgreSQL's pre-rollout start timestamp are unchanged; Core/PostgreSQL, owner loopback and certificate-validated public health are healthy. Nine owned self-only account/message checks pass with message/session cleanup. Protected ports, temporary-resource cleanup and snapshot permissions were checked. Exact identities and limits are in DEPLOYMENT and TEST_REPORT.

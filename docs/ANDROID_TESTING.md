@@ -1,3 +1,15 @@
+## Local draft cold persistence and clearing — 2026-10-19
+
+With the local Core/TLS proxy ready and one owned emulator running, invoke the exact triple in PowerShell:
+
+```powershell
+./scripts/test-android-integration.ps1 -Serial emulator-5564 -Phases @('draft-cold-prepare','draft-cold-recover','draft-cold-confirm')
+```
+
+Preparation registers a disposable account and Signal peer, enters group/private drafts through the original composer input connection and leaves via Back. The driver actually force-stops between stages; recover/confirm remove the local TLS reverse mapping, restore drafts offline, clear through the composers and confirm absence after another cold process. Native draft models, serialized preferences, private encryption/plaintext exclusion and distinct PIDs are checked. Confirm restores transport and logs out the fixture peer. Run reaction-read on the same artifacts if the shared network-driver handling changes.
+
+The driver requires the entire triple, treats an already absent reverse listener as offline, and propagates the instrumentation process exit status instead of the last optional-file poll status. Test evidence is artifacts/android-drafts-cold-api30.json. These are text drafts on one device; cloud/other-device sync and locked-device/reply/media drafts are not covered. Keep the emulator off during builds and use only its verified project serial.
+
 ## Private Signal reaction chooser and fragment navigation — 2026-10-19
 
 Run `./scripts/test-android-integration.ps1 -Serial emulator-5564 -Phases private-search-ui` with the matching local-TLS app/test APKs and local Core/proxy ready. In addition to native reaction protocol and disconnected search, it now opens the original private ChatActivity, touches its supported message menu/chooser, saves, cancels, navigates Back/reopens and clears its own selection while preserving another participant. Ciphertext/revision/authenticated display and actual native storage are checked. Latest-message positioning uses native scrollToLastMessage as fixture setup; menu/dialog controls and Back use UI actions. Capture: app-private vyrn-test-private-reaction-picker.png; the exported artifact is private-reaction-picker-api30.png.

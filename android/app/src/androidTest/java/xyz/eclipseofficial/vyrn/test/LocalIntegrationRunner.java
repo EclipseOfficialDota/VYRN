@@ -61,7 +61,7 @@ public final class LocalIntegrationRunner extends Instrumentation {
         Thread diagnostic=null;
         boolean offlineChatReopen=phase.equals("chat-offline-reopen")||phase.equals("chat-failed-reopen")||phase.equals("chat-private-edit-cold")||phase.equals("chat-private-offline-view")||phase.equals("chat-private-deleted-offline-view")||phase.equals("chat-private-pending-reopen")||phase.equals("chat-private-composer-offline")||phase.equals("chat-private-composer-reopen");
         boolean coldMediaRecovery=phase.equals("read-cold-recover")||phase.equals("media-photo-chat-cold-recover")||phase.equals("media-voice-chat-cold-recover");
-        boolean boundedChatStartup=coldMediaRecovery||offlineChatReopen||phase.startsWith("chat-private-composer-")||phase.equals("chat-private-fixture-send")||phase.equals("chat-private-auto-recover")||phase.equals("chat-private-manual-retry")||phase.equals("chat-private-cancel-recover");
+        boolean boundedChatStartup=coldMediaRecovery||offlineChatReopen||phase.startsWith("chat-private-composer-")||phase.equals("chat-private-fixture-send")||phase.equals("chat-private-auto-recover")||phase.equals("chat-private-manual-retry")||phase.equals("chat-private-cancel-recover")||phase.equals("draft-cold-recover")||phase.equals("draft-cold-confirm");
         if(phase.startsWith("chat-")){
             diagnostic=new Thread(()->{try{Thread.sleep(50000);StringBuilder trace=new StringBuilder("stage=").append(stage).append('\n');for(java.util.Map.Entry<Thread,StackTraceElement[]> entry:Thread.getAllStackTraces().entrySet()){trace.append(entry.getKey().getName().equals("main")?"main":"worker").append(' ').append(entry.getKey().getState()).append('\n');for(StackTraceElement frame:entry.getValue())trace.append(frame).append('\n');}java.nio.file.Files.write(file("vyrn-test-thread-state.txt").toPath(),trace.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8));}catch(Exception ignored){}},"vyrn-test-diagnostic");diagnostic.setDaemon(true);diagnostic.start();
         }
@@ -88,7 +88,9 @@ public final class LocalIntegrationRunner extends Instrumentation {
             check(foreground!=null,"foreground_activity");
             stage="foreground_idle";
             if(!boundedChatStartup)waitForIdleSync();
-            if(phase.equals("private-search")){
+            if(phase.startsWith("draft-cold-")){
+                stage="draft_ui";DraftUiIntegration.run(this,foreground,read("vyrn-test-fixture.json"),phase,(condition,name)->{check(condition,name);passed.put(name);});
+            }else if(phase.equals("private-search")){
                 stage="private_search";PrivateSearchIntegration.run(getTargetContext(),read("vyrn-test-fixture.json"),(condition,name)->{check(condition,name);passed.put(name);});
             }else if(phase.equals("private-search-ui")){
                 stage="private_search_ui";PrivateSearchUiIntegration.run(this,foreground,read("vyrn-test-fixture.json"),(condition,name)->{check(condition,name);passed.put(name);});
