@@ -1,3 +1,9 @@
+## Private Signal reaction chooser and fragment navigation — 2026-10-19
+
+Run `./scripts/test-android-integration.ps1 -Serial emulator-5564 -Phases private-search-ui` with the matching local-TLS app/test APKs and local Core/proxy ready. In addition to native reaction protocol and disconnected search, it now opens the original private ChatActivity, touches its supported message menu/chooser, saves, cancels, navigates Back/reopens and clears its own selection while preserving another participant. Ciphertext/revision/authenticated display and actual native storage are checked. Latest-message positioning uses native scrollToLastMessage as fixture setup; menu/dialog controls and Back use UI actions. Capture: app-private vyrn-test-private-reaction-picker.png; the exported artifact is private-reaction-picker-api30.png.
+
+Display checks must use MessageObject.messageText, while requiring the serialized messageOwner.message field to exclude the private plaintext. Shared openChat setup is also covered by search-ui regression. This scenario does not kill the app, switch accounts or simulate a lost committed response. Keep Gradle and the one emulator sequential; no physical phone is involved.
+
 ## Group reaction menu and offline retry — 2026-10-19
 
 With the local Core/TLS proxy ready, build `./scripts/build-android.ps1 -Abis x86_64 -LocalTest -Instrumentation` while all project emulators are off. After Gradle exits, start only vyrn_api30 and run `./scripts/test-android-integration.ps1 -Serial emulator-5564 -Phases reaction-read`. The driver verifies the owned emulator, uses disposable local accounts, and stops/restores only its verified local TLS proxy for real offline/online transitions. Run private-search-ui afterward as the Signal/offline-search regression on the same artifacts.

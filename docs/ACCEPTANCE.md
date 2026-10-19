@@ -1,5 +1,11 @@
 # Acceptance matrix
 
+## Private chooser and chat-fragment reopen accepted locally — 2026-10-19
+
+API30 private-search-ui passes141 checks with real Signal ciphertext, actual menu/dialog save/cancel/clear, native Back/reopen, persisted own selection, preserved other-user reaction and unchanged server ciphertext/revision/authenticated display. Native SQLite plaintext exclusion and offline search remain covered. The stable chooser screenshot was visually inspected. Shared group-search regression passes87 on the same artifacts; TEST_REPORT records dates, hashes and the corrected plaintext-field harness assumption.
+
+This adds private chooser UI and fragment navigation acceptance with a second API fixture. It does not establish process death, committed-response-loss, account/session races or two-native-client reactions. No product APK rebuild or production operation occurred. The full objective remains active.
+
 ## Group reaction chooser and disconnected retry accepted locally — 2026-10-19
 
 The original message context menu now exposes a supported standard Unicode chooser. API30 reaction-read passes107 checks including actual menu/dialog touches, max-three enforcement, confirmed selection, Clear preserving another participant, real network failure with unchanged counts, reconciliation without replay and explicit retry. Private Signal/offline-search regression passes99 on the same APKs. See TEST_REPORT for hashes, timestamps, reproduced checkbox defect and harness failures.

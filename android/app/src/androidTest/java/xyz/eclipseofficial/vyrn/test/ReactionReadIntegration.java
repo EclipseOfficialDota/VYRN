@@ -151,10 +151,10 @@ final class ReactionReadIntegration {
     private static TLRPC.TL_messages_sendReaction selection(long chat,int id,String... values){TLRPC.TL_messages_sendReaction request=new TLRPC.TL_messages_sendReaction();request.peer=new TLRPC.TL_inputPeerChat();request.peer.chat_id=chat;request.msg_id=id;for(String value:values){TLRPC.TL_reactionEmoji reaction=new TLRPC.TL_reactionEmoji();reaction.emoticon=value;request.reaction.add(reaction);request.flags|=1;}return request;}
     static TLRPC.Updates request(int account,TLObject request) throws Exception {CompletableFuture<TLRPC.Updates> done=new CompletableFuture<>();ConnectionsManager.getInstance(account).sendRequest(request,(value,error)->{if(error==null)done.complete((TLRPC.Updates)value);else done.completeExceptionally(new AssertionError("native_reaction_request"));});return done.get(30,TimeUnit.SECONDS);}
     private static String error(int account,TLObject request) throws Exception {CompletableFuture<String> done=new CompletableFuture<>();ConnectionsManager.getInstance(account).sendRequest(request,(value,error)->done.complete(error==null?"":error.text));return done.get(30,TimeUnit.SECONDS);}
-    private static android.app.AlertDialog picker(ChatActivity chat) {
+    static android.app.AlertDialog picker(ChatActivity chat) {
         Object dialog=field(chat,"visibleDialog");return dialog instanceof android.app.AlertDialog?(android.app.AlertDialog)dialog:null;
     }
-    private static void chooser(Instrumentation test,ChatActivity chat,int id,AuthUiIntegration.Check check) throws Exception {
+    static void chooser(Instrumentation test,ChatActivity chat,int id,AuthUiIntegration.Check check) throws Exception {
         android.graphics.Rect bounds=new android.graphics.Rect();
         await(test,()->{
             ViewGroup list=(ViewGroup)field(chat,"chatListView");
@@ -172,13 +172,13 @@ final class ReactionReadIntegration {
         AuthUiIntegration.clickWindow(test,LaunchActivity.instance,xyz.eclipseofficial.vyrn.compat.ReactionUi.label(),check);
         await(test,()->picker(chat)!=null&&picker(chat).getListView()!=null&&picker(chat).getListView().isShown(),check,"reaction_picker_opened_from_original_message_menu");
     }
-    private static void row(Instrumentation test,ChatActivity chat,int index,AuthUiIntegration.Check check) throws Exception {
+    static void row(Instrumentation test,ChatActivity chat,int index,AuthUiIntegration.Check check) throws Exception {
         android.graphics.Rect bounds=new android.graphics.Rect();
         await(test,()->{android.app.AlertDialog dialog=picker(chat);if(dialog==null||dialog.getListView()==null)return false;android.widget.ListView list=dialog.getListView();android.view.View row=list.getChildAt(index-list.getFirstVisiblePosition());return screenBounds(row,bounds);},check,"reaction_picker_row_visible_"+index);
         check.verify(AuthUiIntegration.touch(test,bounds),"reaction_picker_row_touched_"+index);test.waitForIdleSync();Thread.sleep(250);
         test.runOnMainSync(()->{try{org.json.JSONObject diagnostic=new org.json.JSONObject().put("row",index).put("bounds",bounds.toShortString()).put("checked",picker(chat).getListView().getCheckedItemPositions().toString());java.nio.file.Files.write(new java.io.File(test.getTargetContext().getFilesDir(),"vyrn-test-reaction-touches.jsonl").toPath(),(diagnostic.toString()+"\n").getBytes(java.nio.charset.StandardCharsets.UTF_8),java.nio.file.StandardOpenOption.CREATE,java.nio.file.StandardOpenOption.APPEND);}catch(Exception failure){throw new IllegalStateException(failure);}});
     }
-    private static void button(Instrumentation test,ChatActivity chat,int which,AuthUiIntegration.Check check) throws Exception {
+    static void button(Instrumentation test,ChatActivity chat,int which,AuthUiIntegration.Check check) throws Exception {
         android.graphics.Rect bounds=new android.graphics.Rect();
         await(test,()->picker(chat)!=null&&screenBounds(picker(chat).getButton(which),bounds),check,"reaction_dialog_button_visible");
         check.verify(AuthUiIntegration.touch(test,bounds),"reaction_dialog_button_touched");test.waitForIdleSync();
@@ -189,12 +189,12 @@ final class ReactionReadIntegration {
     }
     static void apply(Instrumentation test,int account,TLRPC.Updates updates){test.runOnMainSync(()->MessagesController.getInstance(account).processUpdates(updates,false));}
     private static JSONObject summary(String emoji,Number count,boolean mine) throws Exception {return new JSONObject().put("emoji",emoji).put("count",count).put("mine",mine);}
-    private static TLRPC.Message message(ChatActivity chat,int id){for(var value:chat.messages)if(value.getId()==id)return value.messageOwner;return null;}
-    private static boolean matches(TLRPC.Message message,String[] emojis,int[] counts,boolean[] mine){
+    static TLRPC.Message message(ChatActivity chat,int id){for(var value:chat.messages)if(value.getId()==id)return value.messageOwner;return null;}
+    static boolean matches(TLRPC.Message message,String[] emojis,int[] counts,boolean[] mine){
         if(message==null||message.reactions==null||message.reactions.results.size()!=emojis.length)return false;
         for(int i=0;i<emojis.length;i++){boolean found=false;for(var row:message.reactions.results)if(row.reaction instanceof TLRPC.TL_reactionEmoji&&emojis[i].equals(((TLRPC.TL_reactionEmoji)row.reaction).emoticon)&&row.count==counts[i]&&row.chosen==mine[i]&&((row.flags&1)!=0)==mine[i])found=true;if(!found)return false;}return true;
     }
-    private static boolean stored(int account,long dialog,int message,String[] emojis,int[] counts,boolean[] mine) throws Exception {
+    static boolean stored(int account,long dialog,int message,String[] emojis,int[] counts,boolean[] mine) throws Exception {
         MessagesStorage storage=MessagesStorage.getInstance(account);CompletableFuture<Boolean> result=new CompletableFuture<>();
         storage.getStorageQueue().postRunnable(()->{try{
             org.telegram.SQLite.SQLiteCursor cursor=storage.getDatabase().queryFinalized("SELECT data FROM messages_v2 WHERE uid="+dialog+" AND mid="+message);
@@ -205,8 +205,9 @@ final class ReactionReadIntegration {
         for(Class<?> type=object.getClass();type!=null;type=type.getSuperclass())try{var field=type.getDeclaredField(name);field.setAccessible(true);return field.get(object);}catch(NoSuchFieldException inherited){/* Search the original button's parent class. */}catch(Exception failure){throw new IllegalStateException(name,failure);}
         throw new IllegalStateException(name);
     }
-    private static void await(Instrumentation test,BooleanSupplier condition,AuthUiIntegration.Check check,String name) throws Exception {
+    static void await(Instrumentation test,BooleanSupplier condition,AuthUiIntegration.Check check,String name) throws Exception {
         boolean[] ready={false};RuntimeException[] failure={null};long end=System.nanoTime()+TimeUnit.SECONDS.toNanos(30);while(!ready[0]&&System.nanoTime()<end){test.runOnMainSync(()->{try{ready[0]=condition.getAsBoolean();}catch(RuntimeException problem){failure[0]=problem;}});if(failure[0]!=null){capture(test);throw failure[0];}if(!ready[0])Thread.sleep(100);}if(!ready[0])capture(test);check.verify(ready[0],name);
     }
-    private static void capture(Instrumentation test) throws Exception {var bitmap=test.getUiAutomation().takeScreenshot();if(bitmap!=null)try(var output=new java.io.FileOutputStream(new java.io.File(test.getTargetContext().getFilesDir(),"vyrn-test-reaction-read.png"))){bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG,100,output);}finally{bitmap.recycle();}}
+    private static void capture(Instrumentation test) throws Exception {capture(test,"vyrn-test-reaction-read.png");}
+    static void capture(Instrumentation test,String filename) throws Exception {var bitmap=test.getUiAutomation().takeScreenshot();if(bitmap!=null)try(var output=new java.io.FileOutputStream(new java.io.File(test.getTargetContext().getFilesDir(),filename))){bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG,100,output);}finally{bitmap.recycle();}}
 }

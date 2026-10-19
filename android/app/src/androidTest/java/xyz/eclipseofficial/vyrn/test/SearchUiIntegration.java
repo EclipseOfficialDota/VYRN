@@ -57,14 +57,18 @@ final class SearchUiIntegration {
         check.verify("VYRN_FEATURE_UNAVAILABLE".equals(denied.get(20,TimeUnit.SECONDS)),"search_self_dialog_rejected_before_server_search");
         verifyUi(test,local,false,query,expected,check);
     }
-    static void verifyUi(Instrumentation test,long local,boolean privatePeer,String query,ArrayList<Integer> expected,AuthUiIntegration.Check check) throws Exception {
-        int account=UserConfig.selectedAccount;
+    static ChatActivity openChat(Instrumentation test,long local,boolean privatePeer,AuthUiIntegration.Check check) throws Exception {
         await(test,()->LaunchActivity.getLastFragment()!=null&&!LaunchActivity.getLastFragment().getParentLayout().checkTransitionAnimation(),check,"search_parent_transition_ready");
         Bundle args=new Bundle();args.putLong(privatePeer?"user_id":"chat_id",local);ChatActivity chat=new ChatActivity(args);current=chat;
         test.runOnMainSync(()->{if(!LaunchActivity.getLastFragment().presentFragment(chat))throw new AssertionError("search_chat_present");});
         await(test,()->chat.getFragmentView()!=null&&!chat.getParentLayout().checkTransitionAnimation(),check,"search_original_chat_ready");
         AuthUiIntegration.handlePrompts(test,LaunchActivity.instance,check);
         await(test,()->chat.messages.stream().anyMatch(row->row.getId()>0&&!row.isDateObject)&&chat.messages.stream().filter(row->row.getId()>0&&!row.isDateObject).noneMatch(org.telegram.messenger.MessageObject::canSetReaction),check,"native_chat_unwired_reaction_capability_disabled");
+        return chat;
+    }
+    static void verifyUi(Instrumentation test,long local,boolean privatePeer,String query,ArrayList<Integer> expected,AuthUiIntegration.Check check) throws Exception {
+        int account=UserConfig.selectedAccount;
+        ChatActivity chat=openChat(test,local,privatePeer,check);
         if(privatePeer){
             await(test,()->!(Boolean)value(chat,"firstLoading")&&expected.stream().allMatch(id->chat.messages.stream().anyMatch(row->row.getId()==id)),check,"private_search_native_history_loaded_before_disconnect");
             await(test,()->VyrnBridge.privateTextReady(account,local),check,"private_search_native_device_ready");

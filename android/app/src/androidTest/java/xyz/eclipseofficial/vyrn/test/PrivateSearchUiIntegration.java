@@ -14,11 +14,14 @@ import org.telegram.messenger.MessagesStorage;
 import org.telegram.messenger.UserConfig;
 import org.telegram.tgnet.ConnectionsManager;
 import org.telegram.tgnet.TLRPC;
+import org.telegram.ui.ChatActivity;
+import org.telegram.ui.LaunchActivity;
 import xyz.eclipseofficial.vyrn.compat.VyrnBridge;
 import xyz.eclipseofficial.vyrn.data.IdMap;
 import xyz.eclipseofficial.vyrn.data.RestRepository;
 import xyz.eclipseofficial.vyrn.data.SignalDeviceKeys;
 import xyz.eclipseofficial.vyrn.data.SignalMessages;
+import static xyz.eclipseofficial.vyrn.test.ReactionReadIntegration.*;
 
 /** Real Signal ciphertext, native history, Search/IME/navigation with transport disconnected. */
 final class PrivateSearchUiIntegration {
@@ -67,6 +70,7 @@ final class PrivateSearchUiIntegration {
             TLRPC.Updates cleared=ReactionReadIntegration.request(account,clear);
             check.verify(cleared.updates.size()==1&&cleared.updates.get(0) instanceof org.telegram.tgnet.tl.TL_update.TL_updateMessageReactions&&((org.telegram.tgnet.tl.TL_update.TL_updateMessageReactions)cleared.updates.get(0)).reactions.results.isEmpty(),"private_reaction_native_empty_selection_clears_confirmed_state");
             ReactionReadIntegration.apply(test,account,cleared);
+            verifyReactions(test,account,peer,latest,messageId,recipient,sender,before,query+" result 23",check);
             SearchUiIntegration.verifyUi(test,peer,true,query,expected,check);
             CompletableFuture<Integer> clean=new CompletableFuture<>();
             MessagesStorage storage=MessagesStorage.getInstance(account);
@@ -84,5 +88,38 @@ final class PrivateSearchUiIntegration {
         }finally{
             try{sender.request("POST","/v1/auth/logout",new JSONObject(),true);other.request("POST","/v1/auth/logout",new JSONObject(),true);}finally{sender.vault.clear();other.vault.clear();}
         }
+    }
+    private static void verifyReactions(Instrumentation test,int account,long peer,int ordinal,String id,RestRepository recipient,RestRepository sender,JSONObject before,String text,AuthUiIntegration.Check check) throws Exception {
+        String path="/v1/messages/"+id+"/reactions";
+        sender.request("PUT",path,new JSONObject().put("emoji","👍"),true);
+        ChatActivity chat=SearchUiIntegration.openChat(test,peer,true,check);
+        await(test,()->matches(message(chat,ordinal),new String[]{"👍"},new int[]{1},new boolean[]{false})&&authenticatedText(chat,ordinal,text),check,"private_reaction_chooser_authenticated_message_and_other_selection_loaded");
+        test.runOnMainSync(()->chat.scrollToLastMessage(true,false));Thread.sleep(650);
+        chooser(test,chat,ordinal,check);row(test,chat,1,check);
+        Thread.sleep(650);capture(test,"vyrn-test-private-reaction-picker.png");
+        button(test,chat,android.content.DialogInterface.BUTTON_POSITIVE,check);
+        await(test,()->matches(message(chat,ordinal),new String[]{"👍","❤️"},new int[]{1,1},new boolean[]{false,true})&&authenticatedText(chat,ordinal,text),check,"private_reaction_actual_menu_save_keeps_authenticated_text");
+        check.verify(stored(account,peer,ordinal,new String[]{"👍","❤️"},new int[]{1,1},new boolean[]{false,true}),"private_reaction_native_sqlite_persists_own_selection");
+        chooser(test,chat,ordinal,check);row(test,chat,2,check);
+        button(test,chat,android.content.DialogInterface.BUTTON_NEGATIVE,check);
+        await(test,()->picker(chat)==null&&matches(message(chat,ordinal),new String[]{"👍","❤️"},new int[]{1,1},new boolean[]{false,true}),check,"private_reaction_cancel_keeps_confirmed_ui_selection");
+        check.verify(recipient.message(id).reactions.stream().noneMatch(r->r.emoji.equals("🔥")),"private_reaction_cancel_does_not_mutate_server");
+        test.sendKeyDownUpSync(android.view.KeyEvent.KEYCODE_BACK);
+        await(test,()->LaunchActivity.getLastFragment()!=chat,check,"private_reaction_original_back_leaves_chat");
+        ChatActivity reopened=SearchUiIntegration.openChat(test,peer,true,check);
+        await(test,()->matches(message(reopened,ordinal),new String[]{"👍","❤️"},new int[]{1,1},new boolean[]{false,true})&&authenticatedText(reopened,ordinal,text),check,"private_reaction_reopened_native_chat_restores_confirmed_selection_and_text");
+        test.runOnMainSync(()->reopened.scrollToLastMessage(true,false));Thread.sleep(650);
+        chooser(test,reopened,ordinal,check);
+        button(test,reopened,android.content.DialogInterface.BUTTON_NEUTRAL,check);
+        await(test,()->matches(message(reopened,ordinal),new String[]{"👍"},new int[]{1},new boolean[]{false}),check,"private_reaction_actual_clear_preserves_other_participant");
+        JSONObject after=(JSONObject)recipient.request("GET","/v1/messages/"+id,null,true);
+        check.verify(after.getBoolean("encrypted")&&after.getInt("revision")==before.getInt("revision")&&after.getJSONObject("payload").toString().equals(before.getJSONObject("payload").toString()),"private_reaction_save_cancel_reopen_clear_preserve_ciphertext_and_revision");
+        sender.request("DELETE",path,new JSONObject().put("emoji","👍"),true);
+        await(test,()->matches(message(reopened,ordinal),new String[]{},new int[]{},new boolean[]{})&&authenticatedText(reopened,ordinal,text),check,"private_reaction_other_participant_clear_syncs_without_losing_text");
+        test.sendKeyDownUpSync(android.view.KeyEvent.KEYCODE_BACK);
+        await(test,()->LaunchActivity.getLastFragment()!=reopened,check,"private_reaction_leaves_chat_before_offline_search_regression");
+    }
+    private static boolean authenticatedText(ChatActivity chat,int id,String text) {
+        return chat.messages.stream().anyMatch(row->row.getId()==id&&row.messageText!=null&&text.contentEquals(row.messageText)&&!row.messageOwner.message.contains(text));
     }
 }
