@@ -1,5 +1,11 @@
 # Acceptance matrix
 
+## Go1.26.9 production rollout accepted — 2026-10-19
+
+The clean28aa513/Go1.26.9 Linux binary is active after verified archive/image/executable hashes, a real isolated database/media restore rehearsal, a second fresh validated snapshot and Core-only activation with retained rollback. Schema9 and PostgreSQL's pre-rollout start timestamp are unchanged; Core/PostgreSQL, owner loopback and certificate-validated public health are healthy. Nine owned self-only account/message checks pass with message/session cleanup. Protected ports, temporary-resource cleanup and snapshot permissions were checked. Exact identities and limits are in DEPLOYMENT and TEST_REPORT.
+
+This supersedes the earlier pending-server-upgrade statement. Same-VPS snapshots still do not satisfy offsite backup, and this rollout does not establish phone, reboot, signing, safe-update or complete UI/security acceptance. The full objective remains active.
+
 ## Private chooser and chat-fragment reopen accepted locally — 2026-10-19
 
 API30 private-search-ui passes141 checks with real Signal ciphertext, actual menu/dialog save/cancel/clear, native Back/reopen, persisted own selection, preserved other-user reaction and unchanged server ciphertext/revision/authenticated display. Native SQLite plaintext exclusion and offline search remain covered. The stable chooser screenshot was visually inspected. Shared group-search regression passes87 on the same artifacts; TEST_REPORT records dates, hashes and the corrected plaintext-field harness assumption.
