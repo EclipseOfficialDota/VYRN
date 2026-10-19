@@ -12,7 +12,7 @@ Source repository: [EclipseOfficialDota/VYRN](https://github.com/EclipseOfficial
 
 ## Local development on Windows
 
-Use PowerShell 7, Go 1.26.8, Git and Docker Desktop. The module requires the patched toolchain. No production credential is needed.
+Use PowerShell 7, Go 1.26.9, Git and Docker Desktop. The module requires the patched toolchain. No production credential is needed.
 
 ```powershell
 ./scripts/init-local.ps1
