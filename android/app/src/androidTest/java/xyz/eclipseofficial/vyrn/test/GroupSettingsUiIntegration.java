@@ -121,7 +121,7 @@ final class GroupSettingsUiIntegration {
         Rect bounds = new Rect(); test.runOnMainSync(() -> { View button = (View) field(editor, "doneButton"); int[] xy = new int[2]; button.getLocationOnScreen(xy); bounds.set(xy[0], xy[1], xy[0] + button.getWidth(), xy[1] + button.getHeight()); });
         check.verify(!bounds.isEmpty() && AuthUiIntegration.touch(test, bounds), "group_original_done_button_touched");
     }
-    private static Object field(Object object, String name) {
+    static Object field(Object object, String name) {
         for (Class<?> type = object.getClass(); type != null; type = type.getSuperclass()) try { var f = type.getDeclaredField(name); f.setAccessible(true); return f.get(object); } catch (NoSuchFieldException inherited) { } catch (Exception failure) { throw new IllegalStateException(name, failure); }
         throw new IllegalStateException(name);
     }

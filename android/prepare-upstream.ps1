@@ -1328,6 +1328,28 @@ Edit 'TMessagesProj/src/main/java/org/telegram/ui/ChatEditActivity.java' {
 '@
  $t.Replace($fields,$fields.Substring(0,$fields.Length-5)+"$gate`n    }")
 }
+Edit 'TMessagesProj/src/main/java/org/telegram/ui/GroupCreateActivity.java' {
+ param($t)
+ $t=(& git -c "safe.directory=$($upstream.Replace('\','/'))" -C $upstream show "${pin}:TMessagesProj/src/main/java/org/telegram/ui/GroupCreateActivity.java") -join "`n"
+ $marker="            if (!ChatObject.isChannel(chat)) {`n                LinearLayout linearLayout = new LinearLayout(getParentActivity());"
+ if(([regex]::Matches($t,[regex]::Escape($marker))).Count -ne 1){throw 'Pinned add-member history option changed'}
+ $t.Replace($marker,"            if (false) { // VYRN cannot forward previous history when inviting members.`n                LinearLayout linearLayout = new LinearLayout(getParentActivity());")
+}
+Edit 'TMessagesProj/src/main/java/org/telegram/ui/GroupCreateFinalActivity.java' {
+ param($t)
+ $t=(& git -c "safe.directory=$($upstream.Replace('\','/'))" -C $upstream show "${pin}:TMessagesProj/src/main/java/org/telegram/ui/GroupCreateFinalActivity.java") -join "`n"
+ $marker="        floatingButton.imageView.setImageResource(R.drawable.checkbig);`n`n        return fragmentView;"
+ if(([regex]::Matches($t,[regex]::Escape($marker))).Count -ne 1){throw 'Pinned group creation photo gate changed'}
+ $gate=@'
+        if (chatType == ChatObject.CHAT_TYPE_CHAT) {
+            // Group-photo requests are not implemented; keep the native placeholder.
+            avatarOverlay.setOnClickListener(null);
+            avatarOverlay.setClickable(false);
+            avatarEditor.setVisibility(View.GONE);
+        }
+'@
+ $t.Replace($marker,"        floatingButton.imageView.setImageResource(R.drawable.checkbig);`n$gate`n        return fragmentView;")
+}
 Get-ChildItem (Join-Path $upstream 'TMessagesProj/src/main/res') -Filter strings.xml -Recurse | ForEach-Object {
  $t=[IO.File]::ReadAllText($_.FullName)
  $t=$t -replace '(<string name="AppName">)[^<]+','$1Vyrn' -replace '(<string name="AppNameBeta">)[^<]+','$1Vyrn Dev'

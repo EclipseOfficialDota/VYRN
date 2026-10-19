@@ -4,7 +4,7 @@ Independent messaging for `eclipseofficial.xyz`, based on the actual Telegram An
 
 **Status: development in progress. This is not a production release.** See [test evidence](docs/TEST_REPORT.md) and [remaining acceptance criteria](docs/ACCEPTANCE.md). Private-chat encryption, complete Android feature wiring, production deployment and release artifacts must pass their gates before public use.
 
-Latest Android checkpoint: [basic-group roles and confirmed settings](docs/checkpoints/2026-10-19-group-settings.md), with72 group and107 reaction/receipt checks. These changes are in source and local-TLS test builds; the downloadable ARM prerelease below predates them.
+Latest Android checkpoint: [native group creation and invitations](docs/checkpoints/2026-10-19-group-create.md), with82 creation/invitation and72 settings/role checks. Current normal ARM64/ARMv7/Universal Debug APKs were rebuilt and verified locally; the published GitHub prerelease below is the older snapshot.
 
 ## Repository
 
@@ -12,7 +12,7 @@ Latest Android checkpoint: [basic-group roles and confirmed settings](docs/check
 
 Source repository: [EclipseOfficialDota/VYRN](https://github.com/EclipseOfficialDota/VYRN) (private). The generated `android/upstream/`, SDK/JDK, caches, local credentials and build artifacts are intentionally ignored. Main branches are `main`, `develop`; active work uses the `codex/` prefix.
 
-For testing, download the approximately159MB Universal ARM APK from the [Debug prerelease](https://github.com/EclipseOfficialDota/VYRN/releases/tag/debug-20261019). It includes ARM64 and ARMv7, requires Android8.0 or newer, and is not the final signed production Release. SHA256SUMS.txt accompanies the APK.
+The [published Debug prerelease](https://github.com/EclipseOfficialDota/VYRN/releases/tag/debug-20261019) is an earlier snapshot: approximately159MB Universal ARM APK, ARM64+ARMv7, Android8.0 or newer, with SHA256SUMS.txt. It predates the latest group changes. Current verified local APKs and their hashes are described in the checkpoint above; rebuild them using the Android commands below. These are not final signed production Release artifacts.
 
 ## Local development on Windows
 

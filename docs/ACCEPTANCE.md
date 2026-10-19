@@ -1,5 +1,9 @@
 # Acceptance matrix
 
+## Native group creation/invitations and refreshed normal Debug builds — 2026-10-19
+
+The original picker/search/result/Next/name/Create flow creates exactly one real group with the correct owner/member. The original chat header/Profile/Add Member path supports cancellation and confirmed invitation, reflected in server access and native membership. The unsupported default100-message forwarding option and group-photo picker are gated. This passes82 recorded checks (62 distinct names), followed by72 settings/role/offline-save regression checks on the same artifacts. Fresh normal ARM64, ARMv7 and Universal Debug APKs pass signature/manifest/ABI/TLS checks; Universal is158736298 bytes. See the [checkpoint report](checkpoints/2026-10-19-group-create.md) for exact hashes, limits and local files. The existing GitHub prerelease is the older snapshot. Full group/permission/lifecycle and physical-device/production acceptance remain outstanding.
+
 ## Basic-group administrator roles and confirmed title saving — 2026-10-19
 
 Native administrator flags now match supported backend roles and survive TL serialization. The original group editor keeps input/cache on failed offline save, retries explicitly and closes only after confirmation; an ordinary member cannot edit. Unsupported settings are hidden while supported administrator/member rows follow native role visibility. The group suite passes72 recorded checks (50 distinct names), followed by107 reaction/receipt regression checks on the same local-TLS artifacts. See the [checkpoint report](checkpoints/2026-10-19-group-settings.md) for hashes, failures and limits. Screen-driven group creation/member management, full permissions/settings, lifecycle races and production release remain outstanding. The downloadable ARM prerelease predates this change.
