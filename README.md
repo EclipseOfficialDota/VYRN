@@ -10,6 +10,8 @@ Independent messaging for `eclipseofficial.xyz`, based on the actual Telegram An
 
 Source repository: [EclipseOfficialDota/VYRN](https://github.com/EclipseOfficialDota/VYRN) (private). The generated `android/upstream/`, SDK/JDK, caches, local credentials and build artifacts are intentionally ignored. Main branches are `main`, `develop`; active work uses the `codex/` prefix.
 
+For testing, download the approximately159MB Universal ARM APK from the [Debug prerelease](https://github.com/EclipseOfficialDota/VYRN/releases/tag/debug-20261019). It includes ARM64 and ARMv7, requires Android8.0 or newer, and is not the final signed production Release. SHA256SUMS.txt accompanies the APK.
+
 ## Local development on Windows
 
 Use PowerShell 7, Go 1.26.9, Git and Docker Desktop. The module requires the patched toolchain. No production credential is needed.

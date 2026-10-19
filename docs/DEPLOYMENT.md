@@ -1,5 +1,11 @@
 # Deployment runbook
 
+## Source security update awaiting server activation — 2026-10-19
+
+GitHub main now requires Go1.26.9 and pins the official golang:1.26.9-alpine image to sha256:3082400e369fa24d5fc60bca20edab3f6d604e0c5a690ec66b295eff4dd87ade. The initial GitHub vulnerability scan found eight reachable standard-library advisories in Go1.26.8; all report Go1.26.9 as fixed. Source commit b3241d130c79952ad8e74e8f9b673dc596ee9930 passes [CI](https://github.com/EclipseOfficialDota/VYRN/actions/runs/39291176819), including PostgreSQL/race tests, govulncheck and the production-container build. See the [Go advisory](https://pkg.go.dev/vuln/GO-2026-6617).
+
+This is a source/build update. It has not yet replaced the live a05831a release described below; that server still needs a Go1.26.9 rebuild, restore rehearsal and controlled activation. Do not treat GitHub CI or the Android prerelease as evidence of a server upgrade.
+
 Status (2026-10-17): **Core source a05831a is active with fresh authorization after lock waits and atomic reaction-selection support. Schema remains at nine migrations; Core/PostgreSQL and authenticated public HTTPS checks pass. Native reaction controls remain gated. Physical-phone and final Release acceptance remain pending.** See [Persian owner guide](OWNER_GUIDE.fa.md).
 
 ## Active deployment
