@@ -1286,6 +1286,48 @@ Edit 'TMessagesProj/src/main/java/org/telegram/ui/SessionsActivity.java' {
  }
  $t
 }
+Edit 'TMessagesProj/src/main/java/org/telegram/ui/ChatEditActivity.java' {
+ param($t)
+ $t=(& git -c "safe.directory=$($upstream.Replace('\','/'))" -C $upstream show "${pin}:TMessagesProj/src/main/java/org/telegram/ui/ChatEditActivity.java") -join "`n"
+ $done="        donePressed = true;`n        if (currentUser != null) {"
+ $fields="        if (suggestedCell != null) {`n            updateSuggestedCell(animated);`n        }`n    }"
+ foreach($marker in @($done,$fields)){if(([regex]::Matches($t,[regex]::Escape($marker))).Count -ne 1){throw 'Pinned group settings marker changed'}}
+ $save=@'
+        if (currentChat instanceof TLRPC.TL_chat) {
+            if (!ChatObject.canChangeChatInfo(currentChat)) return;
+            String title = nameTextView.getText().toString();
+            if (title.equals(currentChat.title)) { finishFragment(); return; }
+            donePressed = true;
+            progressDialog = new AlertDialog(getParentActivity(), AlertDialog.ALERT_TYPE_SPINNER);
+            showDialog(progressDialog);
+            progressDialog.setCancelable(false);
+            progressDialog.setCanceledOnTouchOutside(false);
+            xyz.eclipseofficial.vyrn.compat.VyrnBridge.saveGroupTitle(this, chatId, title, accepted -> {
+                if (progressDialog != null) { progressDialog.dismiss(); progressDialog = null; }
+                donePressed = false;
+                if (accepted) finishFragment();
+            });
+            return;
+        }
+'@
+ $t=$t.Replace($done,"$save`n$done")
+ $gate=@'
+        // Only server-backed basic-group settings are interactive.
+        if (currentChat instanceof TLRPC.TL_chat) {
+            boolean editable = ChatObject.canChangeChatInfo(currentChat);
+            nameTextView.setEnabled(editable);
+            nameTextView.getEditText().setFocusable(editable);
+            if (doneButton != null) doneButton.setEnabled(editable);
+            View[] unavailable = {settingsContainer, typeEditContainer, settingsTopSectionCell,
+                settingsSectionCell, reactionsCell, blockCell, inviteLinksCell, memberRequestsCell,
+                logCell, deleteContainer, deleteInfoCell, stickersContainer, stickersInfoCell,
+                balanceContainer, statsAndBoosts, channelAffiliateProgramsCell, welcomeMessagesCell,
+                communityCell, communityLinkView, communityInfoCell, communityUnlinkCell, communityGapView};
+            for (View view : unavailable) if (view != null) { view.setVisibility(View.GONE); view.setEnabled(false); }
+        }
+'@
+ $t.Replace($fields,$fields.Substring(0,$fields.Length-5)+"$gate`n    }")
+}
 Get-ChildItem (Join-Path $upstream 'TMessagesProj/src/main/res') -Filter strings.xml -Recurse | ForEach-Object {
  $t=[IO.File]::ReadAllText($_.FullName)
  $t=$t -replace '(<string name="AppName">)[^<]+','$1Vyrn' -replace '(<string name="AppNameBeta">)[^<]+','$1Vyrn Dev'

@@ -989,6 +989,12 @@ public final class VyrnBridge {
     }
     private TLRPC.Chat chat(Models.Conversation c){
         TLRPC.TL_chat chat=new TLRPC.TL_chat();chat.id=ids.local("conversation",c.id);chat.title=c.title;chat.photo=new TLRPC.TL_chatPhotoEmpty();chat.participants_count=c.members;chat.creator=c.role.equals("owner");chat.version=1;chat.date=(int)(System.currentTimeMillis()/1000);
+        if(chat.creator||"admin".equals(c.role)){
+            chat.admin_rights=new TLRPC.TL_chatAdminRights();chat.flags|=1<<14;
+            chat.admin_rights.change_info=chat.admin_rights.delete_messages=chat.admin_rights.ban_users=chat.admin_rights.invite_users=true;
+            chat.admin_rights.add_admins=chat.creator;
+            chat.admin_rights.flags=1|8|16|32|(chat.creator?512:0);
+        }
         // Modern native chats treat absent default rights as no member sending permission.
         chat.default_banned_rights=new TLRPC.TL_chatBannedRights();chat.flags|=1<<18;
         TLRPC.TL_chatBannedRights rights=chat.default_banned_rights;
@@ -996,6 +1002,24 @@ public final class VyrnBridge {
         rights.send_media=rights.send_docs=rights.send_photos=rights.send_voices=false;
         rights.change_info=rights.invite_users=rights.pin_messages=true;
         return chat;
+    }
+    /** The editor closes only after a confirmed native update for its original account/session. */
+    public static void saveGroupTitle(org.telegram.ui.ActionBar.BaseFragment fragment,long chatId,String title,java.util.function.Consumer<Boolean> complete){
+        int account=fragment.getCurrentAccount();long owner=UserConfig.getInstance(account).getClientUserId();
+        TokenVault vault=forAccount(account).repository.vault;String session=vault.cachedSession();
+        if(owner==0||session==null||isLoggingOut(account)){complete.accept(false);return;}
+        TLRPC.TL_messages_editChatTitle request=new TLRPC.TL_messages_editChatTitle();request.chat_id=chatId;request.title=title;
+        org.telegram.tgnet.ConnectionsManager.getInstance(account).sendRequest(request,(response,error)->AndroidUtilities.runOnUIThread(()->{
+            boolean origin=owner==UserConfig.getInstance(account).getClientUserId()&&session.equals(vault.cachedSession())&&!isLoggingOut(account);
+            boolean accepted=origin&&error==null&&response instanceof TLRPC.Updates;
+            if(accepted)MessagesController.getInstance(account).processUpdates((TLRPC.Updates)response,false);
+            boolean visible=origin&&UserConfig.selectedAccount==account&&fragment.isLastFragment()&&fragment.getParentActivity()!=null&&!fragment.getParentActivity().isFinishing()&&!fragment.getParentActivity().isDestroyed();
+            if(visible&&!accepted){
+                boolean fa="fa".equals(java.util.Locale.getDefault().getLanguage());
+                android.widget.Toast.makeText(fragment.getParentActivity(),fa?"ذخیره تأیید نشد؛ اتصال و مجوز خود را بررسی و دوباره تلاش کنید.":"Save was not confirmed. Check your connection and permissions, then retry.",android.widget.Toast.LENGTH_LONG).show();
+            }
+            complete.accept(visible&&accepted);
+        }));
     }
     private String conversation(TLRPC.InputPeer peer) throws Exception{
         if(peer.chat_id!=0)return ids.remote("conversation",peer.chat_id);

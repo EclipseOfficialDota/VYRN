@@ -1,5 +1,9 @@
 # Acceptance matrix
 
+## Basic-group administrator roles and confirmed title saving — 2026-10-19
+
+Native administrator flags now match supported backend roles and survive TL serialization. The original group editor keeps input/cache on failed offline save, retries explicitly and closes only after confirmation; an ordinary member cannot edit. Unsupported settings are hidden while supported administrator/member rows follow native role visibility. The group suite passes72 recorded checks (50 distinct names), followed by107 reaction/receipt regression checks on the same local-TLS artifacts. See the [checkpoint report](checkpoints/2026-10-19-group-settings.md) for hashes, failures and limits. Screen-driven group creation/member management, full permissions/settings, lifecycle races and production release remain outstanding. The downloadable ARM prerelease predates this change.
+
 ## Local text drafts and offline cold clearing accepted — 2026-10-19
 
 The native group/private composer and Back save drafts; a real new process restores both offline, and clearing plus another process death leaves them empty. API30 passes77 checks across36/20/21 stages with three distinct PIDs. Private draft preferences retain an owner-bound Keystore envelope and no plaintext/hex copy. Shared network-driver fixes also pass the107-check reaction regression. TEST_REPORT records exact hashes, failures and limits.

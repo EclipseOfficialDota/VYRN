@@ -4,6 +4,8 @@ Independent messaging for `eclipseofficial.xyz`, based on the actual Telegram An
 
 **Status: development in progress. This is not a production release.** See [test evidence](docs/TEST_REPORT.md) and [remaining acceptance criteria](docs/ACCEPTANCE.md). Private-chat encryption, complete Android feature wiring, production deployment and release artifacts must pass their gates before public use.
 
+Latest Android checkpoint: [basic-group roles and confirmed settings](docs/checkpoints/2026-10-19-group-settings.md), with72 group and107 reaction/receipt checks. These changes are in source and local-TLS test builds; the downloadable ARM prerelease below predates them.
+
 ## Repository
 
 `android/` contains the pinned upstream descriptor, reproducible preparation script, app module and compatibility/domain/repository layers. `backend/` contains the Go service and PostgreSQL migrations. `admin/` is VYRN Control. `deployment/` contains Compose, Caddy, inactive TURN configuration and backup timers.
