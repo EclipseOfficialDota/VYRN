@@ -8,7 +8,7 @@ Independent messaging for `eclipseofficial.xyz`, based on the actual Telegram An
 
 `android/` contains the pinned upstream descriptor, reproducible preparation script, app module and compatibility/domain/repository layers. `backend/` contains the Go service and PostgreSQL migrations. `admin/` is VYRN Control. `deployment/` contains Compose, Caddy, inactive TURN configuration and backup timers.
 
-The generated `android/upstream/`, SDK/JDK, caches, local credentials and build artifacts are intentionally ignored. The user-selected root is `C:/Users/PC/Documents/ChatGPT/Telegram/VYRN`. Main branches are `main`, `develop`; active work uses `codex/initial-implementation`. No remote is configured.
+Source repository: [EclipseOfficialDota/VYRN](https://github.com/EclipseOfficialDota/VYRN) (private). The generated `android/upstream/`, SDK/JDK, caches, local credentials and build artifacts are intentionally ignored. Main branches are `main`, `develop`; active work uses the `codex/` prefix.
 
 ## Local development on Windows
 
@@ -40,9 +40,9 @@ Upstream pin: `f2908b14133bbffbf7ab04f641ecb5bfaf533242` (12.10.6 / 7112). Initi
 ./scripts/verify-apks.ps1
 ```
 
-This builds an early development client. The API endpoint defaults to `https://api.vyrn.eclipseofficial.xyz`; it will not connect until a valid HTTPS backend exists. API URL overrides must be HTTPS hostnames. Debug signing does not imply release readiness. See [the implementation matrix](docs/ACCEPTANCE.md) for supported requests and gaps.
+This builds a development client. The API endpoint defaults to the deployed HTTPS backend at `https://api.vyrn.eclipseofficial.xyz`. API URL overrides must be HTTPS hostnames. Debug signing does not imply release readiness. See [the implementation matrix](docs/ACCEPTANCE.md) for supported requests and gaps.
 
-Verified ARM64, ARMv7 and Universal Debug APKs are in `artifacts/`; hashes and manifest evidence are in `artifacts/apk-verification.json`. These are large unminified development artifacts.
+Verified ARM64, ARMv7 and Universal Debug APKs are local ignored files in `artifacts/`; hashes and manifest evidence are in `artifacts/apk-verification.json`. The last normal Universal ARM build is about159MB; the newer local-TLS emulator build is test-only. APKs are not committed to this repository.
 
 For real emulator-to-backend HTTPS tests, see [Android integration instructions](docs/ANDROID_TESTING.md). The opt-in local CA is never included in normal APKs. Foreground repository/adapter tests and process-restart checks pass; complete interactive UI acceptance remains unfinished.
 
@@ -50,7 +50,7 @@ The independent Docker smoke stack uses `docker compose --project-name vyrn-loca
 
 ## Production
 
-Follow [deployment instructions](docs/DEPLOYMENT.md). DNS, host provisioning, external backups and final signing have not been performed. Do not disable root/password SSH authentication without the user's explicit authorization. See [security](docs/SECURITY.md), [backup and restore](docs/BACKUP_RESTORE.md), [updates](docs/UPDATE_PROCESS.md) and [source redistribution](docs/GPL_COMPLIANCE.md).
+Follow [deployment instructions](docs/DEPLOYMENT.md) for the active backend release and rollback details. External backups, final Android signing and complete release acceptance remain unfinished. Same-server snapshots are temporary and do not replace offsite backup. Do not disable root/password SSH authentication without the user's explicit authorization. See [security](docs/SECURITY.md), [backup and restore](docs/BACKUP_RESTORE.md), [updates](docs/UPDATE_PROCESS.md) and [source redistribution](docs/GPL_COMPLIANCE.md).
 
 ## Repository checks
 
