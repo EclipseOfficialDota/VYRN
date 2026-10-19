@@ -714,6 +714,39 @@ public final class VyrnBridge {
                 pending.complete(result,null);
             }}catch(Exception failure){pending.complete(null,failure);}});return true;
         }
+        if(request instanceof TLRPC.TL_messages_sendReaction||request instanceof TLRPC.TL_messages_getMessagesReactions){
+            final boolean write=request instanceof TLRPC.TL_messages_sendReaction;VyrnBridge bridge=forAccount(account);
+            pending.bridge=bridge;pending.sessionOrigin=UserConfig.getInstance(account).getClientUserId();pending.boundSession=bridge.repository.vault.cachedSession();
+            TLRPC.TL_messages_sendReaction selection=write?(TLRPC.TL_messages_sendReaction)request:null;
+            TLRPC.TL_messages_getMessagesReactions query=write?null:(TLRPC.TL_messages_getMessagesReactions)request;
+            TLRPC.InputPeer input=write?selection.peer:query.peer;
+            final long chat=input instanceof TLRPC.TL_inputPeerChat?input.chat_id:0,peerUser=input instanceof TLRPC.TL_inputPeerUser?input.user_id:0;
+            final ArrayList<Integer> ordinals=new ArrayList<>();final ArrayList<String> emojis=new ArrayList<>();
+            boolean options=(chat>0||peerUser>0&&peerUser!=pending.sessionOrigin);
+            if(write){
+                ordinals.add(selection.msg_id);options&=(selection.flags&~7)==0&&selection.reaction!=null&&selection.reaction.size()<=3;
+                if(selection.reaction!=null){options&=((selection.flags&1)!=0)==!selection.reaction.isEmpty();for(TLRPC.Reaction reaction:selection.reaction){if(reaction instanceof TLRPC.TL_reactionEmoji)emojis.add(((TLRPC.TL_reactionEmoji)reaction).emoticon);else options=false;}}
+                java.util.HashSet<String> unique=new java.util.HashSet<>();for(String emoji:emojis)if(emoji==null||emoji.isEmpty()||emoji.codePointCount(0,emoji.length())>16||!unique.add(emoji))options=false;
+            }else if(query.id!=null)ordinals.addAll(query.id);else options=false;
+            java.util.HashSet<Integer> unique=new java.util.HashSet<>();if(ordinals.isEmpty()||ordinals.size()>100)options=false;for(Integer ordinal:ordinals)if(ordinal==null||ordinal<1||!unique.add(ordinal))options=false;
+            final boolean supported=options;
+            execute(()->{try{synchronized(bridge.repository.vault.guard()){
+                if(pending.sessionOrigin==0||pending.boundSession==null||UserConfig.getInstance(account).getClientUserId()!=pending.sessionOrigin||!pending.boundSession.equals(bridge.repository.vault.cachedSession()))throw new SecurityException("account_changed");
+                String user=bridge.ids.remote("user",pending.sessionOrigin);pending.user=user;
+                if(!supported)throw new UnsupportedOperationException("reaction_options_unavailable");
+                TLRPC.InputPeer source;TLRPC.Peer target;
+                if(chat>0){source=new TLRPC.TL_inputPeerChat();source.chat_id=chat;target=new TLRPC.TL_peerChat();target.chat_id=chat;}else{source=new TLRPC.TL_inputPeerUser();source.user_id=peerUser;target=new TLRPC.TL_peerUser();target.user_id=peerUser;}
+                String conversation=bridge.conversation(source);TLRPC.TL_updates result=new TLRPC.TL_updates();result.date=(int)(System.currentTimeMillis()/1000);
+                // ponytail: bounded sequential reads; add a batch endpoint after measured poll latency.
+                for(int ordinal:ordinals){
+                    String id=bridge.ids.remote("message",ordinal);Models.Message value=bridge.repository.messageForSession(user,pending.boundSession,id);
+                    bridge.requireReactionContext(value,id,ordinal,conversation);
+                    if(write&&!value.deleted){if(isLoggingOut(account)||UserConfig.getInstance(account).getClientUserId()!=pending.sessionOrigin)throw new SecurityException("account_changed");value=bridge.repository.selectReactionsForSession(user,pending.boundSession,id,emojis);bridge.requireReactionContext(value,id,ordinal,conversation);}
+                    bridge.addReactionUpdate(user,result,value,target);
+                }
+                pending.complete(result,null);
+            }}catch(Exception failure){pending.complete(null,failure);}});return true;
+        }
         if(request instanceof UploadPartRequest){
             UploadPartRequest part=(UploadPartRequest)request;pending.bridge=forAccount(account);pending.user=part.identity.owner;pending.sessionOrigin=part.identity.origin;pending.boundSession=part.identity.session;
             UPLOAD.execute(()->uploadPart(account,pending,part,0));return true;
@@ -990,6 +1023,18 @@ public final class VyrnBridge {
             result.messages.add(message(value,destination));
         }
         return result;
+    }
+    private void requireReactionContext(Models.Message value,String id,int ordinal,String conversation){
+        if(!id.equals(value.id)||ordinal!=value.ordinal||!conversation.equals(value.conversation))throw new SecurityException("reaction_message_context_changed");
+    }
+    private void addReactionUpdate(String user,TLRPC.TL_updates result,Models.Message value,TLRPC.Peer target) throws Exception {
+        ids.observe(value);
+        if(value.deleted){
+            long dialog=target.chat_id!=0?-target.chat_id:target.user_id;fenceDeleted(user,dialog,java.util.Collections.singletonList(value.ordinal));
+            TL_update.TL_updateDeleteMessages update=new TL_update.TL_updateDeleteMessages();update.messages.add(value.ordinal);update.pts=value.ordinal;update.pts_count=1;result.updates.add(update);
+        }else{
+            TL_update.TL_updateMessageReactions update=new TL_update.TL_updateMessageReactions();update.peer=target;update.msg_id=value.ordinal;update.reactions=reactions(value.reactions);update.updateUnreadState=false;result.updates.add(update);
+        }
     }
     private static TLRPC.TL_messageReactions reactions(List<Models.Reaction> rows){
         if(rows==null)throw new IllegalStateException("reaction_metadata_unavailable");

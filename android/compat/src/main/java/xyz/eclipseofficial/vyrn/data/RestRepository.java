@@ -201,6 +201,13 @@ public final class RestRepository implements Models.Repository {
     }}
     public Models.Message messageForUser(String user,String id) throws Exception {return message((JSONObject)requestForUser(user,"GET","/v1/messages/"+id,null,true));}
     public Models.Message messageForSession(String user,String session,String id) throws Exception {return message((JSONObject)requestForSession(user,session,"GET","/v1/messages/"+id,null));}
+    public Models.Message selectReactionsForSession(String user,String session,String id,List<String> emojis) throws Exception {synchronized(vault.guard()){
+        if(emojis==null||emojis.size()>3)throw new IllegalArgumentException("invalid_reactions");
+        java.util.HashSet<String> unique=new java.util.HashSet<>();JSONArray selection=new JSONArray();
+        for(String emoji:emojis){if(emoji==null||emoji.isEmpty()||emoji.codePointCount(0,emoji.length())>16||!unique.add(emoji))throw new IllegalArgumentException("invalid_reactions");selection.put(emoji);}
+        requestForSession(user,session,"PUT","/v1/messages/"+id+"/reactions/selection",new JSONObject().put("emojis",selection));
+        return messageForSession(user,session,id);
+    }}
     public Models.Message sendMediaForSession(String user,String session,String conversation,String client,String text,String media) throws Exception {synchronized(vault.guard()){
         JSONObject input=new JSONObject().put("client_id",client).put("payload",new JSONObject().put("text",text)).put("encrypted",false).put("media_id",media);
         JSONObject accepted=(JSONObject)requestForSession(user,session,"POST","/v1/conversations/"+conversation+"/messages",input);return messageForSession(user,session,accepted.getString("id"));

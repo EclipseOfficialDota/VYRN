@@ -1,5 +1,11 @@
 # Acceptance matrix
 
+## Native reaction mutation/query protocol accepted locally — 2026-10-19
+
+Original native complete-selection and metadata requests now reach the server with captured immutable peer/ID/emoji/list values and account/session/context checks. A43-check group run proves confirmed UI/model updates, snapshot capture, invalid/custom/cross-peer rejection, clear preserving another user and learned deletion. A99-check private run proves selection/query/clear over an actual Signal message without changed ciphertext/revision/authenticated text, then passes offline search and native-storage privacy. See TEST_REPORT for distinct test APK hashes, dates, failure/build limits and scope.
+
+This is native request-protocol acceptance issued by instrumentation, not interactive reaction selection or two Android clients. Controls remain gated; supported picker, pending/error/retry/reconciliation and broader session/lifecycle cases remain unfinished. No normal APK rebuild or production operation was performed. Full objective remains active.
+
 ## Native reaction display and read-model sync accepted locally — 2026-10-18
 
 Original group ChatActivity history/chips and native SQLite now carry actual counts and viewer-specific selection. A33-check API30 run proves both visible emoji glyphs, serialized chosen flags, automatic other-account WebSocket count/removal updates, empty-state persistence, unchanged message text/edit date and malformed-summary rejection. A real empty Unicode-heart glyph defect was reproduced in a screenshot and fixed in local asset lookup while retaining exact server identity. Final image was visually inspected; see TEST_REPORT for hashes, harness failures and limits. Shared group/private-search regressions pass87/95 on the same APKs.
