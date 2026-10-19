@@ -1,5 +1,11 @@
 # Acceptance matrix
 
+## Group reaction chooser and disconnected retry accepted locally — 2026-10-19
+
+The original message context menu now exposes a supported standard Unicode chooser. API30 reaction-read passes107 checks including actual menu/dialog touches, max-three enforcement, confirmed selection, Clear preserving another participant, real network failure with unchanged counts, reconciliation without replay and explicit retry. Private Signal/offline-search regression passes99 on the same APKs. See TEST_REPORT for hashes, timestamps, reproduced checkbox defect and harness failures.
+
+This establishes group chooser UI with a second API account. It does not establish private chooser gestures, committed-response-loss recovery, lifecycle/account races or two-native-client reactions. Original animated/custom/paid/tag controls remain gated. No downloadable ARM rebuild or production operation occurred; the full objective remains active.
+
 ## Native reaction mutation/query protocol accepted locally — 2026-10-19
 
 Original native complete-selection and metadata requests now reach the server with captured immutable peer/ID/emoji/list values and account/session/context checks. A43-check group run proves confirmed UI/model updates, snapshot capture, invalid/custom/cross-peer rejection, clear preserving another user and learned deletion. A99-check private run proves selection/query/clear over an actual Signal message without changed ciphertext/revision/authenticated text, then passes offline search and native-storage privacy. See TEST_REPORT for distinct test APK hashes, dates, failure/build limits and scope.

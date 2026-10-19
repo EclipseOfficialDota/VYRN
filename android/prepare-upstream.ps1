@@ -916,6 +916,20 @@ Edit 'TMessagesProj/src/main/java/org/telegram/ui/ChatActivity.java' {
  param($t)
  $t=(& git -c "safe.directory=$($upstream.Replace('\','/'))" -C $upstream show "${pin}:TMessagesProj/src/main/java/org/telegram/ui/ChatActivity.java") -join "`n"
  $openSearch='    public void openSearchWithText(String text) {'
+ $reactionOption='    private void processSelectedOption(int option) {'
+ $reactionMenu='        if (showWelcomeMessageRevertOption(primaryMessage)) {'
+ foreach($marker in @($reactionOption,$reactionMenu)){if(([regex]::Matches($t,[regex]::Escape($marker))).Count -ne 1){throw 'Pinned reaction context menu marker changed'}}
+ $reactionSwitch="        boolean preserveDim = false;`n        switch (option) {"
+ if(([regex]::Matches($t,[regex]::Escape($reactionSwitch))).Count -ne 1){throw 'Pinned reaction option switch changed'}
+ $t=$t.Replace($reactionSwitch,$reactionSwitch+"`n            case 91002: xyz.eclipseofficial.vyrn.compat.ReactionUi.show(this, selectedObject); break;")
+ $t=$t.Replace($reactionMenu,@'
+        if (allowChatActions && xyz.eclipseofficial.vyrn.compat.ReactionUi.canChoose(this, selectedObject)) {
+            items.add(xyz.eclipseofficial.vyrn.compat.ReactionUi.label());
+            options.add(91002);
+            icons.add(R.drawable.menu_smile_add);
+        }
+
+'@+$reactionMenu)
  if(!$t.Contains($openSearch)){throw 'Pinned chat search marker missing'}
  $t=$t.Replace($openSearch,$openSearch+"`n        if (!xyz.eclipseofficial.vyrn.compat.VyrnBridge.chatSearchAvailable(currentAccount, dialog_id)) return;`n        if (dialog_id > 0) android.widget.Toast.makeText(getContext(), LocaleController.isRTL ? `"فقط پیام‌های موجود در این دستگاه جست‌وجو می‌شوند.`" : `"Only messages already on this device are searched.`", android.widget.Toast.LENGTH_LONG).show();")
  $searchIcon='searchIconItem.setContentDescription(LocaleController.getString(R.string.Search));'

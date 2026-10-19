@@ -107,7 +107,7 @@ function Restore-TestProxy {
     [IO.File]::WriteAllText((Join-Path $root '.local/devtls-native.pid'),[string]$proxy.Id)
 }
 function Run-Instrumentation([string]$Phase){
-    if($Phase -notin @('private-search-ui','read-cold-prepare','read-cold-recover','media-voice-send-offline-ui','media-voice-cancel-chat-ui','media-photo-send-mid-offline-ui','sessions-network','media-send-offline-ui','media-photo-send-offline-ui','media-photo-cancel-chat-ui','media-cancel-prepare','media-cancel-recover','media-cancel-chat-ui')){return ((& $adb -s $Serial shell am instrument -w -e phase $Phase "$package.test/xyz.eclipseofficial.vyrn.test.LocalIntegrationRunner") -join "`n")}
+    if($Phase -notin @('reaction-read','private-search-ui','read-cold-prepare','read-cold-recover','media-voice-send-offline-ui','media-voice-cancel-chat-ui','media-photo-send-mid-offline-ui','sessions-network','media-send-offline-ui','media-photo-send-offline-ui','media-photo-cancel-chat-ui','media-cancel-prepare','media-cancel-recover','media-cancel-chat-ui')){return ((& $adb -s $Serial shell am instrument -w -e phase $Phase "$package.test/xyz.eclipseofficial.vyrn.test.LocalIntegrationRunner") -join "`n")}
     if(!$script:liveTestProxy){
         $exe=Join-Path $root '.local/devtls-native.exe';$proxyId=[int][IO.File]::ReadAllText((Join-Path $root '.local/devtls-native.pid'));$proxy=Get-Process -Id $proxyId
         $command=(Get-CimInstance Win32_Process -Filter "ProcessId=$proxyId").CommandLine

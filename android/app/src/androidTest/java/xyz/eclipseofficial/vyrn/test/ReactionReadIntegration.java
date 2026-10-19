@@ -72,6 +72,33 @@ final class ReactionReadIntegration {
             },check,"reaction_original_visible_cell_has_two_reaction_glyphs");
             capture(test);
             check.verify(stored(account,-local,domain.ordinal,new String[]{"👍","❤️"},new int[]{1,1},new boolean[]{false,true}),"reaction_actual_native_sqlite_serializes_selection_flags");
+            chooser(test,chat,domain.ordinal,check);
+            capture(test);
+            row(test,chat,1,check);row(test,chat,2,check);row(test,chat,3,check);row(test,chat,4,check);row(test,chat,5,check);
+            await(test,()->!picker(chat).getListView().isItemChecked(5),check,"reaction_picker_enforces_three_selections");
+            row(test,chat,3,check);row(test,chat,4,check);
+            button(test,chat,android.content.DialogInterface.BUTTON_POSITIVE,check);
+            await(test,()->matches(message(chat,domain.ordinal),new String[]{"👍","🔥"},new int[]{1,1},new boolean[]{false,true}),check,"reaction_original_menu_picker_saves_confirmed_selection");
+            chooser(test,chat,domain.ordinal,check);
+            button(test,chat,android.content.DialogInterface.BUTTON_NEUTRAL,check);
+            await(test,()->matches(message(chat,domain.ordinal),new String[]{"👍"},new int[]{1},new boolean[]{false}),check,"reaction_picker_clear_preserves_other_participant");
+            chooser(test,chat,domain.ordinal,check);row(test,chat,2,check);
+            button(test,chat,android.content.DialogInterface.BUTTON_POSITIVE,check);
+            await(test,()->matches(message(chat,domain.ordinal),new String[]{"👍","🔥"},new int[]{1,1},new boolean[]{false,true}),check,"reaction_picker_reopens_after_clear");
+            chooser(test,chat,domain.ordinal,check);
+            row(test,chat,2,check);row(test,chat,1,check);
+            try {
+                AuthUiIntegration.networkStep(test,LaunchActivity.instance,"offline-load",check);
+                button(test,chat,android.content.DialogInterface.BUTTON_POSITIVE,check);
+                await(test,()->picker(chat)!=null&&picker(chat).getButton(android.content.DialogInterface.BUTTON_POSITIVE)!=null&&picker(chat).getButton(android.content.DialogInterface.BUTTON_POSITIVE).isShown(),check,"reaction_offline_failure_offers_reconciliation");
+                test.runOnMainSync(()->check.verify(matches(message(chat,domain.ordinal),new String[]{"👍","🔥"},new int[]{1,1},new boolean[]{false,true}),"reaction_failed_write_does_not_change_confirmed_counts"));
+                AuthUiIntegration.networkStep(test,LaunchActivity.instance,"online-retry",check);
+                button(test,chat,android.content.DialogInterface.BUTTON_POSITIVE,check);
+                await(test,()->picker(chat)!=null&&picker(chat).getButton(android.content.DialogInterface.BUTTON_POSITIVE)!=null&&picker(chat).getButton(android.content.DialogInterface.BUTTON_POSITIVE).isShown(),check,"reaction_retry_reads_server_before_confirmation");
+                check.verify(repository.message(message).reactions.stream().anyMatch(r->r.mine&&r.emoji.equals("🔥")),"reaction_reconciliation_does_not_replay_unconfirmed_write");
+                button(test,chat,android.content.DialogInterface.BUTTON_POSITIVE,check);
+                await(test,()->matches(message(chat,domain.ordinal),new String[]{"👍","❤️"},new int[]{1,1},new boolean[]{false,true}),check,"reaction_explicit_retry_saves_original_choice");
+            } finally {AuthUiIntegration.networkStep(test,LaunchActivity.instance,"online-confirm",check);}
             TLRPC.TL_messages_sendReaction captured=selection(local,domain.ordinal,"❤️","🔥");
             CompletableFuture<TLRPC.Updates> accepted=new CompletableFuture<>();
             synchronized(repository.vault.guard()){
@@ -124,6 +151,42 @@ final class ReactionReadIntegration {
     private static TLRPC.TL_messages_sendReaction selection(long chat,int id,String... values){TLRPC.TL_messages_sendReaction request=new TLRPC.TL_messages_sendReaction();request.peer=new TLRPC.TL_inputPeerChat();request.peer.chat_id=chat;request.msg_id=id;for(String value:values){TLRPC.TL_reactionEmoji reaction=new TLRPC.TL_reactionEmoji();reaction.emoticon=value;request.reaction.add(reaction);request.flags|=1;}return request;}
     static TLRPC.Updates request(int account,TLObject request) throws Exception {CompletableFuture<TLRPC.Updates> done=new CompletableFuture<>();ConnectionsManager.getInstance(account).sendRequest(request,(value,error)->{if(error==null)done.complete((TLRPC.Updates)value);else done.completeExceptionally(new AssertionError("native_reaction_request"));});return done.get(30,TimeUnit.SECONDS);}
     private static String error(int account,TLObject request) throws Exception {CompletableFuture<String> done=new CompletableFuture<>();ConnectionsManager.getInstance(account).sendRequest(request,(value,error)->done.complete(error==null?"":error.text));return done.get(30,TimeUnit.SECONDS);}
+    private static android.app.AlertDialog picker(ChatActivity chat) {
+        Object dialog=field(chat,"visibleDialog");return dialog instanceof android.app.AlertDialog?(android.app.AlertDialog)dialog:null;
+    }
+    private static void chooser(Instrumentation test,ChatActivity chat,int id,AuthUiIntegration.Check check) throws Exception {
+        android.graphics.Rect bounds=new android.graphics.Rect();
+        await(test,()->{
+            ViewGroup list=(ViewGroup)field(chat,"chatListView");
+            for(int i=0;i<list.getChildCount();i++)if(list.getChildAt(i) instanceof ChatMessageCell){
+                ChatMessageCell cell=(ChatMessageCell)list.getChildAt(i);
+                if(cell.getMessageObject()!=null&&cell.getMessageObject().getId()==id&&cell.isShown()){
+                    int[] location=new int[2];cell.getLocationOnScreen(location);
+                    int x=location[0]+cell.getTextX()+org.telegram.messenger.AndroidUtilities.dp(16),y=location[1]+cell.getTextY()+org.telegram.messenger.AndroidUtilities.dp(8);
+                    bounds.set(x-4,y-4,x+4,y+4);
+                    return !bounds.isEmpty();
+                }
+            }return false;
+        },check,"reaction_menu_message_visible");
+        check.verify(AuthUiIntegration.touch(test,bounds),"reaction_message_tapped_for_original_menu");
+        AuthUiIntegration.clickWindow(test,LaunchActivity.instance,xyz.eclipseofficial.vyrn.compat.ReactionUi.label(),check);
+        await(test,()->picker(chat)!=null&&picker(chat).getListView()!=null&&picker(chat).getListView().isShown(),check,"reaction_picker_opened_from_original_message_menu");
+    }
+    private static void row(Instrumentation test,ChatActivity chat,int index,AuthUiIntegration.Check check) throws Exception {
+        android.graphics.Rect bounds=new android.graphics.Rect();
+        await(test,()->{android.app.AlertDialog dialog=picker(chat);if(dialog==null||dialog.getListView()==null)return false;android.widget.ListView list=dialog.getListView();android.view.View row=list.getChildAt(index-list.getFirstVisiblePosition());return screenBounds(row,bounds);},check,"reaction_picker_row_visible_"+index);
+        check.verify(AuthUiIntegration.touch(test,bounds),"reaction_picker_row_touched_"+index);test.waitForIdleSync();Thread.sleep(250);
+        test.runOnMainSync(()->{try{org.json.JSONObject diagnostic=new org.json.JSONObject().put("row",index).put("bounds",bounds.toShortString()).put("checked",picker(chat).getListView().getCheckedItemPositions().toString());java.nio.file.Files.write(new java.io.File(test.getTargetContext().getFilesDir(),"vyrn-test-reaction-touches.jsonl").toPath(),(diagnostic.toString()+"\n").getBytes(java.nio.charset.StandardCharsets.UTF_8),java.nio.file.StandardOpenOption.CREATE,java.nio.file.StandardOpenOption.APPEND);}catch(Exception failure){throw new IllegalStateException(failure);}});
+    }
+    private static void button(Instrumentation test,ChatActivity chat,int which,AuthUiIntegration.Check check) throws Exception {
+        android.graphics.Rect bounds=new android.graphics.Rect();
+        await(test,()->picker(chat)!=null&&screenBounds(picker(chat).getButton(which),bounds),check,"reaction_dialog_button_visible");
+        check.verify(AuthUiIntegration.touch(test,bounds),"reaction_dialog_button_touched");test.waitForIdleSync();
+    }
+    private static boolean screenBounds(android.view.View view,android.graphics.Rect bounds) {
+        if(view==null||!view.isShown()||!view.isEnabled()||view.isLayoutRequested()||!view.getGlobalVisibleRect(bounds))return false;
+        int[] location=new int[2];view.getLocationOnScreen(location);bounds.set(location[0],location[1],location[0]+view.getWidth(),location[1]+view.getHeight());return !bounds.isEmpty();
+    }
     static void apply(Instrumentation test,int account,TLRPC.Updates updates){test.runOnMainSync(()->MessagesController.getInstance(account).processUpdates(updates,false));}
     private static JSONObject summary(String emoji,Number count,boolean mine) throws Exception {return new JSONObject().put("emoji",emoji).put("count",count).put("mine",mine);}
     private static TLRPC.Message message(ChatActivity chat,int id){for(var value:chat.messages)if(value.getId()==id)return value.messageOwner;return null;}
