@@ -53,6 +53,20 @@ public final class LocalIntegrationRunner extends Instrumentation {
     private Context context;
     private final JSONArray passed = new JSONArray();
 
+    /** SQLite before Android 12 cannot DROP COLUMN; rebuild the exact historical test schema. */
+    private static void legacyOutboxFixture(android.database.sqlite.SQLiteDatabase db,int version){
+        String columns="queue_id,user_id,client_id,conversation_id,body,fingerprint,state,attempts,next_at,server_id,ordinal,date,error,created_at,completed_at,attempted";
+        String cancel=version>=3?",cancel_requested INTEGER NOT NULL DEFAULT 0":"";
+        if(version>=3)columns+=",cancel_requested";
+        db.beginTransaction();
+        try{
+            db.execSQL("ALTER TABLE outbox RENAME TO fixture_newer_outbox");
+            db.execSQL("CREATE TABLE outbox(queue_id INTEGER PRIMARY KEY AUTOINCREMENT,user_id TEXT NOT NULL,client_id TEXT NOT NULL,conversation_id TEXT NOT NULL,body TEXT,fingerprint TEXT NOT NULL,state INTEGER NOT NULL DEFAULT 0,attempts INTEGER NOT NULL DEFAULT 0,next_at INTEGER NOT NULL DEFAULT 0,server_id TEXT,ordinal INTEGER,date INTEGER,error INTEGER NOT NULL DEFAULT 0,created_at INTEGER NOT NULL,completed_at INTEGER,attempted INTEGER NOT NULL DEFAULT 1"+cancel+",UNIQUE(user_id,client_id))");
+            db.execSQL("INSERT INTO outbox("+columns+") SELECT "+columns+" FROM fixture_newer_outbox");
+            db.execSQL("DROP TABLE fixture_newer_outbox");
+            db.setTransactionSuccessful();
+        }finally{db.endTransaction();}
+    }
     @Override public void onCreate(Bundle args) { super.onCreate(args); phase=args.getString("phase", "first"); start(); }
 
     @Override public void onStart() {
@@ -369,9 +383,8 @@ public final class LocalIntegrationRunner extends Instrumentation {
             check(!upgraded.cancel(fixtureUser,legacyClient),"legacy_uncertainty_preserved");
             check(upgraded.next(fixtureUser).state==OutboxStore.SENDING,"upgraded_queue_claimable");
             // Model a populated schema2 database independently of the schema1 migration.
-            upgraded.getWritableDatabase().execSQL("ALTER TABLE outbox DROP COLUMN cancel_requested");
+            legacyOutboxFixture(upgraded.getWritableDatabase(),2);
             upgraded.getWritableDatabase().execSQL("DROP TABLE ui_cancellations");
-            for(String column:new String[]{"media_id","upload_body","origin_session"})upgraded.getWritableDatabase().execSQL("ALTER TABLE outbox DROP COLUMN "+column);
             upgraded.getWritableDatabase().setVersion(2);
         }
         try(OutboxStore upgraded=new OutboxStore(context,9009)){
@@ -379,13 +392,13 @@ public final class LocalIntegrationRunner extends Instrumentation {
             check(legacy.state==OutboxStore.SENDING && !legacy.cancellation && legacy.text.equals("Legacy pending"),"schema2_upgrade_preserves_claim");
             check(upgraded.requestCancellation(fixtureUser,legacyClient).cancellation,"schema2_cancel_intent_available");
             upgraded.getWritableDatabase().execSQL("DROP TABLE ui_cancellations");
-            for(String column:new String[]{"media_id","upload_body","origin_session"})upgraded.getWritableDatabase().execSQL("ALTER TABLE outbox DROP COLUMN "+column);
+            legacyOutboxFixture(upgraded.getWritableDatabase(),3);
             upgraded.getWritableDatabase().setVersion(3);
         }
         passed.put("populated_schema2_cancel_upgrade");
         try(OutboxStore upgraded=new OutboxStore(context,9009)){
             check(upgraded.get(fixtureUser,legacyClient).cancellation && upgraded.pendingUi(fixtureUser)==0,"schema3_ui_journal_upgrade");
-            for(String column:new String[]{"media_id","upload_body","origin_session"})upgraded.getWritableDatabase().execSQL("ALTER TABLE outbox DROP COLUMN "+column);
+            legacyOutboxFixture(upgraded.getWritableDatabase(),4);
             upgraded.getWritableDatabase().setVersion(4);
         }
         passed.put("populated_schema3_UI_journal_upgrade");

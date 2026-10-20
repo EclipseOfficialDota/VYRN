@@ -10,9 +10,13 @@ Latest Android checkpoint: [native group creation and invitations](docs/checkpoi
 
 `android/` contains the pinned upstream descriptor, reproducible preparation script, app module and compatibility/domain/repository layers. `backend/` contains the Go service and PostgreSQL migrations. `admin/` is VYRN Control. `deployment/` contains Compose, Caddy, inactive TURN configuration and backup timers.
 
-Source repository: [EclipseOfficialDota/VYRN](https://github.com/EclipseOfficialDota/VYRN) (private). The generated `android/upstream/`, SDK/JDK, caches, local credentials and build artifacts are intentionally ignored. Main branches are `main`, `develop`; active work uses the `codex/` prefix.
+Source repository: [EclipseOfficialDota/VYRN](https://github.com/EclipseOfficialDota/VYRN) (public). The generated `android/upstream/`, SDK/JDK, caches, local credentials and build artifacts are intentionally ignored. Main branches are `main`, `develop`; active work uses the `codex/` prefix.
 
 The [published Debug prerelease](https://github.com/EclipseOfficialDota/VYRN/releases/tag/debug-20261019) is an earlier snapshot: approximately159MB Universal ARM APK, ARM64+ARMv7, Android8.0 or newer, with SHA256SUMS.txt. It predates the latest group changes. Current verified local APKs and their hashes are described in the checkpoint above; rebuild them using the Android commands below. These are not final signed production Release artifacts.
+
+The owner requested only a final Release on 2026-10-20; no new Debug prerelease will be published. Follow [owner-controlled signing](docs/RELEASE_SIGNING.md) to prepare the final key outside Git and the VPS. Final signing and runtime acceptance of the actual Release artifacts remain required.
+
+The [2026-10-20 critical-check checkpoint](docs/checkpoints/2026-10-20-release-gates.md) records438 passing Android checks, the API30 migration-fixture repair and the unresolved host emulator crashes during two-client retesting. These checks do not establish Stable acceptance.
 
 ## Local development on Windows
 
