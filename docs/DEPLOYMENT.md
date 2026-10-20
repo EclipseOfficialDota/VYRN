@@ -1,71 +1,151 @@
-# Deployment runbook
+# Self-hosting VYRN
 
-## Go security rollout — 2026-10-19
+This guide installs the current development source on a **fresh dedicated Ubuntu24.04 LTS host**. It does not certify a Stable release. Use a test instance before inviting users. Existing Nginx/Caddy sites must keep their ports and certificates; use an inspected proxy integration instead of starting a competing listener.
 
-GitHub main now requires Go1.26.9 and pins the official golang:1.26.9-alpine image to sha256:3082400e369fa24d5fc60bca20edab3f6d604e0c5a690ec66b295eff4dd87ade. The initial GitHub vulnerability scan found eight reachable standard-library advisories in Go1.26.8; all report Go1.26.9 as fixed. Source commit b3241d130c79952ad8e74e8f9b673dc596ee9930 passes [CI](https://github.com/EclipseOfficialDota/VYRN/actions/runs/39291176819), including PostgreSQL/race tests, govulncheck and the production-container build. See the [Go advisory](https://pkg.go.dev/vuln/GO-2026-6617).
+## 1. Host and Docker
 
-The Go1.26.9 binary from clean source28aa513 is now active after an isolated database/media restore rehearsal, a fresh activation snapshot, exact image/binary verification and nine authenticated public HTTPS checks. Server evidence below supersedes the earlier source-only checkpoint.
+Plan for at least4GiB RAM, two CPU cores and40GiB disk for a small evaluation, plus space for media and backup staging. These are starting budgets, not measured capacity guarantees. Core reserves10GiB free disk before accepting uploads. Build Android on a separate Windows workstation.
 
-Status (2026-10-19): **Core source28aa513 is active with Go1.26.9, fresh authorization after lock waits and atomic reaction selection. Schema remains9; Core/PostgreSQL and authenticated public HTTPS checks pass. The Debug Android client has a supported standard reaction chooser; animated/custom/paid controls remain gated. Physical-phone and final Release acceptance remain pending.** See [Persian owner guide](OWNER_GUIDE.fa.md).
+Install Git, Python3 and OpenSSL. Install Docker Engine, Buildx and the Compose plugin using [Docker's official Ubuntu instructions](https://docs.docker.com/engine/install/ubuntu/). Confirm:
 
-## Active deployment
+```bash
+docker version
+docker compose version
+```
 
-The existing Ubuntu/Docker/Compose deployment is retained. The active release is /opt/vyrn/releases/core-20261019-28aa513, selected by /opt/vyrn/current. Use both deployment/compose.yaml and deployment/compose.existing-nginx.yaml with protected /etc/vyrn/runtime.env. Core binds only127.0.0.1:18080; PostgreSQL is unpublished. Existing Nginx retains ports80/443 and the owner panel binds only127.0.0.1:19091. Caddy's standalone-proxy profile remains excluded.
+Use a Docker-authorized administrator. Commands below assume that account can run Docker and uses Bash. Preserve your actual SSH port in the host/provider firewall before changing rules. Allow80/tcp and443/tcp for Caddy. PostgreSQL and Core must not be published directly. Docker-published ports can bypass ordinary UFW rules; review the firewall section of the Docker instructions.
 
-Current source:28aa513da7ccf2470e9ce48f7f32c76d604a6de7, clean VCS build using Go1.26.9, Linux/amd64, CGO disabled and trimpath. Running executable SHA25664f614c0c0176e6d769d201c3933d944a33a6971b91deb0691826a276b8cb59f; immutable image sha256:099e7bb99e880e187eb8e942a26423407246d2de5fc9427781f1e91b75d666b7, tagged vyrn-core:28aa513 and latest. All migration files and Compose/prebuilt Dockerfile were compared unchanged; schema stayed9. The identical backend tree passed GitHub PostgreSQL/race tests, vet, govulncheck and container build under Go1.26.9 at sourceb3241d1; later changes through28aa513 are documentation only. Release archive SHA2567a62e96232a4ff0d37c9edf54ca04cf34cb6c740bd6d701deba8af92381962e0,5193658 bytes.
+## 2. Domain and DNS
 
-Protected rehearsal evidence is under /opt/vyrn/operations/upgrade-20261019-28aa513. A consistent snapshot was restored to a separate database/private media volume: candidate startup, schema9, UID10001 and the2 media/part files passed, PREPARE_EXIT=0. Candidate resources/env were removed and independently checked absent before activation. Activation at /opt/vyrn/operations/deploy-20261019-28aa513 used another fresh validated snapshot and automatic code rollback on failure; its DEPLOYED result and exact running image/binary were read back. Public IPv4 was independently resolved from Windows, and the VPS HTTPS readiness probe retained normal hostname/certificate validation with --resolve. No DNS/resolver/TLS policy changed. Nine authenticated public HTTPS checks passed at2026-10-19T17:54:14.163830Z: selection replacement/replay/clear/invalid input/legacy routes, deletion denial and login/logout. The synthetic self-only message was deleted and verification session logged out.
+Choose a service root, for example `vyrn.example.com`. Create DNS-only A records pointing to your host:
 
-Only Core was recreated. PostgreSQL stayed healthy with the same start timestamp observed before this rollout,2026-10-17T13:39:00.88699932Z. The earlier October4 start timestamp belongs to the older checkpoint; this rollout does not claim an observed whole-host reboot test. Both snapshot runtime.env files are root-owned0600. All same-VPS snapshots remain temporary and unreliable as offsite disaster backups. Owner loopback HTTP returns200; public metrics/admin routes remain404.
+| Hostname | Role |
+| --- | --- |
+| `vyrn.example.com` | Small service identification endpoint |
+| `api.vyrn.example.com` | Android REST API and health |
+| `ws.vyrn.example.com` | WebSocket alias |
+| `media.vyrn.example.com` | Media alias |
+| `push.vyrn.example.com` | Core alias; not proof of a push delivery service |
+| `admin.vyrn.example.com` | Restricted administration |
+| `updates.vyrn.example.com` | Optional static update artifacts |
 
-## Previous schema upgrade (2026-10-15)
+Do not create AAAA records unless IPv6 actually reaches this host. DNS and inbound80/443 must work before Caddy obtains certificates. The root hostname is not a browser messaging client.
 
-The October15 release used source e66e6a892643d6e5ca386d0ac5bbee2e89316d59, executable SHA256c95b3454eef1f76d7fc9ea218826f0ec6df9ab6f4e84fed87f7dc387a2275846 and image sha256:0332c2f7887d52ec62648b1cc455d514da65b07f55dee2d738fe9b912d9ec503. It was tagged latest at that time. Migrations008_media_uploads.sql and009_voice_duration.sql upgraded schema7 to9; prior migrations were byte-compared unchanged. See the historical test report for that rollout.
+Cloudflare is optional. For the existing PowerShell helper, set its two environment variables privately, then run `./scripts/cloudflare-dns.ps1 -Domain vyrn.example.com -IPv4 YOUR_PUBLIC_IPV4`. It plans first; `-Apply` creates missing records and preserves conflicting records for review. No TURN record is created while calls are unavailable.
 
-Before activation, a consistent database/media/config snapshot was restored into a disposable database and private media volume. Candidate startup applied migrations7→9 and passed readiness, media size/checksum and UID10001 checks while live schema remained7. The first rehearsal attempt used the edge network and could not reach PostgreSQL; the successful repeat used vyrn_private. A fresh validated snapshot was then taken immediately before activation at /opt/vyrn/operations/deploy-20261015-e66e6a8/snapshot. Its parent directory is root-only and runtime.env is mode0600. These same-VPS snapshots are temporary and unreliable as disaster backups.
+## 3. Source and protected configuration
 
-Only Core was recreated with up -d --no-deps --no-build core; PostgreSQL and the production media volume were retained. Running image/executable, schema9 and certificate-validated public readiness were verified. The unauthenticated new conversation-read route returns401. A separate post-deploy drill restored the pre-deploy snapshot, upgraded its clone to schema9, and successfully started the previous immutable Core image against that clone. Production remained on the new image throughout this rollback compatibility drill.
+```bash
+sudo install -d -m0755 -o "$USER" -g "$(id -gn)" /opt/vyrn
+git clone https://github.com/EclipseOfficialDota/VYRN.git /opt/vyrn
+cd /opt/vyrn
+sudo install -d -m0700 /etc/vyrn
+sudo install -m0600 .env.example /etc/vyrn/runtime.env
+sudo python3 - <<'PY'
+from pathlib import Path
+import base64, secrets
+p = Path('/etc/vyrn/runtime.env')
+text = p.read_text()
+text = text.replace('POSTGRES_PASSWORD=\n', 'POSTGRES_PASSWORD=' + secrets.token_hex(32) + '\n')
+text = text.replace('VYRN_ADMIN_TOTP_SECRET=\n', 'VYRN_ADMIN_TOTP_SECRET=' + base64.b32encode(secrets.token_bytes(20)).decode() + '\n')
+p.write_text(text)
+p.chmod(0o600)
+print('Generated database password and authenticator secret in the protected runtime file.')
+PY
+sudoedit /etc/vyrn/runtime.env
+```
 
-## Retained rollback candidate
+Do not repeat initialization over an existing configured installation. Set `VYRN_DOMAIN` to your root hostname **without https:// or a path**. Set `VYRN_ADMIN_ALLOWED_CIDRS` to your operator/VPN public IP in CIDR form, e.g. `YOUR_OPERATOR_IP/32`; multiple ranges are space-separated. Never use `0.0.0.0/0` as a workaround. The default loopback restriction intentionally denies remote browsers.
 
-The immediate verified rollback release is /opt/vyrn/releases/core-20261017-a05831a with image vyrn-core:rollback-20261019-28aa513, immutable sha256:012a0e1438c831b5b00b567745556a46689df55abbaa492cffe6fa4ed1eb151b and executable4b5a7059a5cc9e38569fee2361083d19b920104a338912030de6c705512222b5. This exact image was healthy before activation and is still retained. It preserves the selection endpoint/schema9 but uses the earlier Go1.26.8 runtime, so use it only as a temporary availability rollback. No production database restore/overwrite occurred. Automatic rollback was not triggered during this successful rollout; the earlier October16 DNS-failure rollback remains historical evidence.
+Privately import `VYRN_ADMIN_TOTP_SECRET` into your authenticator as a time-based, SHA1,6-digit,30-second entry. Keep host/workstation clocks synchronized. The secret belongs in the authenticator, **not** the panel's six-character code field. Keep the file outside Git, and do not print expanded Compose configuration.
 
-Earlier reports also recorded /opt/vyrn/releases/core-20261011-a00a123 and image vyrn-core:rollback-20261015-e66e6a8, immutable sha256:2daeb2878a140b3233c30a5ebfc2ec14d20641ba3f5dbacf56f8e6f615bb6820. That executable157771edb9eb31f93eba73d6f44a6cda852be86791a289ee1a091a71d1928cda was tested only for readiness on an isolated restored schema9 clone. Their availability was not rechecked in this rollout; use the immediate verified candidate above. Full older-API compatibility with new media flows was not established. Preserve current data and restore into separate volumes if database recovery is necessary.
+For commands in this root shell:
 
-Dedicated key login was verified. Existing root/password access, SSH settings, firewall policy and unrelated services were preserved. Owner credentials live only in `/etc/vyrn/owner-access.json` mode 0600. Owner login, TOTP, all panel read endpoints, invite creation/revocation and session logout passed on the VPS. Bootstrap environment was removed. Containers use restart `unless-stopped` and Docker is enabled; whole-host reboot has not been tested.
+```bash
+sudo -i
+cd /opt/vyrn
+dc() { docker compose --env-file /etc/vyrn/runtime.env -f deployment/compose.yaml "$@"; }
+dc config -q
+mkdir -p artifacts/updates
+dc build core
+dc up -d --wait postgres
+```
 
-The prebuilt image copies the executable with mode 0755. Normalize exported release directories to 0755 and static/source files to 0644 before Nginx serves them; secret files remain outside the release at 0600. Public Nginx config is `deployment/nginx-public.conf`, installed as `/etc/nginx/sites-available/vyrn-public`. All eight DNS A records were created DNS-only. The seven-domain `vyrn-public` certificate expires 2027-01-02; its webroot is `/var/lib/vyrn/acme`. Certbot timer and Nginx deploy hook are enabled; renewal dry-run passed. API/WS/media/push readiness and public admin/metrics blocking passed from Windows with certificate validation. Admin/web/updates hosts return503 pending their public rollout. TURN remains inactive. Do not start Caddy on the existing public ports.
+The function exists only in this shell; recreate it in a new session. `dc config -q` validates without printing secrets. Compose supplies the domain to Caddy and the matching admin Origin to Core. Caddy uses its documented [environment substitution](https://caddyserver.com/docs/caddyfile/concepts#environment-variables).
 
-## Prerequisites
+## 4. First administrator — once, empty database only
 
-Confirmed target: `217.18.90.114`, Ubuntu 24.04.3 LTS, SSH `root` on port `3939`, about 4 GB RAM and 40 GB disk. Dedicated key login is accepted. Never transfer the private half. The recorded host fingerprint was checked against the existing known-host entry.
+In the same root Bash session, enter your own account details. Password input is hidden and values are passed through the environment rather than command arguments:
 
-Run read-only checks first: `/etc/os-release`, `uname`, RAM, disk, existing services, listeners, firewall, Docker, users, SSH effective settings and timezone. Preserve current services and access. Create a non-root administrative user and confirm its SSH key login in a separate session before changing any access policy. Root login and password authentication require separate explicit user approval to disable.
+```bash
+read -r -p 'Administrator email: ' VYRN_BOOTSTRAP_EMAIL
+read -r -s -p 'Administrator password (at least 8 characters): ' VYRN_BOOTSTRAP_PASSWORD
+printf '\n'
+VYRN_BOOTSTRAP_INVITE="$(openssl rand -hex 24)"
+export VYRN_BOOTSTRAP_EMAIL VYRN_BOOTSTRAP_PASSWORD VYRN_BOOTSTRAP_INVITE
+dc run --rm -e VYRN_BOOTSTRAP_EMAIL -e VYRN_BOOTSTRAP_PASSWORD -e VYRN_BOOTSTRAP_INVITE core bootstrap
+# Continue only after bootstrap_complete and exit status0.
+unset VYRN_BOOTSTRAP_EMAIL VYRN_BOOTSTRAP_PASSWORD VYRN_BOOTSTRAP_INVITE
+dc up -d --wait core caddy
+```
 
-## Future standalone-host setup reference (not the active existing-Nginx deployment)
+Use a unique strong password and store it in your password manager. Bootstrap migrates the database and creates the first administrator; it refuses a database with existing users. It also creates a temporary bootstrap invite (100 uses,7days); this procedure discards its plaintext. Create limited daily-use invites in Control instead. There is no shared/default administrator password and no automatic email verification/delivery service.
 
-1. Configure `Asia/Tehran`, unattended security updates and Fail2ban on SSH port 3939.
-2. Keep `3939/tcp` open before enabling UFW; allow `80/tcp` and `443/tcp`. Do not open relay ports before provider confirmation.
-3. Install Docker Engine and Compose from Docker's official Ubuntu repository. Keep PostgreSQL unpublished. Restrict the admin panel to a verified operator CIDR or VPN.
-4. Install source under `/opt/vyrn`; create `/etc/vyrn/runtime.env` mode 0600. Set a randomly generated URL-safe PostgreSQL password and administrator TOTP secret. Keep release keystores off this server.
-5. Validate with `docker compose --env-file /etc/vyrn/runtime.env -f deployment/compose.yaml config -q`. Do not print expanded Compose configuration because it includes environment secrets.
-6. Build with `docker compose --env-file /etc/vyrn/runtime.env -f deployment/compose.yaml build core`. Start PostgreSQL, run the bootstrap command in an empty database with bootstrap values supplied privately, remove bootstrap environment values, then start Core and Caddy.
-7. Confirm health, authorized API tests, certificate renewal, reboot persistence, memory use and free disk. Keep a verified database backup before migrations. Migrations use checksums and cannot be silently modified after application.
+Do not rerun bootstrap to reset a password or delete database volumes to fix login. If setup fails, inspect the error category and fix configuration while preserving data.
 
-## DNS and TLS
+## 5. Verify and sign in
 
-`scripts/set-cloudflare-env.ps1` prompts privately for the token. It only sets the current PowerShell process environment; launch the consuming process from that session. Required names: `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ZONE_ID`.
+Replace example hostnames in these commands:
 
-`scripts/cloudflare-dns.ps1` performs read-only planning; `-Apply` creates absent records only. Existing conflicting records are preserved for review. All eight VYRN hostnames point to the supplied IPv4 and remain DNS-only, including TURN. Do not proxy the core endpoints through an external CDN.
+```bash
+curl --fail --show-error https://api.vyrn.example.com/health/ready
+curl --silent --output /dev/null --write-out '%{http_code}\n' https://api.vyrn.example.com/v1/admin/dashboard
+dc ps
+dc logs --tail=80 core caddy
+```
 
-Caddy automatically obtains and renews publicly trusted certificates after DNS and port reachability are correct. API/WS/media/push share Core. Admin routes are served only on the restricted administrator host. The public API virtual hosts reject `/v1/admin/*` and `/metrics`.
+Readiness must succeed. Public API admin paths must return404; the panel hostname must reject a browser outside the allowed CIDRs with403. Logs should not be shared without inspection.
 
-Monitor certificate expiry and renewal failures. An international outage can delay renewal; valid existing certificates must stay deployed. Never switch clients to an unvalidated certificate or raw IP to bypass TLS.
+Open `https://admin.vyrn.example.com` from an allowed address. Log in using the bootstrap **email and password**, then enter the current six-digit Authenticator code. The administrative grant lasts5minutes; reverify when prompted. A code already used during its30-second interval is rejected; wait for a new one. Browser refresh may require login again because tokens stay in memory.
 
-## TURN gate
+## 6. Give users access
 
-Coturn is an inactive Compose profile named `calls`; its real config is ignored. Provider inbound UDP is unconfirmed. Voice/video feature flags remain false. After confirmation, test UDP and TCP on 3478, TLS on 5349 and the documented relay range `49160–49200/udp`; only then enable verified calling. Generate short-lived credentials server-side, never ship the shared TURN secret to clients. Credential issuance and WebRTC integration are still required.
+In Control, open **Invites**, choose a small use count and expiry, and create an invite. Save the code when shown; only its hash is stored. Send the code privately to the intended person. You can revoke unused invites.
 
-## Rollback
+Build the client for **your API**, following [Android instructions](ANDROID_TESTING.md):
 
-Retain the previous immutable Core image and APK. Database migration rollback requires an inspected compatibility plan or restoration into a separate database, followed by a controlled switch; do not overwrite live data blindly. Keep host access and logs available during deployment failures.
+```powershell
+./scripts/build-android.ps1 -Flavor dev -BuildType debug -ApiUrl https://api.vyrn.example.com
+./scripts/verify-apks.ps1
+```
+
+For final distribution, use [production signing](RELEASE_SIGNING.md) and include `-ApiUrl https://api.vyrn.example.com` in the production build. Keep the same package identity and keystore for later updates. The existing project APK targets a different instance and has no server switcher.
+
+The invited person installs the matching client, chooses registration, enters email, password, display name and invitation, and saves the recovery code when shown. Later sign-in uses email/password, not the public username. Accounts and invites do not work across instances. Users can then discover participants using supported app controls and create groups/private chats. Start with two test accounts and verify the particular messaging/media paths your users need before wider use.
+
+## 7. Operate and update
+
+Control can list users/groups, block/unblock other users, reset their passwords, revoke their sessions, issue/revoke invites and show audit events. Password resets revoke sessions; they are not a way to recover old locally held encryption keys. Do not promise administrators can read private-message plaintext. Group messages and service metadata have different privacy properties; see [security design](SECURITY.md).
+
+Persist PostgreSQL, media and Caddy volumes. Never use `docker compose down -v` on a real instance. Arrange encrypted [offsite backup and restore rehearsals](BACKUP_RESTORE.md) before relying on stored data. A same-host snapshot is temporary and does not survive host loss.
+
+Before upgrading: retain the current commit/image, take and verify a backup, inspect migrations/release notes, then test the candidate against a restored copy. Updating the source alone does not update a running container:
+
+```bash
+git fetch origin
+# Select a reviewed commit/tag. Avoid an unattended moving-branch deployment.
+git checkout YOUR_REVIEWED_COMMIT
+dc build core
+dc up -d --no-deps --wait core
+curl --fail https://api.vyrn.example.com/health/ready
+```
+
+On failure, retain logs and data. Restore an earlier image only after verifying schema compatibility; database recovery should use a new database/volume and an inspected switch, not blind overwrite. Configure monitoring for readiness, disk, certificate expiry and backup failures.
+
+## Existing reverse proxy and migration from earlier settings
+
+`compose.existing-nginx.yaml` and the Nginx examples are optional integration templates, not an automatic installer. Review bindings, hostnames, certificates, forwarded IP trust and restricted panel access before use. They retain the original instance names as examples; replace them for your host. Do not start Caddy on occupied80/443.
+
+Earlier deployments hardcoded the original project's domain in Compose/Caddy. On upgrade, explicitly set `VYRN_DOMAIN` to that same service root before recreating Caddy/Core. This documentation/config cleanup does not redeploy or change any running server.
+
+Calls/TURN remain unavailable even if you open relay ports; inbound UDP confirmation and actual calling implementation/acceptance are separate gates.

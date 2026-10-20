@@ -13,26 +13,21 @@ upstream:
   commit: f2908b14133bbffbf7ab04f641ecb5bfaf533242
   version: 12.10.6
 server:
-  ipv4: 217.18.90.114
-  os_expected: Ubuntu 24.04.3 LTS
-  ssh_user: root
-  ssh_port: 3939
+  # Documentation defaults; runtime settings come from the operator's env file.
+  os_expected: Ubuntu 24.04 LTS
   timezone: Asia/Tehran
   memory_mb: 4096
   disk_gb: 40
-  verified: true
-  ssh_key_path: C:/Users/PC/Documents/ChatGPT/Telegram/VYRN/.local/ssh/vyrn_ed25519
-  ssh_key_accepted: true
   provider_udp_confirmed: false
 domains:
-  web: vyrn.eclipseofficial.xyz
-  api: api.vyrn.eclipseofficial.xyz
-  websocket: ws.vyrn.eclipseofficial.xyz
-  media: media.vyrn.eclipseofficial.xyz
-  push: push.vyrn.eclipseofficial.xyz
-  admin: admin.vyrn.eclipseofficial.xyz
-  updates: updates.vyrn.eclipseofficial.xyz
-  turn: turn.vyrn.eclipseofficial.xyz
+  web: vyrn.example.com
+  api: api.vyrn.example.com
+  websocket: ws.vyrn.example.com
+  media: media.vyrn.example.com
+  push: push.vyrn.example.com
+  admin: admin.vyrn.example.com
+  updates: updates.vyrn.example.com
+  turn: turn.vyrn.example.com
   turn_proxy: false
 limits:
   upload_bytes: 262144000

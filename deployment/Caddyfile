@@ -18,7 +18,7 @@
         -Server
     }
 }
-api.vyrn.eclipseofficial.xyz, ws.vyrn.eclipseofficial.xyz, media.vyrn.eclipseofficial.xyz, push.vyrn.eclipseofficial.xyz {
+api.{$VYRN_DOMAIN}, ws.{$VYRN_DOMAIN}, media.{$VYRN_DOMAIN}, push.{$VYRN_DOMAIN} {
     import security
     @internal path /metrics /v1/admin/*
     respond @internal 404
@@ -29,7 +29,7 @@ api.vyrn.eclipseofficial.xyz, ws.vyrn.eclipseofficial.xyz, media.vyrn.eclipseoff
         header_up X-Real-IP {remote_host}
     }
 }
-admin.vyrn.eclipseofficial.xyz {
+admin.{$VYRN_DOMAIN} {
     import security
     @denied not remote_ip {$VYRN_ADMIN_ALLOWED_CIDRS}
     respond @denied 403
@@ -44,12 +44,12 @@ admin.vyrn.eclipseofficial.xyz {
         file_server
     }
 }
-updates.vyrn.eclipseofficial.xyz {
+updates.{$VYRN_DOMAIN} {
     import security
     root * /srv/updates
     file_server
 }
-vyrn.eclipseofficial.xyz {
+{$VYRN_DOMAIN} {
     import security
     respond "VYRN" 200
 }

@@ -1,13 +1,13 @@
 # INACTIVE TEMPLATE. Incoming UDP is NOT provider-approved. Do not enable the calls profile yet.
 listening-port=3478
 tls-listening-port=5349
-listening-ip=217.18.90.114
-relay-ip=217.18.90.114
-external-ip=217.18.90.114
+listening-ip=192.0.2.10
+relay-ip=192.0.2.10
+external-ip=192.0.2.10
 min-port=49160
 max-port=49200
-realm=turn.vyrn.eclipseofficial.xyz
-server-name=turn.vyrn.eclipseofficial.xyz
+realm=turn.vyrn.example.com
+server-name=turn.vyrn.example.com
 fingerprint
 use-auth-secret
 # static-auth-secret must be written only to deployment/secrets/turnserver.conf.

@@ -1,13 +1,16 @@
 # Contributing
 
-Keep local resource use low, as requested by the owner. Run suites sequentially and target the affected scenario. Build with the emulator stopped; start one emulator only when native verification needs it, and shut down owned test services afterward. Start a second emulator only for genuine two-client acceptance. Do not reduce acceptance coverage or claim physical-phone results from emulator tests.
+Use focused branches from `develop` (the project's automation uses `codex/`). Keep changes small, describe the problem and validation in the pull request, and update the relevant guide/feature status. `main` is the public delivery branch; its name does not imply Stable acceptance.
 
-scripts/build-android.ps1 uses one Gradle worker, disables parallel projects and persistent daemons, and caps the Gradle heap at3GiB with768MiB metaspace and two reported processors. These are JVM limits, not a total-process RAM cap. scripts/start-emulator.ps1 requests1536MiB guest RAM and two virtual CPUs, starts below normal priority and disables the window/audio/boot animation. Host emulator memory and rendering overhead are additional. Keep Go unit tests serial with GOMAXPROCS=2 and go test -p 1; never lower test assertions to save resources.
+## Checks
 
-Use `codex/` branches from `develop`. Keep changes reviewable and update `PROJECT_MEMORY.md`, `docs/ACCEPTANCE.md` and `docs/TEST_REPORT.md` with actual evidence. Read the confirmed decisions before changing product behavior. `main` is the intended delivery branch; a branch name does not imply production readiness.
+- Run `python3 scripts/check-repository.py` before committing.
+- Use an isolated disposable PostgreSQL database for backend tests; set `DATABASE_URL`, then run `go test -race -count=1 ./...` and `go vet ./...` in `backend/`.
+- For Android changes, use the relevant [native/emulator scenario](docs/ANDROID_TESTING.md), record artifact hashes and report actual failures.
+- CI checks repository hygiene, administrator JavaScript, shell/PowerShell syntax, Go formatting/vet, PostgreSQL integration/race tests, reachable vulnerabilities and container compilation.
 
-Run backend tests against an isolated local PostgreSQL database, run `go vet ./...`, and check Android changes with the appropriate emulator suite. CI checks repository hygiene, script syntax, Go formatting/tests/race detection, reachable vulnerabilities and container compilation. GitHub CI execution must be verified after the repository is created; a workflow file alone is not a passing check.
+Run suites sequentially. Keep emulators off during builds, use one by default and two only when testing independent clients. Low-resource settings are in the existing scripts; never weaken assertions to reduce resource use.
 
-Never commit credentials, real environment files, keystores, backup data, private media, SDKs or generated upstream/build artifacts. Run `python scripts/check-repository.py` before publishing. Its pattern checks supplement manual review; they cannot prove that every arbitrary secret is absent.
+Never commit credentials, real environments, keys/keystores, backups, private media, SDKs or generated upstream/build artifacts. The repository scanner detects known patterns, not every possible secret. Preserve upstream/dependency licenses and corresponding-source requirements.
 
-Do not enable private chat before reviewed E2EE and device verification work. Calls stay disabled until inbound UDP and TURN tests pass. Do not publish a release until the complete acceptance matrix is verified, corresponding source is provided, external backup restoration passes and final signing is configured privately.
+Do not label Debug builds Stable. Keep calls disabled until implementation, network prerequisites and acceptance are complete. See [release gates](docs/ACCEPTANCE.md). Report vulnerabilities through the private channel described in [SECURITY](SECURITY.md), not a public issue.

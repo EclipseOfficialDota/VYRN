@@ -1,647 +1,85 @@
-## Local draft cold persistence and clearing — 2026-10-19
+# Android development and testing
 
-With the local Core/TLS proxy ready and one owned emulator running, invoke the exact triple in PowerShell:
+The build workflow uses Windows/PowerShell7, Git, JDK21, Android SDK platform36/build-tools36.0.0 and NDK27.2.12479018. The normal app supports API26+. Do not install test fixtures on a real phone or production instance without explicit authorization.
+
+## Normal build
+
+```powershell
+./android/fetch-upstream.ps1
+./scripts/setup-jdk.ps1
+./scripts/build-android.ps1 -Flavor dev -BuildType debug -ApiUrl https://api.vyrn.example.com
+./scripts/verify-apks.ps1
+```
+
+Use your own HTTPS hostname. Without `-ApiUrl`, the script targets the project's configured API. Build outputs and verification reports live in ignored `artifacts/`; ARM64, ARMv7 and Universal are separate files. A single-ABI APK must match the device. Debug is for evaluation. See [final signing](RELEASE_SIGNING.md) for production builds; keep the endpoint override for your server.
+
+The fetch/prepare scripts pin Telegram and submodules, apply overlays and disable Telegram transport. The generated upstream directory is not committed. See [compliance](GPL_COMPLIANCE.md) before binary distribution.
+
+Install [Android SDK command-line tools](https://developer.android.com/tools) under `.tools/android-sdk/cmdline-tools/latest/`. After `setup-jdk.ps1`, use PowerShell to install the pinned packages and review/accept the SDK licenses when prompted:
+
+```powershell
+$env:JAVA_HOME = (Resolve-Path .tools/jdk21/jdk-21.0.12.1+1).Path
+$env:PATH = "$env:JAVA_HOME/bin;" + $env:PATH
+& ./.tools/android-sdk/cmdline-tools/latest/bin/sdkmanager.bat --sdk_root="$PWD/.tools/android-sdk" "platforms;android-36" "build-tools;36.0.0" "platform-tools" "ndk;27.2.12479018" "cmake;3.22.1"
+& ./.tools/android-sdk/cmdline-tools/latest/bin/sdkmanager.bat --sdk_root="$PWD/.tools/android-sdk" --licenses
+```
+
+Then run the build command above. The upstream wrapper downloads its pinned Gradle version.
+
+## Disposable local backend
+
+Install PowerShell7, Git and Docker Desktop. The container builds the pinned Go toolchain. From the repository root:
+
+```powershell
+./scripts/init-local.ps1
+function dc { & docker compose --project-name vyrn-local --env-file .local/dev.env -f deployment/compose.yaml -f deployment/compose.local.yaml @args }
+dc build core
+dc up -d --wait postgres
+./scripts/with-local.ps1 -Command docker -Arguments @('compose','--project-name','vyrn-local','--env-file','.local/dev.env','-f','deployment/compose.yaml','-f','deployment/compose.local.yaml','run','--rm','-e','VYRN_BOOTSTRAP_EMAIL','-e','VYRN_BOOTSTRAP_PASSWORD','-e','VYRN_BOOTSTRAP_INVITE','core','bootstrap')
+# Continue only after bootstrap completes successfully.
+dc up -d --wait core
+```
+
+Bootstrap only on the new empty database. Existing data must be preserved; a failed login is not a reason to wipe it. Local credentials are in ignored `.local/dev.env`. Control is at `http://127.0.0.1:18080`; HTTP is allowed only for this loopback development route.
+
+In a separate console, with Core running:
+
+```powershell
+./scripts/setup-dev-tls.ps1
+# Stop owned emulators while compiling.
+./scripts/build-android.ps1 -Abis x86_64 -LocalTest -Instrumentation
+./scripts/start-emulator.ps1 -Serial emulator-5564 -GpuMode software -ColdBoot -Monitor
+```
+
+The last command monitors the project API30 emulator; leave that console open. The TLS helper must retain the same local CA embedded in the test APK. Do not regenerate it between build and execution. Normal APKs must never include this CA.
+
+## Focused checks
+
+In another console, run suites sequentially:
+
+```powershell
+./scripts/test-android-integration.ps1 -Serial emulator-5564 -Phases auth-ui
+./scripts/test-android-integration.ps1 -Serial emulator-5564 -Phases first
+./scripts/test-signal.ps1 -Serial emulator-5564 -Network
+./scripts/test-android-integration.ps1 -Serial emulator-5564 -Phases sessions-network
+```
+
+Consult each script's parameters before combining phases. Cold draft acceptance requires the exact ordered triple:
 
 ```powershell
 ./scripts/test-android-integration.ps1 -Serial emulator-5564 -Phases @('draft-cold-prepare','draft-cold-recover','draft-cold-confirm')
 ```
 
-Preparation registers a disposable account and Signal peer, enters group/private drafts through the original composer input connection and leaves via Back. The driver actually force-stops between stages; recover/confirm remove the local TLS reverse mapping, restore drafts offline, clear through the composers and confirm absence after another cold process. Native draft models, serialized preferences, private encryption/plaintext exclusion and distinct PIDs are checked. Confirm restores transport and logs out the fixture peer. Run reaction-read on the same artifacts if the shared network-driver handling changes.
-
-The driver requires the entire triple, treats an already absent reverse listener as offline, and propagates the instrumentation process exit status instead of the last optional-file poll status. Test evidence is artifacts/android-drafts-cold-api30.json. These are text drafts on one device; cloud/other-device sync and locked-device/reply/media drafts are not covered. Keep the emulator off during builds and use only its verified project serial.
-
-## Private Signal reaction chooser and fragment navigation — 2026-10-19
-
-Run `./scripts/test-android-integration.ps1 -Serial emulator-5564 -Phases private-search-ui` with the matching local-TLS app/test APKs and local Core/proxy ready. In addition to native reaction protocol and disconnected search, it now opens the original private ChatActivity, touches its supported message menu/chooser, saves, cancels, navigates Back/reopens and clears its own selection while preserving another participant. Ciphertext/revision/authenticated display and actual native storage are checked. Latest-message positioning uses native scrollToLastMessage as fixture setup; menu/dialog controls and Back use UI actions. Capture: app-private vyrn-test-private-reaction-picker.png; the exported artifact is private-reaction-picker-api30.png.
-
-Display checks must use MessageObject.messageText, while requiring the serialized messageOwner.message field to exclude the private plaintext. Shared openChat setup is also covered by search-ui regression. This scenario does not kill the app, switch accounts or simulate a lost committed response. Keep Gradle and the one emulator sequential; no physical phone is involved.
-
-## Group reaction menu and offline retry — 2026-10-19
-
-With the local Core/TLS proxy ready, build `./scripts/build-android.ps1 -Abis x86_64 -LocalTest -Instrumentation` while all project emulators are off. After Gradle exits, start only vyrn_api30 and run `./scripts/test-android-integration.ps1 -Serial emulator-5564 -Phases reaction-read`. The driver verifies the owned emulator, uses disposable local accounts, and stops/restores only its verified local TLS proxy for real offline/online transitions. Run private-search-ui afterward as the Signal/offline-search regression on the same artifacts.
-
-reaction-read now includes actual original message-menu and platform-dialog touches, three-selection checkbox enforcement, Clear, confirmed-state-only offline failure, read-before-explicit-retry, and existing protocol/SQLite/WebSocket checks. Touch coordinates for separate dialog windows use getLocationOnScreen, not root-relative getGlobalVisibleRect. Diagnostic checked-row states are stored only in app-private vyrn-test-reaction-touches.jsonl. Reports and precise remaining gaps are recorded in TEST_REPORT; these tests do not establish private-picker/two-native-client/cold/committed-response-loss acceptance. Shut down the emulator before another build.
-
-## Private native read context — 2026-10-15
-
-Run `./scripts/test-two-client-messaging.ps1 -PrivateComposer` on the matching local TLS APK/Core with both preserved test emulators. Online private view phases now require actual incoming ChatActivity server read receipts, replay the native read request and verify unchanged encrypted payload/revision, then reject a different peer paired with that message ordinal. The read adapter uses only already authenticated local cached context for authorization; an unavailable cache is not fetched merely to mark a message read. Existing offline Send/cold confirmation checks remain part of this scenario. Run notification-ui separately as the group/other-session regression.
-
-These checks do not establish a newly unread private message read offline followed by cold receipt recovery, cross-session private races or physical devices. Reports: artifacts/android-two-client-private-composer.json and artifacts/android-notification-ui.json.
-
-## Two-native-client current regression — 2026-10-15
-
-With the matching local TLS APK/Core and preserved emulator-5560/5562 ready, run each suite separately:
+For genuine two-device messaging, stop API30 first, then use the two project API35 AVDs:
 
 ```powershell
-./scripts/test-two-client-messaging.ps1 -PrivateKeys -Offline
-./scripts/test-two-client-messaging.ps1 -PrivateComposerEditCold
+./scripts/test-two-client-messaging.ps1 -Edit -Delete -Offline
 ```
 
-Both scripts register from actual UI on the two dedicated emulators. The first includes native group Send/Edit/Delete and offline/cold recovery; the second includes actual encrypted offline Edit/Done and cold intent/editor recovery in both directions. Current4b5a0f53 APK reports have231 and605 recorded scenario checks respectively, with registration evidence separate. See TEST_REPORT for dates/limitations and exact worker/wrapper cleanup outcomes. A matching old check count or stale report is not current evidence. Physical-phone and full lifecycle acceptance remain separate.
+This scenario registers disposable accounts and checks native controls plus server state. It needs two emulators; it is not a physical-device test. On2026-10-20 both attempted runs were blocked by host emulator crashes. Do not reuse an older report as a pass for a failed current run.
 
-## Original offline read after process death — 2026-10-15
+## Resources and results
 
-Run `./scripts/test-android-integration.ps1 -Phases @('read-cold-prepare','read-cold-recover')` against matching local Core/native TLS. Only this exact ordered pair is accepted. Prepare receives a real notification, disconnects transport before its original action opens ChatActivity and requires the original readHistory intent to be durable. The driver stops the app between phases without clearing data. Recovery requires a new PID/same identity/intent, restores transport, and waits for the existing account worker to confirm the receipt and clear the own intent while foreign test identities remain untouched. Report: artifacts/android-read-cold.json. No explicit queue drain/send is invoked by recovery. Run notification-ui separately as online/read-event regression.
+Builds use one Gradle worker, no persistent daemon/parallel projects, a3GiB heap and two reported processors. One test emulator requests1536MiB guest RAM and two CPUs; host rendering overhead is additional. Avoid concurrent builds/emulators and stop only owned VYRN services. Use two emulators only for real two-client scenarios.
 
-This does not establish receipt delivery while the process stays killed, physical devices, long outage/revoked-session/storage-failure behavior or private chat read support. Unconfirmed read journals are scoped by original session and limited to1000 records; session-rotation reconciliation remains pending.
-
-## Same-account other-session read event — 2026-10-15
-
-notification-ui now also logs into a distinct same-account API session, backgrounds/screens off the native receiver, posts a second message from the sender fixture and requires actual notification plus native unread1 before the remote read. The stream must clear that notification and native unread count without a direct native-update fixture or receiver dialog reload. Requires conversation.read events and unread_count in the authorized conversation detail response. Report: artifacts/android-notification-ui.json. This does not prove two native phones, offline/cold replay or adversarial identity races.
-
-## Native group read acknowledgement — 2026-10-15
-
-The notification-ui phase also requires server read_by_me after its original notification action opens ChatActivity, then checks a fresh conversation DTO has unreadCount0. Run with local Core supporting PUT /v1/conversations/{id}/read. The fixture does not issue that PUT; the original native readHistory request must do it. Cold restoration, offline retry, cross-session read events, sender read ticks and private read mapping remain separate requirements.
-
-## Live-process background notification with screen off — 2026-10-15
-
-Run `./scripts/test-android-integration.ps1 -Phases notification-ui` on matching local TLS/Core supporting conversation unread_count. The dedicated emulator registers through real UI, accepts the Android notification prompt, goes Home and turns the screen off with Android input. A distinct REST fixture sends a group message. Require an active system notification containing that message and its original content PendingIntent opening the correct ChatActivity. The test wakes the emulator and cancels its fixture notifications in finally. Failure diagnostics contain counts/state only in app-private vyrn-test-notification.json. Report: artifacts/android-notification-ui.json.
-
-This is live-process screen-off delivery, not process-death/Doze/physical-phone/private notification acceptance. Native read-history synchronization is not implemented by the unread-count DTO change. PostgreSQL tests: TestIntegrationConversationUnread and TestIntegrationMessagesAndPermissions; require DATABASE_URL and isolated test schemas (a skipped integration test is not evidence).
-
-## Original voice recording UI storage error and retry — 2026-10-14
-
-Run `./scripts/test-android-integration.ps1 -Phases media-voice-storage-ui` on local Core migration009/native TLS and the owned no-host-audio emulator. It records through original composer touch controls, matches the unique live output descriptor by device/inode and changes it to read-only. Require visible storage Toast text, failed-file cleanup, zero published audio/message, restored composer and successful repeat recording in the same activity. Report: artifacts/android-media-voice-storage-ui.json. Permission is fixture-granted; whole-volume ENOSPC and physical hardware are separate acceptance requirements.
-
-## Native voice storage-I/O failure — 2026-10-14
-
-Run `./scripts/test-android-integration.ps1 -Phases media-voice-storage` with the matching local instrumentation APK. The test uses the actual native encoder and finalizer, switches only its own output file descriptor to read-only, and requires rejected finalization, partial-file cleanup, original error notification, no audioDidSent and successful subsequent codec boundary/decode tests. A second fixture injects the prior-frame failure latch. Report: artifacts/android-media-voice-storage.json.
-
-This is a component I/O failure scenario, not actual whole-volume ENOSPC or original recording UI error acceptance. Android denies app access to /dev/full; the test does not weaken that policy or fill the device volume.
-
-## Actual voice chat recovery after process death — 2026-10-14
-
-Run the exact ordered pair on matching local Core migration009/native TLS and the owned no-host-audio emulator:
-
-```powershell
-./scripts/test-android-integration.ps1 -Phases @('media-voice-chat-cold-prepare','media-voice-chat-cold-recover')
-```
-
-The driver clears the dedicated test app only before prepare, records through original controls, holds a committed part acknowledgement, then force-stops/relaunches the app. Recovery handles permission prompts during bounded startup and relies on normal unsent-message recovery. Require original identity/hash/size, voice type/duration and one published message. Report: artifacts/android-media-voice-chat-cold.json. This is local group recovery before first acknowledgement, not physical-device, prolonged-outage or positive-progress acceptance.
-
-## Cancel an offline pending voice from chat — 2026-10-14
-
-Run `./scripts/test-android-integration.ps1 -Phases media-voice-cancel-chat-ui` against local Core migration009/native TLS and the owned no-host-audio emulator. It records through the actual composer while offline, activates the original bubble's accessibility Cancel, and requires durable cancellation/server fence/part cleanup before native bubble removal. Reconnection must not publish the voice, and late parts must be rejected. Evidence: artifacts/android-media-voice-cancel-chat-ui.json. This is before-upload accessibility cancellation, not a physical gesture/mid-transfer/process-death case.
-
-## Voice recording and Send while offline — 2026-10-14
-
-Run `./scripts/test-android-integration.ps1 -Phases media-voice-send-offline-ui` against matching local Core migration009/native TLS. The driver requires the owned no-host-audio emulator, removes local transport before recording, verifies pending voice/source retention, restores TLS/mapping and checks automatic completion of the same original recording. It restores owned networking in finally. Report: artifacts/android-media-voice-send-offline-ui.json. This is before-upload disconnection, not mid-transfer/process-death or physical microphone acceptance.
-
-## Original group voice recording and Send — 2026-10-14
-
-Run each phase independently with a matching local instrumentation APK and Core migration009:
-
-```powershell
-./scripts/test-android-integration.ps1 -Phases media-voice-send-ui
-./scripts/test-android-integration.ps1 -Phases media-voice-send-member-ui
-```
-
-The script refuses these phases unless emulator-5560 is the owned vyrn_api35 qemu process started with -no-audio, so host audio is not captured. RECORD_AUDIO is fixture-granted. The original composer receives a real touchscreen hold/release, and original recording/Send/upload must publish exactly one acknowledged voice with matching bytes, duration and progress. Member group ownership is an independent REST fixture. Reports are artifacts/android-media-voice-send-ui.json and artifacts/android-media-voice-send-member-ui.json. Permission dialogs, physical hardware and interrupted/cold/pause/low-storage recording remain separate requirements.
-
-## Received voice play/pause in native chat — 2026-10-14
-
-Run `./scripts/test-android-integration.ps1 -Phases media-voice-ui` against local Core migration009. The recipient registers through native controls; an independent REST sender publishes original-codec synthetic five-second audio. The actual ChatActivity must render a voice row, the original FileLoader must download matching bytes, and the original accessibility Play/Pause controls must produce positive player progress and a paused target. Active automatic downloads are awaited rather than cancelled by a test click. Evidence: artifacts/android-media-voice-ui.json. This does not use the microphone or verify physical audio output/recording UI.
-
-## Voice upload and native adapter — 2026-10-14
-
-Run `./scripts/test-android-integration.ps1 -Phases media-voice-upload` against matching local Core migration009. The dedicated emulator uses the original small Audio upload queue and original-codec synthetic recording; native media dispatch/outbox performs completion and publication. Replaying the same request must produce one message, validated duration/hash and one durable voice intent. This phase does not press the recording or playback controls. Evidence: artifacts/android-media-voice-upload.json.
-
-## Original voice codec boundaries — 2026-10-14
-
-Run `./scripts/test-android-integration.ps1 -Phases media-voice-codec` with a matching local instrumentation APK. This dedicated-emulator phase uses synthetic PCM with original native startRecord/writeFrame/stopRecord and full cropOpusFile decode/re-encode; it never opens the microphone. Three endings test zero, half and near-full final frames. Fixtures in backend/internal/api/testdata allow independent backend framing/timing checks. This is codec verification, not recording/Send/playback UI acceptance.
-
-## Photo send during a mid-upload outage — 2026-10-14
-
-With the native local TLS proxy running, use a matching instrumentation build:
-
-```powershell
-./scripts/test-android-integration.ps1 -Phases media-photo-send-mid-offline-ui
-```
-
-This isolated phase acknowledges part zero, holds the committed second part, then removes local transport after original upload progress. It verifies the native pending photo during a12-second outage and automatic completion under the same transfer identity after reconnection. The driver stops only owned local helpers, restores the native TLS proxy/mapping in finally, and saves artifacts/android-media-photo-send-mid-offline-ui.json. It does not test production transport or a physical phone.
-
-## Automatic pending gallery photo recovery — 2026-10-14
-
-Use the exact ordered pair in one invocation with a matching local instrumentation build:
-
-```powershell
-./scripts/test-android-integration.ps1 -Phases @('media-photo-chat-cold-prepare','media-photo-chat-cold-recover')
-```
-
-This clears only the dedicated emulator app before prepare, preserves its data between phases, commits and holds the first upload-part acknowledgement, then force-stops and restarts the original app. Recovery relies on normal unsent-message startup. Evidence: artifacts/android-media-photo-chat-cold.json. The older media-photo-upload-cold-prepare/recover pair tests explicit original FileLoader worker resume and remains a separate component scenario. Neither pair establishes physical-device compatibility.
-
-## Original native upload workers — 2026-10-12
-
-With matching local Core supporting migration008, run separate `media-upload`, `media-upload-big`, `media-upload-cancel` invocations of scripts/test-android-integration.ps1. Final local APKafce9eb96099e93d3d9de6df002569ec741c30fc6272638acd1fa32f08f344de passes24+24+19=67 checks, reports2026-10-12T08:39:17/08:44:31/08:35:25+03:30. Small2MiB+113 and big12MiB+113 use original FileLoader/FileUploadOperation, original progress notifications, persisted server parts and exact completed hash.16MiB+113 cancel test calls original FileLoader.cancelFileUpload after real progress; server cancellation/cleanup, late-part409, no completion and original source preservation pass. Small had one allowed pre-runner attach retry. All accepted scripts exit0.
-
-Owner/session captured at upload construction, scoped saved preferences, immutable Java part snapshot/native buffer release and original ACK/progress are wired. Tests invoke FileLoader directly, completion/group through API fixtures; no native chat Send button, offline/restart prefix or encrypted private upload claim. Final independent Signal exits0/35 on same APK. Overlapping Big80742/Signal attempt explicitly discarded; exact instrument11528 closed, independent reruns accepted. Local Corea7fc1e7/binary68e835d8 now has migration008, no VPS or normal public phone APK change.
-
-## Native incoming group file — 2026-10-12
-
-Run `scripts/test-android-integration.ps1 -Phases media-ui` with matching local TLS APK and Core supporting media metadata/ETags. Final APK13aa3915b991c5d02d7db63af3eadde22b58bf8a1bf5b7c6354e178dc0f4d990 passes37 checks at2026-10-12T07:25:12.1931289+03:30, no attach retry, script16801 exits0. Actual invite registration plus a separate API-fixture sender creates a group/file message. Original incoming ChatMessageCell/action and FileLoadOperation download2MiB+113 bytes with whole SHA validation. Descriptor/native hash, changed-account/unbound native ID, recipient new-download denial after deletion and shared completion guard rejection of an altered file copy pass.
-
-Media IDs derive from owner/media UUIDs in a separate long-ID table. Historical v4 fixture migration preserves native user/chat numbering; scope, reopen and fresh-database stability checks pass. Native dialog users/chats are applied before programmatic ChatActivity entry; wait for navigation and use active fragment view. This is one emulator with two accounts/API sender fixture, not native Upload/Send or two devices. No claim for actual corrupted-cache interruption, upload progress/resume/cancel, image/voice playback, encrypted private media or physical phones. Normal public phone APK/VPS remain98c88ff/a00a123; new local Core binaryf926d87b uses backendc9851f2 and preserved existing configuration/database.
-
-## Account lifecycle regression on latest local APK — 2026-10-11
-
-Local APK SHA256 b2da7451a54b77d2758f1830630848b48828226c9fc1eb5e71ef0a7be46eeebb passes259 recorded UI checks: auth-ui12, sessions-ui67, logout38 across3 phases, onboarding45 across5 phases, sessions-network97. Separate reports dated21:32:33/21:33:33/21:34:34/21:35:14/21:36:03+03:30; no accepted run needed attach retry. Original controls exercise recovery/sign-in, registration and session management, logout offline/online, recovery-code preservation across real force-stops and session-loading/revocation failures under actual local TLS loss.
-
-Run standalone `auth-ui`, `registration-ui`, `sessions-ui`, `sessions-network` in separate script invocations: each needs its own fresh app. Mixed58387 auth+sessions failed the fresh-account fixture guard; independent runs passed. Group related logout-* or onboarding-* phases as shown below to preserve their shared account. auth97274/sessions1818/logout25511/onboarding31960 exit0. sessions-network6733 prints PASS and writes97-check report; actual worker absent, childless RTK11140 verified/stopped, outer exit1 is wrapper cleanup. One API35 emulator/programmatic Settings entry/API-created companion sessions are explicit limits. Full account switching, physical phones, storage/Keystore failures, media and background acceptance remain open.
-
-## Private edit Retry and changed-text feedback — 2026-10-11
-
-Run `scripts/test-two-client-messaging.ps1 -PrivateComposerEditCold` against the local TLS instrumentation APK. Final local APK SHA256 b2da7451a54b77d2758f1830630848b48828226c9fc1eb5e71ef0a7be46eeebb passes635 recorded checks (30 registration plus605 scenario),37 rounds, report2026-10-11T21:25:33.5827815+03:30. Both cold edit phases record39 checks. Changing the restored pending text gets a specific permanent alert without Retry, preserves the original encrypted journal fingerprint, and reopening actual Edit restores that original saved text. Exact original Retry then commits revision2 on the same server/native message; live recipient and both cold offline displays pass.
-
-Signal40545 exits0/35 checks on the same APK at2026-10-11T21:14:34.4318859+03:30. Classification rejects certificate handshake, account guard and plain storage IO as private Retry; connection refusal and abrupt TLS EOF remain retryable. The actual disconnection can surface SSLHandshakeException with a direct EOFException cause, so certificate rejection alone cannot classify it. Generic HTTP IO is wrapped in an IOException-compatible network exception. Debug diagnostics expose only exception/cause classes and fixed guard names.
-
-Native8659 printed PASS; actual worker was absent, completed childless RTK27300 was verified and stopped. Outer exit1 is wrapper cleanup, not an observed test-script exit0. Prior1215 crashed in test code dereferencing a transient rendered cell after server IO; a bounded await now verifies the same identity/placeholder/edited-date conditions across re-layout. This is two emulators, not physical-device acceptance. Older suites below retain their original hashes; Release, background/media lifecycle and external media backup remain open.
-
-Normal phone build83917 exits0/3m30s; verifier passes all3 Debug ARM files/publicTLS/no localCA/minAPI26. Universal158702830 bytes/SHA256376974edbd8d53174e297462cb2fcd9bd3a204796bcd7effe7113dd546006ad8; ARM64122477413/280676569ce6a01406853f437891e0dd1069314f17181afd900d7c52a5fadaaf; ARMv7108190719/dc0a0ec470de17dc89f6ad79cf6b20c435327f2559715cf0edb54a7f0a515218. Physical installation and final signing remain unproved.
-
-## Cold native pending edit recovery accepted — 2026-10-11
-
-SignalMessages.display adds edit_text only for live own authenticated cached head/current revision and matching encrypted private-edit peer/conversation/message/client/session/text. Original bubble text remains original. Bridge hydrates optional pending text into volatile weak PrivateEditState; editTextForComposer requires the original captured basis, unchanged row/context/session/owner/text hash/expiry/fences. Reproducible upstream composer overlay uses that text for editing only; no native messageOwner or ordinary draft write. Confirmed revision2 does not expose old revision1 edit_text. Unknown/different sessions do not expose it; recipient cannot read sender edit intent.
-
-Final local APKaac08232da0de2efe9b27365e52699f84abf0fe4509e1872264de9fbd33b97a7. Signal39750 exits0 with238 (169network+46actual disconnected cold+23reconnect) at2026-10-11T17:38:55+03:30, including original sender-only pending display, wrong-session suppression and no stale pending field after confirmation. First42180 failed the negative fixture's saveValue outside transaction; fixed test writes/restores with existing store.transaction, no product invariant loosened. Builds54613/38562/46200/36452 pass3m12s/46s/43s/53s.
-
-UI84784 report artifacts/android-two-client-private-composer-edit-cold.json at2026-10-11T20:23:29+03:30 passes621 checks (30registration+591scenario),37rounds, same localAPK. Both actual native offline Edit/Done create body-null encrypted intent and actual Retry dialog before host reconnect. First phase ends, host force-stops original app; cold phase has new real PID, same original encrypted intent SHA, old plaintext bubble and desired edit text in actual offline editor; native message cache and ordinary draft remain separate. Second actual Done/failure/Retry reuses intent, original server/native ID becomes revision2, recipient updates in its live process, both final cold offline views pass. Cold phases32 checks each. Extra cold receiver120s allows actual extra startup/failure cycle; ordinary40s unchanged. Host first staged phase can end before250ms poll; terminal state is read once before declaring missing and Finish-Phase still requires PASS. Actual Retry dialog readiness prevents restoring TLS before second request really fails.
-
-UI74551 passed registrations but missed final offline_edit_pending due completed-phase poll race; fixed host terminal-state read. UI67934 then failed cleanup mapping because primary emulator really disappeared; only stable peer4472/8736 remained by CIM, primary absent. No cold UI pass attributed to that attempt. Preserved primary AVD restarted with existing verified Stable37.2.12 host/ColdBoot/Monitor83229; peer stable monitor98818 retained; both mappings restored. Final84784 printed PASS; actual script gone and childless RTK17448 verified/closed, outer exit1 is wrapper cleanup, not observed script exit0. One bounded pre-runner failed-attach retry occurred during final registration; both actual registration UI phases then passed. No AVD wipe or backend reset.
-
-Normal phone2014 exits0 in2m30s; verify-apks passes all3 Debug/publicTLS/no localCA/minAPI26. ARM64=122477377 bytes/7d76ff89fd3f615c9004433f97690eeaed52d7250ebe41bb42d130f3667882d8; ARMv7=108190683/7ef24920ec784ee6e338e65912cf938eb1fea9fca66fe7b147c73d0f486ff282; Universal=158702794/4839cdc3b74576661e44633a75fd21375633900be3dd32db08f5b985e1f65a89. These differ in ABI/TLS from tested emulator APK. Earlier API30 compatibility and held-successful-ack/UI scenarios remain tied to their original APK, not rerun here.
-
-Run scripts/test-two-client-messaging.ps1 -PrivateComposerEditCold after local instrumentation build, and scripts/test-signal.ps1 -Network separately; do not overlap ADB suites or edit Java during builds/tests. Both AVDs now use the existing Stable37.2.12 runtime; revalidate actual processes before recovery. Dedicated local TLS PID changes during tests, discover its listener/executable/upstream rather than reuse old PID. Final build/test workers are terminal; emulator monitors intentionally remain services. Production remainsa00a123; no DNS/TURN/release signing/external backup changes.
-
-Full8-item goal remains active. Next: pending edit cancellation/replacement and permanent versus temporary failure feedback, then broader account/device/navigation/crash/media/background lifecycle. Physical phone install/real two phones, signed Release/update and external media-inclusive S3 backup/restore remain unproven or gated; calls/TURN remain off until inbound UDP confirmed. Do not mark full goal complete from these emulator/component results.
-## Native private Edit opens while already offline — 2026-10-11
-
-Verified follow-up: PrivateComposerEditLostAck50154 exits0, report2026-10-11T17:20:48+03:30 records565 checks (30registration+535scenario),35rounds on the same becd4e0 local APK. Both held successful edit responses are interrupted by actual app force-stop, cold original history reconciliation and exact retry preserve server/native message/ciphertext/ratchet; recipient realtime and both cold offline views pass. Native received-message preflight denial adds2 checks over earlier563. This proves committed-but-unacknowledged edit recovery, not an unprepared cold editor.
-
-Normal phone39965 exits0 in3m10s; all3 verifiers pass (signature/package/min26/ARM/no localCA). ARM64=122477389/f9c7a3aad137212ed6fa0db33b5725717edc4a672b6f4c7043afdbb052a66a33; ARMv7=108190695/45a4b284d9d2f25f5516ae99ac139c42a64ee82c291db6809cdead502a212e4f; Universal=158702806/3b84e2eef127890b2bf3bc6b0a4505c48c1a0ccd1a20051d34bb1e62f9923bd4. Debug/publicTLS; physical installation and final Release not verified. No Signal component or native group rerun on this build, keep earlier evidence tied to its APK. Current local proxy PID may have changed during offline suite; discover/validate listener rather than reuse18172. Stable peer monitor98818 is intentionally left running. All build/test workers terminal, except intentional emulator service monitors.
-
-Private getMessageEditData now checks the existing encrypted display against local owner/session/native self, peer/message/conversation/revision/ordinal, learned expiry and the current native deletion snapshot; no HTTP or private conversation lookup is performed. Rechecks session/native self/context and latest deletion snapshot after crypto validation. Received, self-peer, unknown and mismatched context remain denied. Group preflight still uses the authenticated server. Private edit dispatch no longer fetches dialogs to resolve a cached conversation; captured request identity, encrypted stageEdit context and server revision/roster checks still apply.
-
-Offline UI test fault now stops the dedicated TLS proxy BEFORE selecting actual menu/Edit and native preflight, then Done stages original encrypted body-null intent; old bubble stays, server revision remains1 until actual Retry, same message becomes revision2 and recipient updates in its live process. Fresh report at2026-10-11T17:13:58+03:30 records567 checks (30registration+537scenario),35rounds; sender edits26 each, including invalid self/unknown preflight while offline and recipient denial. Final local APKbecd4e0c88474621577f787c939b8cc7b9c601203d15a0d9888903e08e71181f. UI suite26201 printed PASS, actual script worker gone; childless RTK24112 verified/closed, host exit1 records wrapper cleanup rather than test-script exit0.
-
-Local build43174 failed nonpublic keys.sessionId helper access; fixed with existing vault/session guards plus fresh deletion snapshot. Build9142 exits0 in1m45s. First UI78615 failed registration instrumentation_start with peer ADB/process gone; attempt93148 failed registration recovery dialog, local aggregate showed3 invites/0usable/maxremaining0. Only matched depleted local bootstrap invite replenished to1000/7days (UPDATE1), no production change. Attempt28468 passed registration but primary runtime peer exited during composer-recover; Windows Event1000 confirms qemu0xc0000005 unknown module. Existing official Stable37.2.12 host ColdBoot used on preserved peer; monitored launcher98818 remains a service. API30 helper5564 was identity-verified and stopped after its completed compatibility tests. No AVD wipe or broad process kill. Restart peer with explicit .tools/android-emulator-37.2.12/emulator/emulator.exe; default primary runtime can crash here.
-
-This is concrete progress toward the full goal, not full completion. Cold native restoration of an unprepared edit's pending text/editor is still missing; existing transport cold-intent proof remains separate. Temporary/permanent Retry error classification, account/device/media/background lifecycle, physical phones, final Release and external backup gates remain open. Production Core remainsa00a123; calls/TURN remain off.
-API35 network39012 exits0/235 on the same final local APK after the timestamp change. This is component regression coverage; older native UI561/563 remains tied to its original APK.
-
-## Android 11 compatibility — 2026-10-11
-
-The requested phone range is roughly five years old through current devices. Keep minSdk26 (Android8) and both ARM64/ARMv7 in the phone Universal Debug APK. Manifest support is not physical-device acceptance. Xiaomi Note10 Pro installation remains unverified; no Android version/installer reason or physical ADB evidence was supplied.
-
-Create the checksum-verified official Android11/API30 x86_64 AVD with scripts/start-emulator.ps1 -Serial emulator-5564 -ColdBoot. Existing API35 AVDs are preserved. Run scripts/test-signal.ps1 -Serial emulator-5564, then the same command with -Network, then scripts/test-android-smoke.ps1 -Serial emulator-5564 -LocalTest. Do not overlap ADB suites. API30 reports use separate filenames; measured API must match the AVD name.
-
-Actual older-platform testing found that Instant.parse rejected numeric-offset API timestamps. Timestamps.parse uses OffsetDateTime.parse and converts to Instant; explicit offsets remain mandatory. The regression checks cover Z, +00:00, +03:30 and nanosecond precision, and reject offset-free timestamps. The expiry test harness uses the same parser.
-
-Final local test APK8ac89c3f8eea0197a7ab83c53e3ed01e52e16e866743d34d9df6e59c51fa9c19 passes API30 Signal29 checks (23+6), network235 (169+46+20), and two stable cold launcher starts. These are x86_64 emulator results, not ARM installation or full native messaging UI acceptance. Current normal phone APK hashes are recorded in artifacts/apk-verification.json. The older two-client561/563 evidence below belongs to572509 and was not rerun on this new build.
-## Private edit offline intent and native Retry — 2026-10-11
-
-After building the local x86_64 instrumentation APK, run `scripts/test-signal.ps1 -Network` for235 component checks, then `scripts/test-two-client-messaging.ps1 -PrivateComposerEditOffline` for561 checks using actual Edit/Done/Retry in both independent emulator directions. Do not overlap ADB suites. The host discovers the dedicated127.0.0.1:18443 listener, verifies its executable/upstream, stops that proxy after preflight to close existing HTTPS connections and restores it with the same CA. Removing ADB reverse alone did not prove disconnection of a live process. Production services are not stopped.
-
-Report `artifacts/android-two-client-private-composer-edit-offline.json` records encrypted unprepared intent, original old bubble, revision1 before Retry, original ID at revision2, realtime recipient and both cold offline displays. `artifacts/android-signal-network.json` separately proves actual offline staging and cold transport recovery of the exact unprepared edit. Final local APK SHA256572509a00bdec01a3178f51747b90f04ea1f77495dca7efbae10aa5aad951b54. The offline UI report is not cold native Retry UI acceptance and does not test opening Edit before preflight while already disconnected. Physical phones, cancellation/replacement and broader lifecycle remain open.
-
-`scripts/test-two-client-messaging.ps1 -PrivateComposerEditLostAck` also passes563 checks on the same APK after this change: held successful edit response, actual process death376ms/423ms after request start, cold original revision2 recovery and exact retry without ratchet/ciphertext advance. Normal phone Debug builds and all three verifiers pass; their TLS/ABI differ from this local emulator APK. Keep final Release/signing and physical installation separate.
-
-## Native staged unknown acknowledgement accepted — 2026-10-10
-
-Local build47208 exits0 in34s after test snapshot fix. PrivateComposerLostAck79791 exits0; artifacts/android-two-client-private-composer-lost-ack.json records349 checks (30 registration plus319 scenario checks) at2026-10-10T21:20:46.9570133+03:30 on local APKdec69cf69e91150eb6cbecf98fbac52aefc3b86dce44a74a18a6ababd73adcc2. Both independent emulator directions use actual native disconnected Send, first/existing private pair resolution by original worker, cold unprepared intent/draft/privacy checks, then local exact-client successful response hold. Original prepared journal has no acknowledgement/UI completion and active original lease; standalone encrypted SignalStore snapshot preserves native owner/session/device/client/local/random/date and ciphertext/ratchet proof without waiting behind HTTP vault guard. First app force-stop248ms, second131ms after request start, both before20s read timeout. Actual cold app respects original durable lease and automatically recovers exact already committed server ID/conversation without new ciphertext/ratchet advance. One original server/native message, exact repeat delivery, both clients decrypt/display and cold offline cache/privacy pass. No prepared fixture or precreated first pair substitutes for actual Send. Local proxy target can be exact staged client UUID with unresolved conversation; unrelated requests/clients pass through, successful matching response held once. Four Go proxy unit scenarios pass, including existing send/edit/delete and new client targeting. Host interruption helper now accepts explicit sender with default5562 and restores only that owned mapping in finally. An initial run98842 failed because snapshot called a nested SignalStore transaction; test helper now computes proof inside its existing transaction, not a production workaround. Original permanent-message/native assertions stay intact. Pre-runner registration attach retried once by existing bounded script on final run, then both actual registrations passed. Parser/scanner164/diff checks pass. No production behavior/normal phone APK change; ARM64 remains122477397 bytes/f89d7bc3f8f12590af5e2b152ec5cfab482059e71b61d62609a53ef3124eeec0. Previous331 composer/221 Signal/221 cancellation/351 retry remain distinct earlier local APK evidence. Full goal active: account/device/navigation/crash edges, media/background/full auth/physical phones/release/external backup remain. No physical phone, VPS/DNS/TURN/signing/external backup changes. Build/test workers terminal; original healthy Core/TLS services retained.
-
-Runnable check: rtk proxy pwsh -NoProfile -File scripts/test-two-client-messaging.ps1 -PrivateComposerLostAck after local instrumentation build. Separate report and mutually exclusive staged retry/cancel flags. Fault proxy listens only127.0.0.1:18444 with existing scoped TLS; no trust bypass or production traffic. Test proxy unit check: rtk proxy go test scripts/lost-ack-proxy/main.go scripts/lost-ack-proxy/main_test.go.
-## Native staged manual retry accepted — 2026-10-10
-
-Local build50699 exits0 in41s. PrivateComposerRetry9916 exits0; artifacts/android-two-client-private-composer-retry.json records351 checks (30 registration plus321 scenario checks) at2026-10-10T21:06:05.0761761+03:30 on local APK3d93dfeb39ca48e14ff76336b33d29972030a16290bade7a453efb0d663a049d. Both emulator directions use original native Send disconnected, local storage-failure/draft/double-click proofs, and eight actual app-worker offline failures with original retry backoff (no exhaustion injection). Null conversation/ciphertext body, no message acknowledgement and unchanged peer ratchet are checked at exhaustion; actual native failed bubble visible. Cold offline original tuple/date/draft/privacy and failed budget remain. Online cold app cannot automatically revive failed intent: original eight-attempt/503/zero next-at record remains and actual failed bubble requires Retry. Native unsent scan and altered placeholder cannot revive it. Actual native message options/Retry invokes app worker; original local/random/dialog/date preserved, failure/error/next-at cleared, one original encrypted server client ID and one confirmed native bubble. Exact repeated delivery preserves prepared ciphertext/ratchet/server identity after success. Both clients decrypt/display and cold offline caches/privacy pass. Staged retry does not reuse prepared-message fixture or precreate the original pair. Existing normal/cancel scenarios stay separate; prior331 composer/221 Signal/221 cancellation are earlier distinct-APK evidence, not reruns. No production behavior or normal phone APK changed; ARM64 f89d7bc3f8f12590af5e2b152ec5cfab482059e71b61d62609a53ef3124eeec0 remains122477397 bytes. Parser/scanner164/diff checks pass. Full goal active: actual staged unknown ACK, account/device/navigation/crash edges; media/background/full auth/physical phones/release/external backup remain. No physical phone connected, no VPS/DNS/TURN/signing/external backup changes. No build/test worker live; original healthy Core/TLS services retained.
-
-Runnable check: rtk proxy pwsh -NoProfile -File scripts/test-two-client-messaging.ps1 -PrivateComposerRetry after local instrumentation build. Incompatible with PrivateComposerCancel. Each offline phase deadline300s allows the real eight-attempt backoff; instrumentation exhaustion check220s. Reports are distinct and the host always restores offline ADB mappings through existing finally cleanup.
-## Native staged cancellation accepted — 2026-10-10
-
-Local build86645 exits0 in2m9s. PrivateComposerCancel99189 exits0; artifacts/android-two-client-private-composer-cancel.json records221 checks (30 registration plus191 scenario checks), tested APK af7e84fd498b78b533f1c0cf786731165cb90fe7f31fa83a7aa30b9b7e8cca03. Both independently registered emulator directions use actual native Send while disconnected, then cold reopen and actual Cancel Sending menu. First pair is absent before Send; the encrypted local intent has null conversation and ciphertext body. Offline cancellation retains original client/local/random/dialog/date identity, durably requests cancellation without premature completion, and does not prepare ciphertext or advance the peer ratchet. Reconnected original app worker resolves conversation and permanent server client cancellation fence; intent text/body scrubbed, negative native row removed and durable replay fence checked. Two recovery cold starts per direction reject late native objects/storage resurrection and show no cancelled bubble. Existing prepared cancellation recovery now reads authoritative binding conversation, compares fixture conversation when provided and checks original date. No production behavior or phone APK changed: latest verified normal ARM64 remains f89d7bc3f8f12590af5e2b152ec5cfab482059e71b61d62609a53ef3124eeec0,122477397 bytes. PrivateComposer normal331/Signal221 remain earlier different-local-APK evidence, not reruns on this test APK. Parser, scanner164 and diff checks pass. No physical phone connected (only5560/5562); physical USB request pending. Full goal active: staged Retry/unknown ACK/account/device/navigation/crash, complete auth/media/background/physical/release/external backup remain. No VPS/DNS/TURN/signing/external-backup mutation. Core/TLS service wrappers remain intentional; no build/test worker live.
-
-Runnable check: rtk proxy pwsh -NoProfile -File scripts/test-two-client-messaging.ps1 -PrivateComposerCancel (after local instrumentation build). Report is separate from normal PrivateComposer and prepared PrivateCancel; no fixture precreation or ciphertext preparation replaces actual native Send.
-# Local Android integration
-
-Same-APK Signal86269 exits0 with221 checks (160 network/JNI +44 disconnected cold +17 online restart) at20:42:27 on4a78fbea98a472ea5b08059460629c6576192fadaba7695f59642cb4884f9a44. Normal75246 build exits0 in2m15s; all3 APK verifiers pass. ARM64/ARMv7/universal122477397/108190703/158702814 bytes; hashes f89d7bc3f8f12590af5e2b152ec5cfab482059e71b61d62609a53ef3124eeec0 /f0df1cd648c1e4b22a7599800c85393919f6a263c140ba83287044c3cb990e50 /94df8b9b76a4a694f49cbdbcc6c6fb92121ff1754cefffa33e582072c137fd2c. Normal Debug/public TLS/no local CA/minAPI26; physical phone installation remains unproved. No app behavior changes after builds. Full original goal remains active.
-
-
-## Unsupported AI controls and native enabled state — 2026-10-10
-
-PrivateComposer94036 exits0 with331 checks at20:40:24 on APK4a78fbea98a472ea5b08059460629c6576192fadaba7695f59642cb4884f9a44. Both directions force the actual composer AI visibility callback: control remains hidden/disabled, no AI hint is created, forced click keeps the draft and opens no editor. An actual RichEditorToolbar instance with a fixture delegate proves both AI controls disabled/dimmed and forced clicks invoke no AI actions. Existing native Send/local-failure/same-text draft/cold pending/first-pair/automatic confirmation and recipient/privacy/cache checks pass in both directions. Screenshot confirms AI and schedule/silent hints absent from the actual reopened chat.
-
-Pinned overlays use one shared unavailable capability for chat input, photo caption, attachment top/bottom caption, rich editor/toolbar and common AI/style/compose sheet entries. RichEditor.Button.setEnabled now calls its native superclass before the existing early return/animation: previously Android isEnabled/accessibility remained enabled even when its private flag/clickable/alpha changed. Caption/attachment/full rich-fragment interaction is not exercised by this scenario; those gates are source/compilation evidence. Whole-app unsupported controls and physical phones remain acceptance work.
-
-An initial attempt failed before UI checks because local Core/TLS were stopped. Original PostgreSQL data stayed online; restored only existing Core/TLS services in actual Ubuntu-24.04 with strict scoped-CA TLS, without resetting DB or renewing a valid invite. A subsequent failing rich-toolbar enabled assertion found the actual shared-button defect. Test now reports UI assertion failures on the instrumentation worker rather than crashing the main process. Two-client script checks strict backend readiness before registration. Healthy Core/TLS service wrappers must not be killed as abandoned test workers.
-
-Final same-APK Signal94339 exits0 with221 (160 network/JNI +44 disconnected cold +17 online restart) at14:44:28 onf97cff24a546e98a9200de1029a60b8e6b265f79502f709d4b02f823ae1188a9. This complements PrivateComposer319; full physical/device/media/background/release acceptance remains incomplete.
-
-
-## Private draft edits and unsupported hints — 2026-10-10
-
-PrivateComposer23414 exits0 with319 checks at14:42:30 on APKf97cff24a546e98a9200de1029a60b8e6b265f79502f709d4b02f823ae1188a9. First direction changes the composer text and restores the original text before the local commit callback; the new same-text draft remains and survives cold reopening. Second unchanged draft still clears only after durable persistence. Both actual schedule/silent hint Runnables are invoked and remain invisible. All offline failure/duplicate-click/encrypted pending/first-pair/automatic recovery/receiver/cold privacy checks pass in both directions. Screenshot confirms schedule/silent hints gone; the separate unsupported AI editor/hint remains visible and is the next control audit item.
-
-Normal21185 build exits0 in2m25s; all3 APK verifiers pass. ARM64/ARMv7/universal122477401/108190707/158702818 bytes; hashes b006fc8965e6a05f679cd752779049b7d56e6b543a8f32718ad80ecb1c0cb81d /44ee328fd8765a593a983480d44e83a0dfd2174519c8109856c2c94352190b9a /616421e81efcaa8d7c23278a3a4effb588dee0e2e831d2b226c2ea0c78abd657. Normal Debug/public TLS/no local CA/minAPI26. User identifies Xiaomi Note10Pro/latest OS/122MB APK; exact OS/downloaded hash and Android install error remain unknown. No physical phone connected yet; SDK/ABI manifest compatibility is not install proof.
-
-## Physical phone installation diagnosis
-
-Enable USB debugging, connect the phone to this computer and authorize the computer on the phone. Select its exact physical serial from `adb devices`; never use an emulator serial for physical acceptance. From the VYRN root:
-
-```powershell
-rtk proxy .tools/android-sdk/platform-tools/adb.exe devices
-rtk proxy pwsh -NoProfile -File scripts/diagnose-phone-install.ps1 -Serial YOUR_PHONE_SERIAL
-rtk proxy pwsh -NoProfile -File scripts/diagnose-phone-install.ps1 -Serial YOUR_PHONE_SERIAL -Install
-```
-
-The first diagnosis reads model/Android/API/ABIs and compares the selected APK's real minimum API/native architectures. Default APK is the normal ARM64 Debug build; use `-Apk` to select a different existing file. `-Install` updates through `adb install -r -t`, preserves app data and records Android's exact stdout/stderr in ignored `.local/android-phone-install.json`. A failure never triggers uninstall, data clearing or security-setting changes. An install observation timeout is unconfirmed; inspect the installed package before retrying. SDK/ABI compatibility alone does not prove installation or app behavior. Parser/emulator-rejection/exact ADB stderr checks pass; physical installation remains untested until a real phone is connected.
-
-Same-APK security regression Signal61980 exits0 with221 checks (160 network/JNI,44 disconnected cold,17 online restart) at09:56:11 on1fc2ff226ad2e505684a6ce8817d7412ef24a65b9965bdd8aee2bf89583c5946. Normal27784 build exits0 in2m37s; all3 signature/package/API/ABI/manifest verifiers pass. ARM64/ARMv7/universal Debug APKs122477389/108190695/158702806 bytes; hashes b34491d5e3377fb9b5e9d84def0c7f0a46b8aebc6304898989299bddfae31ba3 /5599056447e8a755e7e0a67780089a45448c6227114308f823be5262d5dbf360 /c7583dbe417bb426808c3a1edcc1a0b0ef8cff6f730b4f94059effac6c0bf1b1. Android8.0 minimum, normal public TLS/no local CA; physical installation unproved. No source behavior changes after builds; full original goal remains active.
-
-
-## Actual private composer offline Send — 2026-10-10
-
-`scripts/test-two-client-messaging.ps1 -PrivateComposer` passes315 recorded checks at09:53:27 on local APK1fc2ff226ad2e505684a6ce8817d7412ef24a65b9965bdd8aee2bf89583c5946 (exec47333 exit0). Both clients register through native UI and retain their original acknowledged devices across cold restart. Peer profile setup does not create the first private pair. Remove transport before clicking the actual native Send control: an injected encrypted-store failure preserves the draft and permits retry; durable success rejects a second click, preserves newly typed text in the first direction and clears the unchanged draft in the second. Pending text/body/ratchet checks, cold offline bubble/draft/native database confidentiality, and cold automatic recovery with one original server/native message pass in both directions. Both receivers and their offline cold caches pass the existing private UI/privacy/draft checks.
-
-First private history failure now releases the native initial-loading state and delayed notifications instead of indefinitely hiding the staged bubble. Send enabled/alpha refreshes when busy/readiness/effect state changes. Unsupported shared plaintext/effect/forward/screenshot/long-press paths remain blocked. A legacy schedule/silent hint is still visible and needs removal for unsupported contexts.
-
-This proves two emulator clients using programmatic native `performClick`, not physical touch or phones. New staged Cancel/Retry/account/navigation/unknown-ACK races, draft ABA/crash-consumption, full device/trust lifecycle, background notifications, media and release/external backup remain acceptance work. Same-APK Signal security regression and normal phone packages are recorded separately after terminal validation.
-
-## Offline private intent without a server conversation ID — 2026-10-10
-
-Same-APK -PrivateAutomatic regression passes318 checks at08:50:05, exec79417 exit0 (registration30 + rounds288). This retains the older prepared-path worker/offline/cold/native receive/draft/gate evidence, separately from the new null-conversation component checks.
-
-Signal network suite219 checks pass at08:44:02 on APKea9e117be87d5b90e3c8cac3772effda2246e05f042e4554a87ff2a28362f0c9. The three actual processes pass160 initial network/JNI,42 disconnected cold and17 online restart checks. The disconnected phase stages a new encrypted intent with a null conversation/body, repeats the exact identity, rejects caller-supplied conversation rebinding and verifies actual failed offline resolution leaves identity/text/body/ratchet unchanged. It also persists cancellation against a null-conversation intent.
-
-After force-stop/reconnect, the original intent resolves through the existing unique private-pair endpoint, decrypts at the recipient and retains its local/random/date identity. Duplicate send retains server ID/ciphertext/ratchet. Cancellation resolves the same pair, fences/scrubs the original client without encryption and cannot be revived. This fixture deliberately reuses an existing server pair while the outgoing intent has no conversation ID; creation of a previously nonexistent pair, resolution-write-failure/crash windows and actual native composer/worker staging remain acceptance work. It is not a two-physical-phone or full private-composer claim.
-
-## Fresh offline private intent — 2026-10-10
-
-Signal network suite209 checks pass08:23:51 on APKa915ae78da9b5f74c2e4b1da7da7800f03dab261d58d4571bb2c9020a5ec26b4:160 network/JNI,37 disconnected cold,12 online restart. Unlike the earlier prepared-before-disconnect fixture, the disconnected phase creates a genuinely new encrypted local intent with null body and unchanged ratchet. Assert exact repeat/native-row/text/peer conflicts, metadata-only recovery, encrypted store reopen and original cancellation before any preparation/directory call. Online cold phase retains the tuple/date/schedule, prepares through current membership/device validation, delivers/decrypts, retries without ciphertext/ratchet changes, fences cancelled work and rejects a mismatched peer/conversation without encryption.
-
-Same-APK -PrivateAutomatic regression passes318 checks at08:30:55 (registration30 + rounds288), exec46982 exit0. Both actual offline app workers and cold-reconnect native deliveries preserve original prepared ciphertext/server/native identity, receiving/draft/history/send-gate checks. This is regression coverage for the existing prepared path; it does not exercise new staged text through the native composer/adapter.
-
-New staging coverage is through the existing journal/send API, not actual composer Send or the new adapter/worker staging entry. A known private conversation and previously acknowledged original device exist before going offline. First-dialog creation, actual cold native staged-bubble reconciliation and the full original scope remain unfinished.
-
-## Verification dialog Cancel and revoked devices — 2026-10-10
-
-Signal194 checks pass07:54:07 on APK85525888c876685f1a30d5a50d6835282704706e47083f588e2baa57fd0a12b8 (160 network/JNI,28 disconnected cold,6 online restart). Reuse the fixture's second recipient device after normal encrypted delivery: preserve its displayed number/session bytes, log out that real backend session, fetch the signed current roster and require only the surviving device. Reject confirmation of the old number with signal_device_not_ready; stored unverified status/number/ratchet remain unchanged and encrypted reopen retains rejection. This is a real server/device-key lifecycle component check; stale native dialog confirmation across revocation and physical devices still need acceptance.
-
-Extended -PrivateVerification first clicks native Cancel on the number dialog, requires dismissal and unchanged exact number/unverified status, then reopens and confirms/removes through actual controls. Final run passes408 checks at08:06:19 on APKd1aba0443853fc06183bfa8b01faa643f949ccaa33555f17efc0499b6bb7ee48: registration30 + rounds378. The initial menu-transition failure led to a shared exact-node bounded click wait and cached predicate result, preventing double action dispatch. Earlier totals336 are corrected to364 because registration devices store numeric check counts, not check arrays. No physical-device or complete stale-dialog lifecycle claim.
-
-Same final APK Signal194 passes08:07:43 (160 network/JNI,28 disconnected cold,6 online restart). Both suites and cleanup are terminal. Production phone-app sources are unchanged by this test/helper work, so normal122/108/159MB packages remain the previous verified outputs.
-
-## Native device verification scenario — 2026-10-10
-
-Final harness rebuild passes38s. Final -PrivateVerification suite passes364 checks at07:45:20 on APKddb8de43553dca74fc845dc7c3c15c54178dfd6adce45cebd05214bdf3f601a6. Both final PNGs were pulled and visually inspected: same number on both devices, full UUIDs wrap, comparison instruction and both actions fit without clipping. The earlier first-frame raster issue is superseded by the final captures; the remaining lifecycle/physical/composer limits below still apply.
-
-Same final APK `scripts/test-signal.ps1 -Network` passes190 checks at07:48:27 (156 network/JNI,28 disconnected cold,6 online restart). An initial registrationHTTP400 was resolved for the retry by renewing only the local test invitation with the existing admin/MFA maintenance helper; credentials stayed in ignored dev.env.
-
-Run `scripts/test-two-client-messaging.ps1 -PrivateVerification` with the dedicated two-emulator local TLS setup. This independent scenario includes native registration/key publication, programmatic private-message preparation/delivery, actual chat More options → exact device UUID/status row →60-digit number → Codes match → Remove verification on both clients. Check the visible native dialog contains the current number/full peer-device UUID and inspect encrypted status after each actual click. Existing private-history/draft/offline and disabled-composer checks remain in the scenario. Complete device changes, revoked-device confirmation, navigation/session changes while dialogs are open, physical phones and composer Send remain outside its proof.
-
-The initial partial-label click failed because the shared accessibility helper matches exact text; the fixture now includes device UUID/status. Its first screenshot preceded dialog composition; the final harness waits for main-thread/accessibility idle before capture. The PNG stays in the test app's private files and is transferred as binary to ignored `.local` for inspection. The first completed364-check run at07:39:54 usedb4d5e7e8f71bff2396c99d48ef919466aa145d03ad25ee9d81183d5e3b07ba2b; the final evidence above usesddb8de... .
-
-## Device-pair verification component checks — 2026-10-09
-
-Signal network suite188 checks passes23:42:35 onb957f2506c2a56a8d34f2d3d1abf052445f9a42fd88a871c4246d548e383c68d. The codec fixture establishes real peer sessions before comparing both device-pair60-digit numbers. Confirm only a currently displayed number; check local-only/idempotent status and encrypted store reopen, then reject a wrong number/unknown device. Temporarily alter each original pinned address/identity and remove only the fixture's session; fresh target-roster processing must reject it without creating a session and an old number must not repair it. Finally restore exact original encrypted record/session and check explicit unverify leaves identities/ratchet/number unchanged. These are component checks; the native verification screen and active-roster/device-change acceptance remain unfinished.
-
-Same-APK -PrivateAutomatic318 checks passes23:46:57, preserving real offline worker/cold reconnect/private receiving and duplicate-prevention behavior after the early pin checks. Composer remains gated.
-
-## Native private cancellation — 2026-10-09
-
-Run `rtk proxy pwsh -NoProfile -File scripts/test-two-client-messaging.ps1 -PrivateCancel` after the local instrumentation build. This is a separate scenario and cannot combine with private automatic/manual Retry, lost-ACK, deletion or mutation restart. It registers both emulator clients, publishes distinct keys and prepares encrypted pending rows programmatically. With actual HTTPS disconnected, open the existing message-options accessibility menu and click Cancel Sending. Require durable intent and unchanged original ciphertext/ratchet while the bubble is kept. Restore transport, force-stop/reopen and require the app worker to resolve cancellation, scrub payload and acknowledge only after native storage/UI cleanup. Another cold process restart must retain original server/negative native fences. Explicit late negative object/storage replay and actual reopened ChatActivity must remain free of the cancelled bubble.
-
-Final report artifacts/android-two-client-private-cancellation.json passes164 recorded checks at23:30:49 on APK729e2721fb953611db29cffa1f10177520260f4f78dae154a6c15fa230d887b4. This proves unsent offline cancellation in both emulator directions; committed-send UI races, all cleanup interruption windows, cancellation retry exhaustion, physical touch/phones and native composer/device trust remain separate work. An initial final attempt terminated at pre-runner process startup ANR; a single terminal retry passed. Do not reinterpret that failed attempt as a cancellation assertion failure or claim its startup root cause fixed.
-
-## Native private Retry scenario
-
-Shared-entry regression: scripts/test-two-client-messaging.ps1 -PrivateKeys -ManualRetry passes325 checks at22:48:17 on the same298b1... APK, report artifacts/android-two-client-private-keys.json. Actual failed-send/cold-failed/native Retry phases and group send/edit/delete/cancellation/offline recovery pass. Actual worker terminated; a verified childless owned RTK wrapper required cleanup and outer exit1 reflects that cleanup, not failed instrumentation.
-
-Final300-check result passes at22:41:03 on local APK SHA256298b1bbc4a848b9790659357d394f9e948de258ceb15b408c63a3e196afbcc50 (registration30 + rounds270), actual worker/host terminal exit0. Both directions include the real eight-attempt offline phase, cold failed bubble, visible native Retry click and original encrypted confirmation. The first failed-bubble screenshot was visually inspected. This proves native action wiring through accessibility, not physical touch or composer activation.
-
-Run scripts/test-two-client-messaging.ps1 -PrivateManualRetry on the two dedicated local-TLS emulators. This mode rejects combination with PrivateAutomatic/LostAck/MutationRestart/PrivateDelete. It prepares/schedules the encrypted native pending row programmatically, removes the actual localhost transport, allows eight real app-worker attempts with natural per-record backoff, requires the failed native bubble and retains ciphertext/ratchet fingerprints. Offline instrumentation allows300s; the internal exhausted wait allows220s. Then force-stop/cold-open, require original encrypted failed state, open the existing native message-options accessibility action and click the visible localized Retry control. Confirmation must come from the app worker, without a test delivery/direct-retry API call. Require original ciphertext/ratchet, one server sender/client identity, one confirmed native bubble/no original negative and encrypted UI acknowledgement. Automatic native unsent scanning and a wrong placeholder body must not revive failure. Both directions then reuse receiving/private draft/offline/send-gate checks.
-
-Report: artifacts/android-two-client-private-manual-retry.json. Inspect its fresh result/hash/date; command availability or successful build is not a passing result. The original accessibility action returns View's fallback after dispatch, so the visible Retry control and subsequent confirmation establish UI success. Physical touch gestures, composer activation, cancellation, device trust and full objective remain separate acceptance requirements.
-
-## Persistent private retry checks — 2026-10-09
-
-Same984898... APK group -PrivateKeys -Offline regression passes261 checks at22:22:24. Shared SEND/worker changes preserve actual native group send/edit/delete/cancellation and disconnected cold recovery. Actual worker exited; verified childless owned RTK wrapper was closed, producing outer exit1. Fresh passed report and final PASS output establish test outcome; physical-phone acceptance remains separate.
-
-Same984898... APK -PrivateChat -LostAck passes288 checks at22:19:30 with161ms interruption, original ciphertext/ratchet/server identity and no duplicate native/server message. It remains a programmatic adapter delivery interruption, separate from automatic worker recovery; an interrupted worker claim lease is not proved by this test.
-
-scripts/test-signal.ps1 -Network passes152 checks at22:13:31 on local APK SHA256984898bdfb59fce3fb8a696237a72a908832bb5ab76e23038ec833c036d8b812 (118 network/JNI,28 disconnected cold,6 online restart). Tests exercise unique claim tokens and stale callback rejection, independent durable retry metadata, bounded failures/manual revival and original ciphertext/ratchet. A real HTTP404 supplies the permanent API error. The eight-attempt test makes the encrypted fixture deadline due between attempts rather than sleeping through transport backoff. Cold restart keeps the failed record and reconstructs native SEND_ERROR from authenticated encrypted metadata. Manual retry here is a component API, not a native gesture.
-
--PrivateAutomatic now requires a real offline app-worker IOException with persisted attempt/status/deadline, then original retry count increasing on automatic cold reconnect and error/deadline cleanup after native UI acknowledgement. Final318-check report passes at22:16:32 on the same984898... APK. Preparation/scheduling stay programmatic and composer remains gated. Earlier314-check report belongs to the older APK; the new report proves the strengthened318-check scope.
-
-## Automatic encrypted private recovery — 2026-10-09
-
-Same final APK -PrivateKeys -Offline regression passes261 recorded checks at22:03:08, report artifacts/android-two-client-private-keys.json. Shared worker/SEND changes preserve native group send/edit/delete/cancellation and cold/offline recovery. The real test worker exited; a childless RTK wrapper remained and was closed only after PID/path command/parent/no-child verification. Outer exit1 records wrapper cleanup; use the fresh passed report and final suite PASS output for test outcome. No emulator data wipe was needed to restore the stopped local runtime.
-
-Run scripts/test-two-client-messaging.ps1 -PrivateAutomatic against the dedicated local TLS service and two owned emulators. Final report artifacts/android-two-client-private-automatic.json passes314 recorded checks at19:59:56; local instrumentation APK SHA2567df6b8aa5826c69dacd1e95f356540c2e7c40e79d957ef7e0b7c10ac98917d94. The test prepares a native encrypted pending entry programmatically, proves its actual ChatActivity bubble with transport disconnected, explicitly schedules it, force-stops/reopens and awaits the app-owned worker. Recovery does not call the delivery method from the test. It requires original local/random/date/peer/conversation metadata, one matching server client identity, one confirmed bubble, removed negative native row and encrypted UI acknowledgement. Existing native private receiving/draft/offline/send-gate checks remain included. -PrivateAutomatic implies PrivateChat and rejects combination with LostAck/MutationRestart to keep recovery scopes separate.
-
-On the same APK, scripts/test-signal.ps1 -Network passes139 checks at19:55:04 and scripts/test-two-client-messaging.ps1 -PrivateChat -LostAck passes288 at20:05:08 with299ms interruption. Explicit scheduling rejects wrong-account identity and repeated intent preserves ciphertext/ratchet. Lost-ACK recovery preserves the exact pre-interruption server UUID. These are bounded emulator/component scenarios; composer Send, durable per-record failed/manual-retry/cancellation and trust/device UX remain gated/incomplete. Background delivery with the process closed and two physical phones are not established.
-
-## Private lost-ACK adapter recovery — 2026-10-09
-
-Run scripts/test-two-client-messaging.ps1 -PrivateChat -LostAck. Fresh local instrumentation build53s; final report artifacts/android-two-client-private-lost-ack.json passes288 checks (registration30 + rounds258) at19:32:10, SHA2562029becfd909d8ff261fc83683d3515650e5267a2c9a38a54df1fc7e53fc6a9b. The second sender's prepared/displayed native pending row uses the original encrypted outgoing record. Existing owned local HTTPS helper holds server success; force-stop occurs210ms from request start. Reopen with the same pending metadata, compare original ciphertext and sorted Signal-session fingerprints, redeliver and require the pre-interruption server UUID, one matching sender/client live server record, one confirmed native bubble, original negative removed, idempotent delivery and journal UI ACK. Existing both-direction confirmed/offline/draft/send-gate checks remain included. Helper test: go test main.go main_test.go from scripts/lost-ack-proxy. No root Go module is added.
-
-This is actual process interruption/native ChatActivity with programmatic adapter invocation, not native composer Send or automatic private recovery. Post-persisted-ACK/native/UI-journal crash windows and device trust remain separate. Only tests changed; prior verified b43c114 phone APKs remain current for app sources. Prior Signal137/group261 reports belong to their earlier local APK hash and are not reattributed to this build.
-
-## Private app adapter and native pending process restart — 2026-10-09
-
-Same final local APK scripts/test-two-client-messaging.ps1 -PrivateKeys -Offline passes261 checks (registration30 + rounds231) at19:18:43 local. Actual group composer send/edit/delete cancellation/confirmation, receiving changes, cold deleted absence and offline queue/automatic reconnect/confirmed cold reopen remain valid after the shared history change.
-
-Run scripts/test-two-client-messaging.ps1 -PrivateChat on the final local test APK. Final report19:11:36 passes276 checks (registration30 + rounds246), SHA256503f8ad5d632f8716472b0843853ba26f7d2bc020a46475e4ee9d0904ce4a676. Both sender directions prepare a private encrypted journal/native placeholder row through the app adapter, open actual ChatActivity, force-stop, remove the local HTTPS reverse mapping, reopen offline and verify original client/local/random/date and visible pending text. Restore transport, deliver through the adapter, require one confirmed bubble and no old negative row, repeat delivery with the same server ID, and verify encrypted UI work marked done. Existing confirmed/offline/draft/native send-gate checks remain. Host report states REST conversation setup and programmatic adapter entry; native composer Send and automatic private retry/cancellation/trust remain gated.
-
-Run scripts/test-signal.ps1 -Network: final137 checks pass at19:14:09 on the same APK (106 +25 +6; three distinct PIDs15850/15984/16107). Date tampering, premature ACK and wrong account/local/dialog/random/server-ID ACK are rejected. Exact repeated ACK removes journal work without changing original date/server ID or advancing the ratchet. Received/pending volatile native display and disconnected original-row component checks remain covered.
-
-Native history restores random IDs for negative private user rows, retaining existing pending group and encrypted-dialog behavior. New pending-reopen phase uses the existing bounded offline activity startup. Saved online pending-startup trace proved startActivitySync waiting while main draws; pending delivery uses the same visible-activity startup rather than unbounded global-idle waiting. The actual bubble assertions remain unchanged; every chat phase has the existing50s diagnostic trace. Physical ARM installation is separate; no phone is connected. Latest normal universal APK158670010 bytes, Android8+, ARM32/64, Debug/public TLS/no local CA.
-
-## Encrypted pending row component — 2026-10-09
-
-Final suite132 checks at18:03:07 local, APK6d2ee49dcd55c80c992b05003796f8a2ab99b436a665c52ded425f66552e94a9. Added received/pending native-owner replacement with empty body and original-owner restoration. Old volatile text must clear even though native applyNewText ignores empty strings. Pending replacement is exercised again from the cold native row offline. Null-owner clearing branch is not separately exercised. Native composer delivery remains gated.
-
-scripts/test-signal.ps1 -Network now covers126 checks at17:49:10 local on APK49455be4b8a5dbe9ac0e228e457f9abfc2df1476cafb52313499b68de6d4108b. Prepare the native identity using an actual IdMap peer, persist a real placeholder negative native row, force-stop/remove transport, read its actual serialized row/random/send state and require constructor-restored volatile text. Scan native blobs/serialization for fixture plaintext; mutate random and vault user and require clearing. Preserve account3 borrowed-slot guard/cleanup; delete only the dedicated native fixture row after cold read. No account reset or security bypass. Actual composer creation/scheduling/retry/cancellation/ACK reconciliation and foreground pending chat remain unfinished.
-
-## Private send safety gate — 2026-10-09
-
-Latest -PrivateChat passes226 recorded checks at17:31:20 on local APKfd3046e6098665f97eddc606ef4afd105acfa501a09b8d17d8f3ec7b97945bd8. Check actual disabled/dimmed Send, force composer submission, invoke shared native send/forward/screenshot entries and query native messages_v2: no negative private row or plaintext pending bubble; composer draft stays intact and cold-restores offline. This gate prevents the earlier bridge-only rejection from clearing/persisting private text. It does not enable encrypted private delivery; remaining media preparation/UI and legacy storage require separate acceptance.
-
-## Private draft checkpoint — 2026-10-09
-
-Run scripts/test-two-client-messaging.ps1 -PrivateChat against the existing local HTTPS/DB and two dedicated emulator fixtures. Latest run passes202 recorded checks at17:13:17, APK416d289422d42f49cac5889ef9db59070720e1e53a10c49e3b956a3ee40784e5. Besides actual receiving bubbles/native SQL privacy, it enters a private draft into the actual composer, calls native saveDraft, checks encrypted preferences and restores the same draft after force-stop with transport disconnected. Reject corrupted/swapped/legacy records and peer UUID reuse; preserve group serialization. This is programmatic input, not physical UI acceptance or actual reply-save coverage. Unknown legacy drafts are retained but unavailable; migration/recovery feedback remains required. Phone compatibility report remains unresolved pending model/OS/file; universal includes ARM64/ARMv7, Android8+.
-
-## Native-send identity component — 2026-10-09
-
-scripts/test-signal.ps1 -Network also prepares deterministic user:random_id native identities through SignalMessages.prepareNative. Check transaction rollback, changed row rejection, server ACK retention, removal after deletion and metadata-only account-scoped recovery. A real disconnected cold app restart must preserve original local/dialog/random/client IDs and exact ciphertext without ratchet advance. The borrowed inactive native account3 must remain empty on disk after cleanup; refuse an already active slot, never clear it to make the test pass. This component does not create or send a native composer row. Before wiring it, protect native pending-message/draft persistence from plaintext and bind the mapped native peer/account to the authenticated owner. Private Send stays gated until UI recovery/reconciliation is verified.
-
-## Private deletion replay — 2026-10-09
-
-Run scripts/test-two-client-messaging.ps1 -PrivateDelete after a local x86 instrumentation build. Includes the full -PrivateChat receiving/cache scenario, deletes the second fixture message through authenticated REST, and cold-opens both actual private chats online and offline. Require stream-learned persistent native tombstones and a visible known-live first bubble before asserting the deleted message is absent. Controlled stale plaintext objects, new/edit updates, real notification dispatch, dialog previews and MessagesStorage.putMessages must not restore it. A newer object from another dialog must never replace this dialog's preview; absent same-dialog fallback clears the preview. Query actual messages_v2 and the existing dialogs row after replay. No fixture directly seeds the tombstone. Native private composer Send/Delete controls remain gated and untested; physical phones and deletion not yet learned before disconnect remain separate requirements.
-
-## Two native private chats — 2026-10-09
-
-Run scripts/test-two-client-messaging.ps1 -PrivateChat after a local x86 instrumentation build. Reuses native registration/key-publication setup, then sends encrypted text through SignalMessages as a fixture in both directions. Actual private ChatActivity cells and native database rows are checked on both clients, including force-stop and offline reopen with each18443 reverse removed. Restore mappings and remove private fixtures in finally. Screenshots remain ignored in .local for visual verification. Native composer sending is not exercised or enabled by this test.
-
-Shared bounded SDK helper explicitly uses UTF-8 input/output; scripts/test-android-test-tools.ps1 verifies Persian/emoji round-trip, preserved exit code and timeout termination of only the owned helper. Offline activity readiness handles existing test permission prompts before requiring real app window focus. For an exhausted local invite, scripts/renew-local-test-invite.py uses ignored dev.env bootstrap admin credentials, localhost TLS/private CA and MFA to create a fresh normal invite and logs out. No credentials/code are printed, no redirect/proxy inheritance, no production endpoint or database quota reset. Keep .local and environment files out of Git.
-
-## Context-bound private display component — 2026-10-08
-
-scripts/test-signal.ps1 -Network additionally validates automatic signed sender directory resolution without one-time prekey consumption, address/version rejection, and offline cached duplicate receive. The display reader requires authenticated peer/conversation/sender/revision/ordinal and respects deletion/expiry fences. A UI-thread synthetic MessageObject check uses applyNewText and serializes the underlying TL message to prove the placeholder is retained. This does not enter a real private ChatActivity, inspect MessagesStorage blobs or prove physical-device delivery; those remain required when wiring the renderer.
-
-## Authenticated encrypted history after offline process restart — 2026-10-08
-
-scripts/test-signal.ps1 -Network now runs signal-network, signal-network-offline-restart, then signal-network-restart. The host removes the scoped emulator18443 reverse before force-stopping/relaunching the app; the offline phase requires an actual IOException from authenticated HTTPS before testing cache access. Restore the same reverse before online retry and cleanup, including on failure. Three distinct actual app process IDs are recorded.
-
-Latest run passes76 checks (59 network+11 offline+6 online restart), artifacts/android-signal-network.json at22:50:26; local APK SHA256c52cd64f115a6c1883bf3cf2c9c07777c9932eed44737eb60654dc8d60afaaa6. Both encrypted history caches open offline, pending ciphertext/ratchets stay unchanged, duplicate receive requires no directory, changed account/session and reused old-session device proof are rejected, mismatched encrypted device binding is not replaced, missing store creates no identity, and a valid other-account login can replace corrupt unrelated token ciphertext. Includes a real server-device UUID differing from the requested local UUID. These are service/cache tests; native private rendering/sending remains gated.
-
-## Compact Debug packaging and device-key readiness — 2026-10-08
-
-The app module pins the same NDK27.2.12479018 as the native library module, allowing AGP to strip debug symbols. Exclude only libsignal_jni_testing.so from JNI packaging; retain libsignal_jni.so and libtmessages.49.so. The build wrapper recreates only the selected variant's APK output and incremental packaging cache, with validated paths inside android/app/build. This prevents deleted ZIP content from leaving hundreds of MB of unused archive space. Normal APK verification rejects test-only JNI and single-architecture files above250,000,000 bytes.
-
-Run scripts/build-android.ps1 -Abis arm64-v8a,armeabi-v7a, then scripts/verify-apks.ps1. Fresh normal Debug artifacts:ARM64 122,428,217 bytes, ARMv7 108,141,523 bytes, universal 158,653,634 bytes. No local CA; no release-signing claim. After the same fresh local x86 build, scripts/test-signal.ps1 -Network passes64 checks (58 network+6 real process restart), APK SHA256d9265fc63d0ec059b43a9a1cd6abe88270496764b1ddaeef7e10bb71a01c8349. This verifies actual HTTPS/JNI encryption and decryption after stripping and removal of test JNI; physical ARM testing remains separate.
-
-scripts/test-two-client-messaging.ps1 -PrivateKeys -Offline adds automatic native-dialog key publication to existing independent registration and foreground/offline messaging. Each authenticated installation must publish its own distinct device/address, then preserve that publication on cold app entry. The phase waits for automatic preparation before calling the idempotent helper; an explicit helper call cannot conceal a missing native trigger. Private send UI remains gated. These are emulator checks, not proof of full private chat or physical-device completion.
-
-## Native mutations interrupted before acknowledgement — 2026-10-08
-
-Run `./scripts/test-two-client-messaging.ps1 -MutationRestart` after local x86 instrumentation build. It includes -LostAck/-Offline, then sends/caches a fresh message on both native clients, captures owned/live server identity, presses native Edit/Done and shared Delete cancel/confirm, holds successful upstream acknowledgements and force-stops the actor before10s. Both cold histories verify edited identity/revision/uniqueness and repeatedly verify deletion without resurrection. Existing fault helper accepts -operation send/edit/delete and selected -message UUID for mutations; existing local CA checks remain active. No new dependency or production policy change.
-
-Final report artifacts/android-two-client-mutation-restart.json passes412 recorded checks, APK SHA256451305f23d695e7013348865ca48812f536579ab42e6574a132c6c7e0af51c8b, build1m1s. Stop durations:send693ms/edit720ms/delete245ms, before real20s read timeout. Intentional interruption has its own status and captured native check snapshot; successful restart phases still require normal passed instrumentation. Native chat entry is programmatic and group setup is REST fixture. Physical devices and arbitrary pre-commit/storage/account-switch/offline mutation acceptance remain separate; do not claim complete messaging or whole-goal readiness from this scenario.
-
-## Verified interruption before read timeout — 2026-10-08
-
-The refined `./scripts/test-two-client-messaging.ps1 -LostAck` now passes285 checks after a59s local instrumentation build. Fresh report artifacts/android-two-client-lost-ack.json; local APK SHA256376c1654a8a9fc809ba8f66cd050181d05e128fccceeedd305e9b89c7158bde7. Interrupted phase records original queue SENDING and interruption_ms=462, below its10s limit and the app's20s read timeout. After a real successful response is held and the app is force-stopped, original queue/client/server identities reconcile once; recipient bubble and confirmed cold reopen pass. This supersedes the earlier pending/refinement paragraphs below. Interruption has explicit interrupted_as_requested status, never an ordinary successful instrumentation completion. Physical devices and broader mutation/account/background/private/media acceptance remain separate.
-
-## Lost acknowledgement fault test — 2026-10-08
-
-After local x86 instrumentation build, run `./scripts/test-two-client-messaging.ps1 -LostAck`. Requires installed Go to compile the stdlib helper in scripts/lost-ack-proxy/main.go. The helper binds only127.0.0.1:18444, forwards to existing localhost18443 with the local public CA and unchanged certificate checks, and holds only the first successful group-send response. Only the peer's18443 reverse is temporarily mapped to18444; cleanup restores it and stops the owned helper. Private state contains server identity/status/timing, never message bodies or credentials. `go test scripts/lost-ack-proxy/main.go scripts/lost-ack-proxy/main_test.go` tests fault selection, upstream success proof, cancellation and one-shot release.
-
-First complete run passes284 recorded checks, artifacts/android-two-client-lost-ack.json, local APK SHA256555f5f537790af8bd69f9cdd41639b5c841d82997d6898ec8e34a15d302c8cfd. Native Send, real server commit, intentional app interruption, original queue/server-ID recovery, exactly-one native/server message and confirmed cold reopen pass. Explicit interruption has its own result status. That run's proof/log interval was about20s; it does not prove a stop before read timeout. Current refinement adds SENDING proof and a10s completed-interruption limit using request_started_ms; pending helper uses the immutable user captured before Send. This latest variant is not built/run because automatic approval review hit the account usage limit. Build/rerun it before relying on strict in-flight acceptance. Physical devices, broader mutation races and full objective remain open.
-
-## Verified native Retry after failed cold reopen — 2026-10-08
-
-`./scripts/test-two-client-messaging.ps1 -ManualRetry` now passes301 recorded checks (registration30 + messaging/lifecycle271), saved in artifacts/android-two-client-manual-retry.json. Local APK SHA2564bfd095e15efab8bbbf5d741d2a45df05aa3fe8550b24f64596e6494485fc025. The first recovered run exposed a real identity regression: normal-group history discarded the persisted native random ID, so Retry delivered under a new queue client ID. The pinned-source overlay restores that ID for negative group messages. Both cold pending/failed reopens now verify the native ID derives the original account-bound client ID; native Retry confirms the original row SENT, matching server identity, one native/server message and cold confirmed reopen. Physical phones, lost acknowledgements/mid-mutation interruption and broader E2EE/background/media/release scope remain separate requirements.
-
-## Alternate runtime and bounded SDK probes — 2026-10-08
-
-The peer's persistent unresponsive shell/console was recovered by stopping only its verified host process and preserving guest data. A subsequent Canary37.3.2 swangle cold launch really crashed with0xC0000005 (monitored launcher plus Windows Application Event1000, unknown module). Do not infer this root cause from earlier timeout-only observations.
-
-The official Stable37.2.12 Windows archive is verified and extracted separately in ignored .tools/android-emulator-37.2.12. Launch the existing peer with `./scripts/start-emulator.ps1 -Serial emulator-5562 -GpuMode host -ColdBoot -Monitor -EmulatorPath ./.tools/android-emulator-37.2.12/emulator/emulator.exe`. The selected runtime uses the existing SDK images and isolated AVD data; it does not replace the primary runtime. ColdBoot disables snapshot loading and does not wipe data. Starter uses shared bounded SDK probes and rejects unknown emulator identities. A boot observation timeout leaves the owned emulator running; recheck that process before recovery. `./scripts/test-android-test-tools.ps1` verifies stdin, exit propagation and bounded helper termination without a device. The successful301-check ManualRetry report above establishes this fixture only.
-
-## Real failed-send and native Retry scenario — 2026-10-08
-
-`scripts/test-two-client-messaging.ps1 -ManualRetry` includes the previous offline lifecycle, then holds the dedicated proxy offline until real eight-attempt retry exhaustion. Native Send must become an error bubble, journal must be FAILED with8 attempts, cold offline reopen must preserve the same failed bubble/client ID. Restore proxy, start receiving client, open native failed-message menu/Retry and require original queue row SENT plus one native/server message, matching server identity and confirmed cold reopen. Failed-send runner gets300s host bound/200s native exhaustion bound; other phases retain normal bounds. No injected failure or shorter production retry settings.
-
-Historical failed attempt: build51s passed, but peer ADB/control became unresponsive during earlier deletion, before manual Retry. Bounded helper regressions (real stdin and real timeout) passed; no success report existed then. This is superseded by the recovery and301-check result above; do not reuse those older logs as evidence for the corrected scenario.
-
-## Offline queued send and recovery — 2026-10-08
-
-Use `scripts/test-two-client-messaging.ps1 -Offline` with the dedicated matching local TLS proxy and both known clients. Runs the complete send/edit/delete prerequisites before a network-step handshake stops only the validated proxy, closing all test TLS connections. Actual Send creates visible pending bubble and one durable queue entry. Offline cold app entry skips online metadata setup and verifies cached native pending bubble/same client ID. Restore proxy, await recipient readiness, start sender recovery and check visible confirmed bubbles, original queue SENT/server ID and exactly-one native/server message; cold confirmed sender reopen and both deleted-message histories repeat these checks. Proxy is restored in cleanup; no production service stopped.
-
-Pass236 recorded checks (30 registration +206 messaging/lifecycle), local APK SHA256869e844123020e0bc9821b30531d60430ee6eb5418f816169904eec5788f9e45; artifacts/android-two-client-offline.json. Offline launch uses bounded real window focus/fragment readiness rather than startActivitySync/global idle, which hung in the observed trace while main processed frames. Test-only50s final build. Counts/stack-only private diagnostics capture long offline-launch waits; timeout preserves phase logs. REST fixture/programmatic native chat entry and accessibility/View clicks remain explicit. Manual retry, lost acknowledgement, interrupted mutation, physical phones/touch and broader races/background/media/E2EE/release acceptance remain required.
-
-## Shared deletion and cold reopens — 2026-10-08
-
-`scripts/test-two-client-messaging.ps1 -Delete` includes registration, bidirectional text delivery and edit, then native Delete menu cancellation/confirmation, receiver removal in the same process and fresh app-process/native-history entry on both clients. The supported normal-group dialog explains shared deletion without a local-only checkbox; backend/adapter still enforce permissions and server-confirmed deletion. Cancellation verifies actor bubble and unchanged server revision; confirmation verifies same-identity newer tombstone, native entry/bubble absence and absence from live server history. Cold reopens repeat absence checks.
-
-Pass162 recorded checks (registration30 + messaging/edit78 + deletion54), report artifacts/android-two-client-deletion.json; local APK SHA256ba2e92f67985cf877eb272e31d08d7d371f1cc604d4943ae6ba712458ea088c5. Initial test asserted the message-options action boolean, but upstream opens the menu and returns inherited result; corrected to verify actual menu/confirmation instead. Final corrected build48s passes, final test no retry. Does not prove offline/retry/reconnect, physical devices/touch, mutation-interrupted process death or other deletion modes/permission/account race acceptance. Group fixture remains REST-created and ChatActivity entry programmatic.
-
-## Native edit on two clients — 2026-10-08
-
-Run `scripts/test-two-client-messaging.ps1 -Edit` after a local-TLS x86_64 instrumentation build. Uses distinct native account0 registrations, creates a REST group fixture and enters ChatActivity programmatically. Baseline foreground send/receive runs both directions; editor invokes actual message options accessibility action, native Edit menu, waits for preflight, changes native field and clicks Done. Receiver observes the edited bubble in the same live process. Both assert old bubble absent and unchanged server ID/ordinal with a newer revision/edited timestamp, no duplicate or old server text.
-
-Final pass:108 recorded checks (registration30 + messaging47 + edit31), local APK SHA256428aeed1764f09479ba12b55541cb47d39c274154fe8c0848568291f3feb2b3d; artifacts/android-two-client-editing.json. Local build2m49s. Reports remain separate from baseline messaging. Native composer previously called a different generic edit overload than the existing tested revision-bound helper; preparation now routes plain nonscheduled group-text edits to that helper. getMessageEditData handling also added. Counts-only failure diagnostics remain ignored/private. This is emulator UI evidence, not physical touch, phones, deletion/offline/restarts or general edit authorization/unsupported-media acceptance.
-
-## Both foreground delivery directions pass — 2026-10-08
-
-`scripts/test-two-client-messaging.ps1` now passes47 messaging checks plus30 native registration checks on two independent account0 Android35 clients. APK SHA256529a80304327625bf273cab604c76a245454907af3744920bb4ed6bea4072932; report artifacts/android-two-client-messaging.json. This supersedes the earlier sender-bubble failure below for the tested foreground scenario.
-
-The native initial history path requests peer-dialog metadata before history; the shared adapter now returns authorized requested group snapshots instead of rejecting that request. Initial-history completion is checked before receiver readiness. Each direction clicks the real visible/enabled Send view, verifies cleared text, positive confirmed sender bubble and visible incoming recipient bubble, then exactly one server message. Receiver stays in one live process throughout its direction. REST group fixture and programmatic native chat entry remain explicit test setup; physical touch, chat-list/group gestures, edit/delete/offline/retry/restarts and background/phones remain untested.
-
-## Current messaging failure — 2026-10-08
-
-Monitored launchers identified host emulator access violation0xC0000005. `start-emulator.ps1` now uses host GPU with Vulkan disabled; `-GpuMode auto|software` are explicit alternatives, and `-Monitor` keeps a newly started launcher observable until exit. Software mode also crashed here; host mode remained connected through subsequent tests/builds. Reusing an already running AVD does not change its GPU settings. Verify AVD identity before restarting to apply a different mode.
-
-Native group mapping now permits ordinary members to send text; unsupported member media/admin actions have explicit default restrictions. Harness checks native text permission on each client, clicks the actual visible/enabled Send view and intends both directions. This replaces unreliable coordinate injection and does not prove physical touch behavior. Actual native Send clears the composer, but the sender bubble assertion still fails. Latest private diagnostic: server_matches1, native_messages0, matching_native_messages empty. No successful messaging report. Counts/IDs/state diagnostics are copied into ignored .local/chat-diagnostic-*.json before cleanup. Investigate native history/update/render delivery next; do not weaken the bubble assertion or count this REST acceptance as screen delivery.
-
-## Two-client foreground messaging — in progress, 2026-10-08
-
-```powershell
-./scripts/build-android.ps1 -Abis x86_64 -LocalTest -Instrumentation
-./scripts/test-two-client-messaging.ps1
-```
-
-This resets only the two dedicated debug clients, reruns native registration and uses distinct server accounts. REST creates the group fixture; a native request loads group metadata and ChatActivity is opened programmatically. The receiver stays live in its original instrumentation process while the sender touches Send. Intended assertions check visible confirmed outgoing/incoming bubbles and exactly one server message. Fixtures go through stdin and are removed finally. This does not test group creation/chat-list gestures, edit/delete/offline/restarts or physical phones.
-
-Builds pass, but messaging is not yet verified: initial run failed native group loading; after setup adjustment, the peer emulator disappeared in two executions before receiver readiness. Both registration suites and identity/group-fixture phases passed. There is no successful messaging report; use sanitized .local/chat-*.log and actual ADB/process state to diagnose the peer termination before continuing.
-
-## Two independent client registrations — 2026-10-08
-
-```powershell
-./scripts/test-two-client-registration.ps1
-```
-
-Requires the existing local Core/TLS service and matching x86_64 instrumentation APK. Starts or reuses only the exact `vyrn_api35`/5560 and `vyrn_api35_peer`/5562 AVD pairs, verifies different Android IDs and runs actual invite-registration/recovery-acknowledgement controls on each with separate disposable credentials. Each run resets only that emulator's VYRN debug app. Peer AVD uses1536MB RAM. All connected emulator identities are checked before reuse; unrelated emulators are rejected.
-
-The same app passed15 checks on each device, total30, without attach retries. Per-device logs/reports stay separate; `artifacts/android-two-client-registration.json` requires fresh matching reports and identical APK hashes. This establishes two independent Android clients and account setup. Message sending/receiving/edit/delete, offline/restart behavior and physical phones still need their own evidence. Do not run the live shared-proxy disconnection suite concurrently with another client test.
-
-## Live disconnection on the original session screen — 2026-10-07
-
-```powershell
-./scripts/test-android-integration.ps1 -Phases sessions-network
-```
-
-Requires the x86_64 local-TLS instrumentation APK and the existing dedicated native localhost proxy: .local/devtls-native.exe, its matching PID file and an HTTP private-IP:8080 upstream. The helper verifies the process path/arguments before stopping it; normal phases continue to support their existing TLS setup. It restores the same proxy/certificate and forwarding in finally. Native-proxy bootstrap portability is not established by this suite.
-
-One live runner coordinates four public step/ack files with the host. Actual Settings/Devices entry, cached-load failure, offline Retry dispatch, initial empty-screen failure after Back/Devices, successful connected Retry and failed offline revocation are verified. Closing the proxy terminates already-open TLS streams; reverse removal alone is insufficient for this live case. Final report95 recorded checks/78 distinct names, no attach retry, includes the normal registration/session UI cases. Fixture/step files are removed afterward. This is local transport loss on one emulator, not two physical phones, mobile network transitions or background acceptance.
-
-## Original session-management screen — 2026-10-07
-
-```powershell
-./scripts/test-android-integration.ps1 -Phases sessions-ui
-```
-
-Requires a ready local Core/TLS proxy and the x86_64 local instrumentation APK. The script clears only the dedicated test app, creates a disposable invite registration via actual controls, opens Settings programmatically and touches Devices/session rows. It exercises individual and bulk confirmation/cancellation, revoked access/refresh rejection, current-session preservation, hidden unsupported QR/lifetime controls and a controlled unknown-hash error followed by a successful UI retry. Buttons in detail sheets use accessibility; confirmation uses actual native views. Final report:69 recorded checks,57 distinct names, no attach retry. This does not establish physical-device, actual settings-tab entry, offline or complete lifecycle acceptance.
-
-## Recovery code across real process restarts — 2026-10-06
-
-After local TLS setup and an x86_64 local instrumentation build:
-
-```powershell
-./scripts/test-android-integration.ps1 -Phases @('onboarding-prepare','onboarding-restart','onboarding-gap','onboarding-recover','onboarding-complete')
-./scripts/test-android-integration.ps1 -Phases registration-ui
-./scripts/test-android-integration.ps1 -Phases auth-ui
-./scripts/test-android-integration.ps1 -Phases @('logout-prepare','logout-offline','logout-ui')
-```
-
-Run the five onboarding phases together: only the first clears app data, then each round force-stops the app. Preparation uses actual registration controls, exercises manual/automatic refresh and identity/acknowledgement guards, and saves only public state, PID and a recovery-code hash in app-private test storage. Restart removes the local TLS forwarding and verifies the exact selectable dialog offline. Gap clears native config while retaining encrypted tokens; recovery restores server-confirmed native identity online and presses the actual Saved button. Complete verifies the removed code stays absent and MainTabs opens after another process restart. Finally removes the fixture/state file and restores forwarding.
-
-The final report has45 onboarding checks; the same app passes registration15, recovery/sign-in12 and logout38, total110. Permission-dependent counts can vary. Native syncContacts=false must persist with identity before navigation. This tests one emulator and new registrations; arbitrary crash timing, legacy-format migration, storage/Keystore failures, complete account switching and physical-device acceptance remain open.
-
-For Android's observed old-task-removal race, the harness retries once only when instrumentation reports 'shortMsg=failed to attach', which happens before the runner enters. It saves the first result in ignored .local logs and records startup_attach_retry in the report. Test assertions/application crashes are never automatically retried.
-
-## Native logout and login persistence — 2026-10-06
-
-After the local TLS setup and x86_64 instrumentation build, run:
-
-```powershell
-./scripts/test-android-integration.ps1 -Phases @('logout-prepare','logout-offline','logout-ui')
-./scripts/test-android-integration.ps1 -Phases auth-ui
-./scripts/test-android-integration.ps1 -Phases registration-ui
-```
-
-The logout sequence clears only the disposable vyrn_api35 app once, then preserves its account across real force-stops and an offline/online network transition. Do not run logout-ui alone against a fresh app: logout-prepare establishes the disposable account. The current report has11 preparation,8 offline and19 online checks; permission-dependent counts can vary. Online checks touch the original LogoutActivity row and confirmation, exercise a controlled stale-session race, verify server revocation/local clearing and preservation of another session, then touch the actual welcome button and verify login. auth-ui passes11 and registration-ui14 checks on the same app. Reports remain separate.
-
-Use specific screen-state waits rather than unbounded waitForIdleSync after intro interactions: the native intro renders continuously. The fixture allows notification permission and denies observed unrelated photos/audio/contacts requests; denied repeated requests can have a different button identifier, so the helper also recognizes the observed English button label. This does not fix unwanted production permission prompts or establish Persian system-permission acceptance.
-
-Login now commits native identity before continuing. A process restart in the logout sequence confirms the stored account; process death before acknowledging the recovery-code dialog remains a separate unfinished flow. Forced logout, cleanup failure/ack loss, complete session-management gestures and two physical devices are not covered by this sequence.
-
-## Automatic complete-device acquisition — 2026-10-04
-
-The latest network harness passes64 checks (58 initial,6 distinct-process recovery) on APK SHA-2569b0098cd75f40b797ba41a3fc2d1beb2620350f4778e494cd59eff80c732f33a. Automatic prepare reads/validates both complete ready-device rosters, claims only missing sessions and sends actual authenticated copies to two recipient stores plus the sender's other store. Unprepared devices on both users, no extra claims for existing sessions, session-bound/exact retries and accepted retry after sender-other logout pass. All27 Signal storage/restart checks also pass. This uses four isolated stores on one emulator; private UI, offline cold-start key-service construction and lifecycle/retry/verification scheduling remain incomplete.
-
-## Private codec across actual process death — 2026-10-04
-
-scripts/test-signal.ps1 -Network now passes55 checks across two distinct processes (49 initial,6 recovery). After force-stop, the codec reads both encrypted history caches, reuses the pending body without advancing its ratchet, serves duplicates without decrypting again, recovers the acknowledged server ID and delivers an earlier-prepared pending ciphertext out of order once. Report2026-10-04T06:04:28.4933285Z, APK SHA-2567d7172bd86c0f044d260b3c05538f949479f4286429b5092f3b9d598154ea800. Session cleanup and deletion of both app-private test fixture/state files run in finally. State contains public routing/ciphertext and ratchet hashes, not private keys, tokens or decoded text. These are service tests on one emulator; native UI/lifecycle workers and uncertain acknowledgement-loss recovery still require acceptance.
-
-## Actual deletion and learned expiry — 2026-10-04
-
-The latest scripts/test-signal.ps1 -Network passes47 checks on APK SHA-256 be80e544fa068b2d13bbbedc60a747d7d63f4cfc40c09365e2a69f73d072d1e3. DELETE/GET provides the real tombstone and cleared payload. A real five-second conversation TTL drives sender/two-recipient cache expiry, unread-cache sweeping and stale replay guards without further network reads. Actual cache-write failure rolls back receive ratchets. All27 Signal storage/process-restart checks also pass; the275 original regression suite retains its previous recorded APK evidence. This is a codec primitive on one emulator; expiry-worker/native UI/realtime and private-codec process-restart acceptance remain unfinished.
-
-## Authenticated private text codec — 2026-10-04
-
-The latest scripts/test-signal.ps1 -Network run passes39 checks on APK SHA-256 47d8700db1c728e2975083bb6aae9d8c635abc6d5bfdf7e1a03b5b421ee6e0b7. SignalMessages now persists all fanout ratchets and exact outgoing body/own cache atomically, retries unchanged ciphertext, validates authenticated inner conversation/client/revision/participants/sender/recipient/routing metadata, and commits decrypt state with encrypted receive cache. Actual failure/retry/tamper/two-recipient/cache-reopen checks pass. Deletion tests inject a tombstone DTO, so server deletion/realtime acceptance is still required. Private UI, scheduling, explicit verification, rotation, expiry and two physical clients remain unverified. Historical sections retain their original scope.
-
-## Actual private ciphertext service delivery — 2026-10-04
-
-The latest scripts/test-signal.ps1 -Network run passes27 checks. Real Signal ciphertext is sent through POST /v1/conversations/{id}/messages with the signal-v2 envelope, retrieved through authorized GET /v1/messages/{id} and decrypted by the recipient. A later message has distinct copies for two recipient stores, and both decrypt their own copy retrieved through their actual sessions. The second recipient uses the sender's physical device UUID under a different account; authenticated profile identity and separate Signal addresses/storage namespaces disambiguate it. Unprepared/revoked destinations and exact accepted retry after revocation are checked.
-
-The27 storage/ratchet/restart checks and275 existing Android checks also pass on local TLS APK SHA-256 5d69d3798b5c74092dad15eeb48fca25b801284c749ac100b85e5ab8924d3744 against the new local Core. Latest report dates are2026-10-04T04:51:40.2711169Z (network),04:53:30.7645872Z (Signal storage) and04:58:23.2680334Z (original suite). The network report now records service fanout as tested while retaining private_chat_ui as not implemented. Three device stores on one emulator are not two physical Android clients or complete private UI/realtime/outbox/cache/trust/lifecycle acceptance. Historical checkpoint evidence below retains its earlier scope.
-
-## HTTPS Signal key exchange — 2026-10-04
-
-After building the local x86_64 instrumentation APK, run scripts/test-signal.ps1 -Network. It installs only on the named local emulator, forwards the scoped TLS endpoint and feeds disposable generated credentials/bootstrap invite through stdin into app-private storage. The fixture is removed in finally; credentials are never printed or passed as command arguments. It creates two test accounts and a private authorization relationship, publishes real keys and runs20 checks recorded in artifacts/android-signal-network.json.
-
-Coverage includes local acknowledgement-write failure after server commit/recovery, exact publication retry, forged signatures, owner/integer/version validation, consumed-key non-resurrection, exhaustion of100 EC keys with real last-resort-Kyber decryption, account/session changes and session-preserving refresh. Run scripts/test-signal.ps1 separately for27 storage/ratchet/restart checks. Both pass on local APK SHA-256 26bd7401767dba2049405d1137fefb28d0e4ef08f9d6e89e94b5118f5a429127. Do not run emulator harnesses concurrently. Two stores on one emulator and local decryption after HTTPS key exchange are not server ciphertext fanout or full private UI acceptance.
-The complete original275-check harness also passes on this APK; the final report is dated2026-10-04T04:29:52.0099938Z. Normal ARM64/ARMv7/Universal Debug builds pass APK verification, but physical installation and release/R8 remain untested. Historical checkpoints below retain their earlier hashes and scope.
-
-Latest Signal run passes27 checks (21 initial,6 restart), including four initial-publication checks for private-key persistence, consumed-key retry, exact store-reopen retry and missing-publication protection. Latest local TLS APK SHA-256: aa56cde1143e184aceea83b48d1a773d1ef244fddabc16b133e5d18a1039beb0. Publication HTTP/UI/refill/rotation remains unconnected. The23-check and275-check same-APK evidence below is the preceding checkpoint, not the current Signal report.
-
-## Signal foundation checkpoint — 2026-10-04
-
-Run scripts/setup-jdk.ps1 for the pinned verified JDK21, then build the x86_64 local TLS instrumentation APK with scripts/build-android.ps1 -Abis x86_64 -LocalTest -Instrumentation. Run scripts/test-signal.ps1 on the local API35 emulator. The harness executes17 initial and6 restart checks, forces application process death and verifies distinct process IDs. It records artifacts/android-signal.json. Private-chat UI and server fanout are explicitly not tested.
-
-These checks use actual official Signal JNI, real keys, PQXDH, ratchets and Android Keystore-encrypted SQLite records. They verify transaction rollback, ciphertext retry persistence, invalid signatures, tamper/replay, identity changes, record binding and missing-key failure. They use two isolated device stores on one emulator, not two physical clients.
-
-The latest original275-check suite and the23-check Signal suite both pass on APK SHA-256 0aa21a915f6de626f3e634fc55bf78e53bb5a9c58db00b8a41e0639a051c6df0. The original harness clears app data; do not run the harnesses concurrently. ARM64/ARMv7/Universal Debug APK verification also passes; physical devices, full UI E2E and release/R8 remain required.
-
-Latest verified checkpoint:275 named API35 checks pass:93 first,34 mutations,76 profile,16 offline,56 restart. The tested APK hash is recorded in artifacts/android-integration.json.
-
-Foreground profile checks use the real distinct session in slot9025 for other-device name/bio edits, avatar replacement, clearing and restoration, then verify a shared-group peer's name/bio/avatar. Actual receiving controller, UserConfig and native SQLite data match; peer profile data survives process restart. The controller preserves existing user and unchanged photo references while applying accepted data. Completed events are drained before controlled empty-cache bio fixtures, preserving all loading/error/Retry assertions. The second device logs out after profile checks. One receiving emulator and API writers are not complete two-Android-device UI acceptance. A native download callback also verifies byte-buffer release after delivery; normal FileLoader download/decoding still passes.
-
-Static profile-picture checks present original SettingsActivity and use ImageUpdater's actual cropped-bitmap entry. They verify no local confirmation before the server, actual JPEG dimensions/current-photo metadata, native full-profile and ImageLocation mapping, original FileLoader authenticated range download/byte equality/bitmap decoding, empty EOF, unsupported video/account rejection and confirmed deletion. UserConfig and native SQLite photo IDs/routing identifier1 survive actual process restart. This does not exercise gallery/camera gestures, old-photo history, derivatives, realtime photo propagation or adversarial lifecycle/disk failures.
-
-The latest profile phase also exercises native blocking/unblocking, immutable target/flag capture at public send entry, server-confirmed block sets/counts/UserFull, paginated block-list metadata and the original PrivacyUsersActivity's actual row/load-error/Retry. A separate authenticated device session changes block state; foreground WebSocket reconciliation updates the receiving controller and native full-profile cache. Restart verifies final unblocked SQLite flags and reloads the server list. Complete offline block-list persistence, concurrent page/late-callback races and popup/gesture acceptance remain unfinished. Slot9025 is reserved for that disposable second-device session.
-
-The suite runs first, mutations, profile, offline and restart in separate app processes. The harness stops the app and waits60 seconds before mutations, profile and restart to respect the unchanged300-request/minute production limit. The profile phase exercises original native updateProfile requests for separate names, partial changes, biography preservation, invalid-input rejection and originating-account protection. It presents the actual original name editor, changes real fields, clicks Done and observes its error dialog and confirmed persistence. The actual biography editor opens without a cached full profile and keeps text/Done disabled until the original controller loads the real biography. A native/vault identity mismatch shows its actual load error; restoring the vault and clicking Retry recovers the real text. Holding the network guard proves no premature save confirmation or cached biography change; successful Done preserves names and confirms native UserFull storage before closing. Real widget tests verify the280-code-point limit for BMP/supplementary characters and selected replacement with a nonzero source offset. The upstream filter's UTF-16 truncation bug is corrected with Character.offsetByCodePoints. Restart checks the full280-emoji server/SQLite biography and UserConfig/SQLite names. Full visual/layout/gesture acceptance, offline load failure, stale profile, photo/realtime, disk-failure injection and adversarial account-switch/late-callback acceptance remain unfinished.
-
-The143-check checkpoint also exercises atomic normal-group deletion through original MessagesController/cache-only removal, permission-denied cache preservation, group binding, admin deletion, idempotent retry, live-history/tombstone handling and process restart. Full screen-driven deletion and prefetched-update/account-switch races remain unfinished. Unsupported delete-for-me/private/scheduled/channel modes are preserved locally rather than silently reinterpreted.
-
-Historical143-check checkpoint: Plain group-text editing exercises the original SendMessagesHelper, exact captured revision, native cache, equal-text ABA conflict, missing cached revision, account/destination binding, deletion and restart persistence. Exact revision metadata now persists in native custom_params; old-cache ABA conflict, legacy decoding, content binding and successful original-helper editing after process restart pass. These checks remain in the current suite. Complete screen-driven composer/reload, rich/media edits and physical-device acceptance remain unfinished.
-
-Use the project-local `vyrn_api35` emulator. These commands reject other devices and keep production credentials, endpoints and signing separate.
-
-```powershell
-./scripts/setup-dev-tls.ps1
-./scripts/build-android.ps1 -Abis x86_64 -LocalTest -Instrumentation
-./scripts/test-android-integration.ps1
-```
-
-The isolated Docker project serves HTTPS at `https://localhost:18443`. ADB reverse connects that loopback port to the emulator. Caddy generates a local CA; only its **public** certificate is copied into ignored debug resources. The network security configuration trusts this CA only for `localhost`; certificate and hostname checks stay enabled. No host or Android system trust store is changed. Default builds use production HTTPS and system roots. Release builds reject the local CA flag.
-
-The script generates an artificial account password and reads the existing local test invite privately. It sends the fixture through stdin into app-private storage, never through command arguments. The test removes the fixture and logs only named checks. Accounts and test groups stay in the disposable local smoke database. The test APK is separate from the app APK and contains no credentials.
-
-The runner starts the real LaunchActivity before testing the repository. A headless emulator can restrict DNS for an app running only in the background; launching the Activity resolved the observed EAI_NODATA failure. This foreground integration suite does **not** establish background sync or push behavior.
-
-The suite now passes55 named checks. It covers TLS trust rejection, disabled cleartext, invite registration, Android Keystore session persistence, group delivery, idempotent retries, Persian text, concurrent renewal across separate repository instances, account-bound requests, edit/reaction/receipt read models, ordered message IDs, pagination and the Telegram dialog adapter. It also verifies an authenticated WebSocket resume, a cursor committed with the raw inbox before acknowledgement and successful submission of an incoming message to Telegram's update processor. A second process runs with ADB forwarding removed: two group-text sends remain queued without false acknowledgement, with conversation ordering and retry/account-isolation checks. A third process runs after forwarding is restored: queued sends arrive once and in order; a server commit with a deliberately uncommitted local acknowledgement is reconciled without duplication. Accepted outbox payloads are cleared. Exclusive send claims, safe unsent cancellation, reopened-claim recovery, retention and populated outbox migrations also pass. Durable cancellation survives the offline process, reconciles both absent and already committed sends, and prevents delayed retries from sending cancelled messages. Cancellation during an active send preserves its exclusive claim and supersedes failed-send retries. The suite also exercises ConnectionsManager token/GUID cancellation, account isolation, callback confirmation, committed-send acknowledgement preservation, cancellation before send preparation and suppression of cancelled read callbacks. Results are saved to `artifacts/android-integration.json`.
-
-This is not complete UI E2E: login button navigation, RTL layouts, themes, media, E2EE, background/offline incoming execution, notifications and physical devices still need their own checks. SendMessagesHelper cancellation now waits for durable reconciliation and guarded native cache cleanup; screen-driven cancellation, queued media, crash-between-persist-and-apply recovery and complete event mapping remain unfinished. Instrumentation slots9001/9002/9008/9009 and compatibility account2 are reserved for local fixtures; do not run against a user's populated installation.
-
-Development compatibility: migration003 introduces server-assigned message ordinals. APKs built before this change used fetch-order IDs. Migration of Telegram's previously populated UI cache is not validated; use a fresh development installation when testing this transition. No production upgrade compatibility is claimed. The server migration preserves existing UUIDs, orders their backfill by creation time/UUID, and continues the sequence for new messages; populated migration and repeat-migration tests pass.
-
-Historical schema4 checkpoint: the suite passed63 named checks. Schema4 adds a journal retaining the negative UI message/dialog/random IDs until cache cleanup is durably acknowledged. New checks cover populated schema3 upgrade, journal reopen, account isolation, guarded acknowledgements and retention, immutable UI identity, transaction rollback and conservative handling of unknown delivery history. The journal is not yet connected to SendMessagesHelper/cache cleanup, so these store checks do not prove interactive cancellation completion.
-
-## Owner branding checkpoint — 2026-10-04
-
-Normal public-endpoint Debug builds now support a separate instrumentation APK:
-
-```powershell
-./scripts/build-android.ps1 -Abis x86_64 -Instrumentation
-./scripts/start-emulator.ps1 -DnsServers '156.154.71.22,4.2.2.3'
-./scripts/test-branding.ps1
-./scripts/test-public-android.ps1
-```
-
-Branding checks reset only the disposable vyrn_api35 app, verify localized names and the original logo mask, then require the real fresh login hierarchy before capturing its screenshot. Inspect artifacts/vyrn-login.png separately. The public connectivity test does not create accounts or reset app data. Its latest result fails at app-UID DNS (UnknownHostException); shell DNS succeeds. This supersedes the older statement that foreground launch alone resolved DNS for every build. Do not count production Android networking as verified.
-
-## Public connectivity correction — 2026-10-05
-
-The earlier app-UID DNS failure is resolved for the foreground test. Android blocked background instrumentation with APP_BACKGROUND. public-connectivity now launches and waits for LaunchActivity before requesting DNS and HTTPS. All eight read-only checks pass after the script force-stops the old process. Platform DNS, certificate validation and cleartext prohibition remain intact; no networking policy exemption was added. This supersedes the previous DNS-failure paragraph and does not verify background connectivity, authentication or physical ARM devices.
-
-## Actual account recovery/sign-in UI — 2026-10-06
-
-```powershell
-./scripts/setup-dev-tls.ps1
-./scripts/build-android.ps1 -Abis x86_64 -LocalTest -Instrumentation
-./scripts/test-android-integration.ps1 -Phases auth-ui
-```
-
-The local-only auth-ui phase presses the actual recovery/sign-in controls and fills native fields. It passes10 checks, including wrong-code feedback, successful reset, revoked old session, wrong old password and correct new-password identity. Fixture registration is REST setup, not a registration-screen check. Only the disposable emulator app is cleared; credentials travel privately through stdin and no recovery codes/passwords are logged. Evidence is saved separately to artifacts/android-auth-ui.json. Full account lifecycle and multi-device UI acceptance remain open. The script refuses stale embedded local CAs; run setup before building when the proxy CA changes.
-
-## Registration controls — 2026-10-06
-
-After setup/build as above, run `./scripts/test-android-integration.ps1 -Phases registration-ui`. This clears only the test emulator app and writes artifacts/android-registration-ui.json. All14 checks pass through actual native controls, including real system Home/return, preserving the recovery code until Saved opens the main screen. The code and credentials stay private and are never logged or automatically copied. Existing auth-ui still passes10 checks. Keyboard/touch details, process-death onboarding and physical/multi-device lifecycle are not established by this test.
-## Reaction read-model phase (2026-10-18)
-
-After building local-TLS/instrumentation APKs with the emulator off, run `scripts/test-android-integration.ps1 -Serial emulator-5564 -Phases reaction-read` on the owned API30 emulator. It resets only that emulator's test-app data, registers through native UI and uses another API fixture account to supply a group message/reactions. It verifies native history/chip glyphs/counts, chosen flags in actual SQLite rows, automatic WebSocket changes/removals/clear and preservation of text/edit date. The initial visible-cell screenshot is saved in app-private files/vyrn-test-reaction-read.png; report is artifacts/android-reaction-read-api30.json. It does not test native reaction selection or two Android clients. Reactions remain gated until mutation UI and failure recovery are implemented. Run jobs sequentially; do not build while an emulator is running.
-
-As of2026-10-19 this phase also issues original native TL reaction selection/metadata requests directly, proving request capture, complete replacement/clear, invalid options/custom emoji/wrong-peer rejection and learned deletion. The private-search-ui phase tests those requests on real Signal ciphertext before disconnecting for search/privacy checks. These are component requests, not picker/bubble gestures. Controls still remain gated; no interactive mutation/error-recovery acceptance is implied.
+Reports are ignored JSON under `artifacts/`; record exact APK hashes, phase, time, results and failures in [TEST_REPORT](TEST_REPORT.md). A fixture assertion is not full interactive acceptance. Verify report freshness, suite exit and actual process state; some Windows RTK wrappers can outlive completed child processes. No broad process termination, device wipe or physical-phone testing is part of the default workflow.

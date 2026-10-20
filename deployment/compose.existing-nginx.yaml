@@ -5,6 +5,6 @@ services:
       dockerfile: deployment/Dockerfile.prebuilt
     ports: ["127.0.0.1:18080:8080"]
     environment:
-      VYRN_ADMIN_ORIGIN: ${VYRN_ADMIN_ORIGIN:-https://admin.vyrn.eclipseofficial.xyz}
+      VYRN_ADMIN_ORIGIN: ${VYRN_ADMIN_ORIGIN:-https://admin.${VYRN_DOMAIN:-vyrn.example.com}}
   caddy:
     profiles: [standalone-proxy]

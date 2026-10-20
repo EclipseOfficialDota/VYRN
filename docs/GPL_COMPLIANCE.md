@@ -6,7 +6,7 @@ Pinned source: https://github.com/DrKLO/Telegram/commit/f2908b14133bbffbf7ab04f6
 
 The VYRN adapter does not replace or redraw Telegram's UI: it compiles the original UI and modifies branding, the entry flow and transport boundary. Preserve notices inside generated source packages even where product branding is removed from the application.
 
-Before distributing any APK, supply corresponding source including the exact upstream checkout and submodules, all VYRN overlays/preparation scripts, dependency lock files, build instructions and required non-secret assets. A pin URL alone is not the complete source delivery for a modified binary. The current repository has no remote, so a public source release is still a delivery gate.
+Before distributing any APK, supply corresponding source including the exact upstream checkout and submodules, all VYRN overlays/preparation scripts, dependency lock files, build instructions and required non-secret assets. A pin URL alone is not the complete source delivery for a modified binary. The public VYRN overlay repository is https://github.com/EclipseOfficialDota/VYRN; complete corresponding-source delivery for each binary remains a release gate.
 
 Exclude `.local`, `.tools`, caches, private credentials, actual `.env` files, private media, backups and keystores from release archives. Upstream includes public dummy credentials; those must not become the VYRN release identity. The VYRN build bypasses upstream signing configuration and disables the Google Services plugin.
 

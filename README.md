@@ -1,65 +1,80 @@
 # VYRN
+<p align="center"><img src="assets/vyrn-logo-transparent-1024.png" width="112" alt="VYRN logo"></p>
 
-Independent messaging for `eclipseofficial.xyz`, based on the actual Telegram Android UI.
+**Self-hosted messaging with a Telegram-derived Android client, a Go backend and a bilingual administration panel.**
 
-**Status: development in progress. This is not a production release.** See [test evidence](docs/TEST_REPORT.md) and [remaining acceptance criteria](docs/ACCEPTANCE.md). Private-chat encryption, complete Android feature wiring, production deployment and release artifacts must pass their gates before public use.
+[![CI](https://github.com/EclipseOfficialDota/VYRN/actions/workflows/ci.yml/badge.svg)](https://github.com/EclipseOfficialDota/VYRN/actions/workflows/ci.yml)
+[Self-hosting](docs/DEPLOYMENT.md) · [راهنمای فارسی](docs/OWNER_GUIDE.fa.md) · [API](docs/API.md) · [Architecture](docs/ARCHITECTURE.md) · [Contributing](CONTRIBUTING.md)
 
-Latest Android checkpoint: [native group creation and invitations](docs/checkpoints/2026-10-19-group-create.md), with82 creation/invitation and72 settings/role checks. Current normal ARM64/ARMv7/Universal Debug APKs were rebuilt and verified locally; the published GitHub prerelease below is the older snapshot.
+> **Development preview.** Public source is available; a supported Stable Android Release is not available yet. The existing Debug prerelease is an older snapshot. See [supported features and limits](docs/ACCEPTANCE.md) and [test evidence](docs/TEST_REPORT.md).
 
-## Repository
+## What it does
 
-`android/` contains the pinned upstream descriptor, reproducible preparation script, app module and compatibility/domain/repository layers. `backend/` contains the Go service and PostgreSQL migrations. `admin/` is VYRN Control. `deployment/` contains Compose, Caddy, inactive TURN configuration and backup timers.
+VYRN runs an independent messaging backend. It does not connect accounts to Telegram or federate with other VYRN servers. The Android client reuses pinned Telegram UI sources with VYRN branding and an adapter for the independent API.
 
-Source repository: [EclipseOfficialDota/VYRN](https://github.com/EclipseOfficialDota/VYRN) (public). The generated `android/upstream/`, SDK/JDK, caches, local credentials and build artifacts are intentionally ignored. Main branches are `main`, `develop`; active work uses the `codex/` prefix.
+- Invite-based email/password registration, recovery codes and device sessions.
+- Group messaging, private-message encryption using Signal, edits, deletion, reactions and read receipts.
+- Durable local message queues, reconnect handling, encrypted private drafts and local search.
+- File, photo and voice-message paths with server-side size and storage limits.
+- VYRN Control: English/Persian administration, TOTP verification, invitations, user blocking, password resets, session revocation and audit events.
+- Docker Compose services for PostgreSQL, Core and a Caddy HTTPS edge; encrypted S3-compatible backup tooling.
 
-The [published Debug prerelease](https://github.com/EclipseOfficialDota/VYRN/releases/tag/debug-20261019) is an earlier snapshot: approximately159MB Universal ARM APK, ARM64+ARMv7, Android8.0 or newer, with SHA256SUMS.txt. It predates the latest group changes. Current verified local APKs and their hashes are described in the checkpoint above; rebuild them using the Android commands below. These are not final signed production Release artifacts.
+Implemented paths have targeted tests. Feature presence does not imply complete UI, lifecycle, security-audit or production acceptance. Voice/video **calls**, bots, stories and channels are unavailable; voice messages are separate from calls.
 
-The owner requested only a final Release on 2026-10-20; no new Debug prerelease will be published. Follow [owner-controlled signing](docs/RELEASE_SIGNING.md) to prepare the final key outside Git and the VPS. Final signing and runtime acceptance of the actual Release artifacts remain required.
+## Host your own instance
 
-The [2026-10-20 critical-check checkpoint](docs/checkpoints/2026-10-20-release-gates.md) records438 passing Android checks, the API30 migration-fixture repair and the unresolved host emulator crashes during two-client retesting. These checks do not establish Stable acceptance.
+Use a dedicated Linux host, a domain you control and Docker Engine with Compose. The [full guide](docs/DEPLOYMENT.md) covers DNS/TLS, private configuration, first administrator, health checks, backups and upgrades. It includes commands for a fresh Ubuntu host. Installation on a host with an existing reverse proxy needs the separate proxy configuration.
 
-## Local development on Windows
+1. Clone this repository.
+2. Configure your own service domain and secrets in `/etc/vyrn/runtime.env`.
+3. Build Core, start PostgreSQL and bootstrap the first administrator.
+4. Start Core/Caddy, sign in to Control, and issue invitations.
+5. Build an Android client targeting **your** HTTPS API and distribute it with its matching source.
 
-Use PowerShell 7, Go 1.26.9, Git and Docker Desktop. The module requires the patched toolchain. No production credential is needed.
+The default downloaded development APK targets the project's instance. It cannot be redirected to your server through a login setting. A custom client build with `-ApiUrl` is required. Accounts are local to each installation.
 
-```powershell
-./scripts/init-local.ps1
-docker run -d --name vyrn-postgres-dev --env-file .local/dev.env -p 127.0.0.1:55432:5432 -v vyrn-postgres-dev:/var/lib/postgresql/data postgres:17-alpine
-Set-Location backend
-../scripts/with-local.ps1 -Command go -Arguments @('test','./...','-count=1')
-../scripts/with-local.ps1 -Command go -Arguments @('build','-o','../artifacts/vyrn-core.exe','./cmd/vyrn')
-Set-Location ..
-./scripts/with-local.ps1 -Command ./artifacts/vyrn-core.exe -Arguments @('bootstrap')
-./scripts/start-local.ps1
-```
+## Android build
 
-Bootstrap requires an empty database and reads generated local settings; it never prints passwords or invite codes. Local credentials are in `.local/dev.env`, which must stay private. A production administrator requires an authenticator secret. HTTP here is loopback-only; Android and production endpoints require HTTPS.
-
-Open VYRN Control at `http://127.0.0.1:8080`. The same origin serves the API. Browser tokens stay in memory; only a non-secret device identifier is stored locally.
-
-## Android
-
-Upstream pin: `f2908b14133bbffbf7ab04f641ecb5bfaf533242` (12.10.6 / 7112). Initialize its exact submodules before building. `android/prepare-upstream.ps1` applies VYRN changes without replacing Telegram's UI implementation. Telegram socket transport is disabled at `Connection::connect`; supported UI requests and foreground VYRN message events go through `VyrnBridge`.
+Build scripts currently target **Windows with PowerShell 7**, Git, JDK21 and the Android SDK/NDK. Build the server on Linux and the client on a build workstation; do not copy your final keystore to the server.
 
 ```powershell
 ./android/fetch-upstream.ps1
 ./scripts/setup-jdk.ps1
-./scripts/build-android.ps1 -Flavor dev -BuildType debug
+# Install Android SDK platform36, build-tools36.0.0 and NDK27.2.12479018.
+./scripts/build-android.ps1 -Flavor dev -BuildType debug -ApiUrl https://api.vyrn.example.com
 ./scripts/verify-apks.ps1
 ```
 
-This builds a development client. The API endpoint defaults to the deployed HTTPS backend at `https://api.vyrn.eclipseofficial.xyz`. API URL overrides must be HTTPS hostnames. Debug signing does not imply release readiness. See [the implementation matrix](docs/ACCEPTANCE.md) for supported requests and gaps.
+Replace the example API hostname with your instance. The upstream pin and its submodules are fetched by the preparation scripts. Outputs are in ignored `artifacts/`; normal builds produce ARM64, ARMv7 and Universal APKs, minimum Android8/API26. See [Android development/testing](docs/ANDROID_TESTING.md), [final signing](docs/RELEASE_SIGNING.md) and [source redistribution](docs/GPL_COMPLIANCE.md).
 
-Verified ARM64, ARMv7 and Universal Debug APKs are local ignored files in `artifacts/`; hashes and manifest evidence are in `artifacts/apk-verification.json`. The last normal Universal ARM build is about159MB; the newer local-TLS emulator build is test-only. APKs are not committed to this repository.
+## Documentation
 
-For real emulator-to-backend HTTPS tests, see [Android integration instructions](docs/ANDROID_TESTING.md). The opt-in local CA is never included in normal APKs. Foreground repository/adapter tests and process-restart checks pass; complete interactive UI acceptance remains unfinished.
+| Guide | Contents |
+| --- | --- |
+| [Self-hosting](docs/DEPLOYMENT.md) | Fresh server, Docker, domains, configuration, bootstrap and maintenance |
+| [Owner and user guide — فارسی](docs/OWNER_GUIDE.fa.md) | نصب، ورود مدیر، دعوت کاربر، استفاده و رفع خطا |
+| [Architecture](docs/ARCHITECTURE.md) | Client adapter, API, storage, authentication and trust boundaries |
+| [API reference](docs/API.md) | Requests, authentication, errors and limits |
+| [Feature status](docs/ACCEPTANCE.md) | Implemented paths and outstanding release gates |
+| [Test evidence](docs/TEST_REPORT.md) | What passed, what failed and scope limits |
+| [Backup/restore](docs/BACKUP_RESTORE.md) | External encrypted backup and isolated restore rehearsal |
+| [Security](SECURITY.md) | Reporting and support status |
+| [Portfolio summary](docs/PORTFOLIO.md) | Project description for a résumé or showcase |
 
-The independent Docker smoke stack uses `docker compose --project-name vyrn-local --env-file .local/dev.env -f deployment/compose.yaml -f deployment/compose.local.yaml up -d --build --wait`. It exposes only `127.0.0.1:18080`, keeps PostgreSQL private, and does not start Caddy or request public certificates. Bootstrap this separate empty database before using `scripts/test-local-stack.ps1`; that test restarts only the named local stack and verifies messages/events and idempotency.
+## Repository map
 
-## Production
+```text
+android/       Android app, compatibility adapter and pinned upstream build scripts
+backend/       Go REST/WebSocket service, PostgreSQL migrations and tests
+admin/         English/Persian web administration
+deployment/    Compose, Caddy, optional proxy and backup service templates
+scripts/       Build, validation, test, backup and restore tools
+docs/          Setup, operation, architecture and acceptance
+assets/        VYRN branding assets
+```
 
-Follow [deployment instructions](docs/DEPLOYMENT.md) for the active backend release and rollback details. External backups, final Android signing and complete release acceptance remain unfinished. Same-server snapshots are temporary and do not replace offsite backup. Do not disable root/password SSH authentication without the user's explicit authorization. See [security](docs/SECURITY.md), [backup and restore](docs/BACKUP_RESTORE.md), [updates](docs/UPDATE_PROCESS.md) and [source redistribution](docs/GPL_COMPLIANCE.md).
+Generated upstream checkouts, SDK/JDK installations, caches, credentials, environments, APKs, private media and backups are excluded from Git. The configuration in `config/project.yaml` is descriptive; Compose reads the operator's runtime environment.
 
-## Repository checks
+## License and attribution
 
-See [contributing](CONTRIBUTING.md). GitHub CI definitions cover repository hygiene, script syntax, backend race/integration tests, vulnerability scanning and Docker compilation. GitHub execution is pending repository creation and authentication. Android APKs remain locally built; do not infer Android acceptance or production readiness from backend CI alone.
+VYRN is independent of and unaffiliated with Telegram. Android UI work derives from [DrKLO/Telegram](https://github.com/DrKLO/Telegram), pinned in `android/upstream.lock.json`; it is not an original UI implementation. Preserve upstream copyright notices. See [LICENSE](LICENSE), [NOTICE](NOTICE.md), [Android notices](android/NOTICE.md) and [license/source compliance](docs/GPL_COMPLIANCE.md), including libsignal's separate AGPL obligations. A complete binary/source/license audit remains a release gate.

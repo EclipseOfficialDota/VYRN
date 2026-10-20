@@ -1,43 +1,29 @@
-# Security status and boundaries
+# Security design and limits
 
-## Implemented controls
+VYRN is a development preview, not an independently audited or supported production messenger. See [release gates](ACCEPTANCE.md) and [reporting](../SECURITY.md).
 
-- Invite-only normalized email identifiers; no email transport or OTP.
-- Argon2id with 64 MiB, three iterations, one lane, random 16-byte salt. Concurrent password work is bounded.
-- Generic login/registration failures, IP rate limits and per-identifier temporary locks.
-- 15-minute access tokens, 30-day refresh horizon, opaque random tokens stored only as SHA-256 digests.
-- Refresh rotation with reuse-triggered session revocation; recovery codes are hashed and consumed once.
-- Per-user lock around session creation; maximum three active device sessions.
-- TOTP administrator unlock, single-use time step, five-minute grant bound to an authenticated session; audit metadata excludes secrets and message content.
-- Membership-based permissions, quota and disk reserve checks, private media authorization and path-safe UUID storage keys.
-- Android token encryption through Android Keystore and standard AES-GCM; production/Android cleartext disabled.
-- Authenticated device-only public-key publication, immutable identity/address binding, optimistic key versions, key-ID reuse/rotation-rollback rejection and atomic one-time EC prekey consumption. The server validates wire shape; receiving libsignal clients must verify signatures. Active unprepared devices are visible in the authorized roster. No private keys are stored by these endpoints.
-- Android initial-publication/claim services bind the user and original session through refresh, persist private keys before HTTP and recover the same publication after acknowledgement failure. Real identity signatures and strict owner/device/version/key encodings are checked before constructing a claimed Signal bundle.20 actual HTTPS/JNI checks pass, including exhausted EC keys with last-resort Kyber decryption.
-- Private signal-v2 sends/edits bind the authenticated producing device and current Signal-address/key-version roster. User/session/key locks preserve complete ready-device coverage through commit; unprepared, missing, extra, stale or mismatched copies fail closed. Real POST/GET delivery and decryption of distinct copies on two recipient stores pass27 Android network checks. These are service checks on one emulator, not private UI acceptance.
-- Signed update envelope library rejects tampering, expired metadata, version rollback and unauthorized APK hosts.
+## Authentication and administration
 
-## Incomplete controls — release blockers
+Email identifiers are normalized; registration requires an invitation. There is no email transport or email OTP service. Passwords use Argon2id with random salts, bounded concurrent work and generic login failures. Login paths have rate limits and temporary identifier locks. Access tokens are short-lived; refresh rotation detects reuse. Recovery codes are hashed and consumed once.
 
-Automatic prepare now validates both complete ready-device rosters/signatures and its producer's local key binding before one-time claims, includes sender-other copies, claims only missing sessions and preserves exact persisted retries. All64 actual network/recovery checks pass, including actual two-recipient plus sender-other decryption and unprepared devices on either participant. Backend commit-time checks still decide current roster validity. Client conflict repair, offline cold-start factory, publication/refill/rotation, receiver scheduling, retry/cancellation/retention and explicit verification/native UI remain open.
+Administrative operations require an authenticated administrator and a five-minute TOTP grant bound to that session. Time steps are single-use. Audit records contain operation/target metadata, not passwords or message contents. The deployment TOTP secret belongs to the bootstrap administrator setup; independent enrollment/recovery for multiple administrators is unfinished.
 
-Private codec network checks now total55 across two actual processes: encrypted history, pending exact ciphertext/ratchet state, duplicate cache reads, acknowledged send retry and out-of-order pending delivery survive force-stop. Handoff uses ratchet hashes instead of private session serialization, and test sessions/files are cleaned in finally. Native private UI, automatic workers/device lifecycle, uncertain server-commit/local-ack-loss across death, cancellation and retention remain unverified.
+Control tokens remain in browser memory. Caddy restricts the panel by operator CIDR, applies a content-security policy and blocks admin/metrics routes on public API hosts. Configure your own allowed Origin and domain. PostgreSQL and the internal Core listener must not be exposed directly.
 
-The private text codec now passes47 actual HTTPS/JNI checks, including actual server deletion/tombstone reads and learned expiry. Server deadlines persist encrypted, cannot be extended by duplicate/stale DTOs, and purge decrypted revisions/own plaintext/outgoing copies on reads, known retries or an explicit atomic sweep. Own cache display requires server DTO reconciliation. Periodic lifecycle-worker wiring, unknown deadline reconciliation/retention, wall-clock changes, large-history sweep cost and full private codec process-restart tests remain open. Existing storage/ratchet restart checks are not proof of those codec lifecycle cases.
+## Message and device boundaries
 
-SignalMessages now supplies a tested text-only codec: authenticated inner conversation/client/revision, participants, sender/recipient and destination manifest; atomic encrypted ratchet/outbox/own-cache and decrypt/cache transactions; exact HTTP retries; sticky peer/address identity bindings; duplicate/rebound/deletion-cache guards. All39 actual HTTPS/JNI network checks pass. This primitive is not invoked by the private UI or realtime worker. Automatic complete-roster acquisition/retries, cancellation/retention, authenticated edits, proactive expiry, explicit identity verification and key lifecycle remain release blockers. Deletion tests currently inject a tombstone DTO rather than exercising server event delivery.
+Private messaging integrates pinned Signal JNI, authenticated per-device key exchange, encrypted local stores and ciphertext fanout. Android Keystore protects local key/token material. Targeted native/network/process-restart checks exist; full lifecycle, identity-change, media/background behavior and independent security review remain unfinished. Signal integration is not a complete security audit.
 
-The pinned official Signal JNI and account/device-scoped Android Keystore-encrypted SQLite store pass27 real cryptographic/storage/restart checks. Authenticated public-key publication, metadata reads, atomic one-time claims and versioned server fanout pass PostgreSQL privacy/concurrency/rollback tests. Signature verification occurs in the receiving Signal client; server fixtures only validate wire shape. The storage transaction can couple ratchet advancement and application ciphertext/cache records, but the private-chat network outbox, encrypted receiver/cache workflow and verification UI are not integrated.
+Group messages and service metadata are not private-message ciphertext. Server operators can access server-side group data and metadata; Control is not a private-plaintext viewer. Device compromise, screenshots, traffic analysis and malicious modified clients are outside these guarantees. Password reset cannot recreate lost device encryption keys.
 
-End-to-end Signal integration, authenticated inner conversation/client/revision metadata, identity verification, automatic publication/refill/key rotation, complete client multi-device encrypted fanout and full adversarial device/network lifecycle tests are not complete. Private plaintext is rejected by the backend and private sending is disabled in the initial bridge. The presence of an `encrypted` flag is never proof of E2EE.
+Membership and ownership checks protect message/media access. Mutations are transactional; client IDs support idempotent retries. Media uses generated storage keys, size/type/quota checks, authorization and free-space limits. Downloads require a live authorized reference. Private attachments must be ciphertext; complete media E2EE acceptance is not claimed.
 
-Android background sync, durable acknowledgement handling, media encryption, signed remote configuration, updater integration, full logout key cleanup and device-revocation UI require completion. Unsupported Telegram surfaces need removal or VYRN implementations. No production penetration/security review has been claimed.
+## Operations
 
-Admin TOTP currently uses one deployment secret for the bootstrap administrator. Per-administrator enrollment and recovery are required before adding further administrators. Control displays only metadata.
+Use valid HTTPS certificates and preserve certificate/hostname checks. The opt-in local CA belongs only in disposable emulator Debug builds, never normal distributed APKs.
 
-## Operational boundaries
+Each operator supplies SSH identity, host-key verification, credentials and optional DNS-provider tokens. Preserve working SSH access during policy changes. Store runtime configuration with restrictive permissions outside Git; keep final Android signing keys off the VPS and retain an offline copy.
 
-The dedicated SSH key is `.local/ssh/vyrn_ed25519`; its public half is installed and key login verified. The private file remains local and ignored. SSH host identity is pinned in `.local/known_hosts`; the deployment matched its existing fingerprint. Private owner panel access uses an SSH tunnel. Public API TLS validates and admin/metrics routes are blocked; public admin rollout remains disabled. Cloudflare credentials were supplied through masked stdin and never persisted to source or VPS. The chat-disclosed token still requires owner rotation through the Cloudflare account; no rotation is claimed.
+Never publish secrets, real environments, keystores, backups or private media in source, logs, screenshots or issues. Pattern scanners do not prove every possible secret absent. Inspect source and binary artifacts separately.
 
-Never disable root login or password authentication without explicit user permission. Never commit `.env`, keystores, service JSON, credential files, backups or private keys. Do not write secrets into process arguments, logs, reports, screenshots or shell history. Root/password access settings are preserved.
-
-Actual values belong in environment variables or restricted ignored files. Source and release archives must be independently checked for secret inclusion. API logs report operation categories only. Certificate verification must never be disabled to work around local or national connectivity failures.
+Backups need authenticated encrypted offsite storage and a tested restore; same-host snapshots are temporary. Calls/TURN remain unavailable. Signed manifest primitives exist, but complete Android update delivery is unfinished; automatic secure updates are not claimed.

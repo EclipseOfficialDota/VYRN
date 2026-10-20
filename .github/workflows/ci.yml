@@ -27,6 +27,22 @@ jobs:
         run: node --check admin/app.js
       - name: Check shell scripts
         run: bash -n scripts/backup.sh scripts/restore-smoke.sh
+      - name: Check DNS planning without external requests
+        shell: pwsh
+        run: ./scripts/test-cloudflare-dns.ps1
+      - name: Validate custom-domain self-host configuration
+        env:
+          VYRN_DOMAIN: chat.example.com
+          POSTGRES_PASSWORD: disposable-config-check-only
+          VYRN_ADMIN_TOTP_SECRET: JBSWY3DPEHPK3PXP
+          VYRN_ADMIN_ALLOWED_CIDRS: 192.0.2.10/32
+        run: |
+          docker compose -f deployment/compose.yaml config -q
+          docker run --rm --network none --memory 128m --cpus 1 \
+            -e VYRN_DOMAIN -e VYRN_ADMIN_ALLOWED_CIDRS \
+            -v "$PWD/deployment/Caddyfile:/etc/caddy/Caddyfile:ro" \
+            caddy:2.10.2-alpine@sha256:4c6e91c6ed0e2fa03efd5b44747b625fec79bc9cd06ac5235a779726618e530d \
+            caddy adapt --config /etc/caddy/Caddyfile --adapter caddyfile --validate >/dev/null
       - name: Parse PowerShell scripts
         shell: pwsh
         run: |

@@ -30,7 +30,7 @@ services:
       VYRN_MEDIA_DIR: /media
       VYRN_MIN_FREE_BYTES: "10737418240"
       VYRN_ADMIN_TOTP_SECRET: ${VYRN_ADMIN_TOTP_SECRET:?Set VYRN_ADMIN_TOTP_SECRET}
-      VYRN_ADMIN_ORIGIN: https://admin.vyrn.eclipseofficial.xyz
+      VYRN_ADMIN_ORIGIN: https://admin.${VYRN_DOMAIN:-vyrn.example.com}
       VYRN_TRUSTED_PROXY: 172.29.70.0/24
       TZ: Asia/Tehran
     volumes: [media:/media]
@@ -55,6 +55,7 @@ services:
     image: caddy:2.10.2-alpine@sha256:4c6e91c6ed0e2fa03efd5b44747b625fec79bc9cd06ac5235a779726618e530d
     ports: ["80:80", "443:443", "443:443/udp"]
     environment:
+      VYRN_DOMAIN: ${VYRN_DOMAIN:-vyrn.example.com}
       VYRN_ADMIN_ALLOWED_CIDRS: ${VYRN_ADMIN_ALLOWED_CIDRS:-127.0.0.0/8 10.0.0.0/8 172.16.0.0/12 192.168.0.0/16}
       TZ: Asia/Tehran
     volumes:

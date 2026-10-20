@@ -1,6 +1,6 @@
 # Backup and restoration
 
-There is currently **no external backup destination**. Local dumps and the October15 snapshots under `/opt/vyrn/operations/` are temporary same-host artifacts and are not reliable disaster backups.
+Each installation must supply its own external backup destination. Same-host dumps and snapshots are temporary and are not reliable disaster backups. The project does not provide a shared backup service.
 
 `scripts/backup.sh` requires a Restic `s3:https://...` destination, TLS validation and a password file. Restic encrypts authenticated repository data before upload. S3 access values belong only in `/etc/vyrn/backup.env` mode 0600; keep another copy of the encryption password off the VPS. Do not put release keys in the backup source.
 
@@ -16,8 +16,6 @@ The v2 script stops Core writers while capturing the database and private media 
 4. Rehearse service startup with the restored database, media ownership and matching application/migration versions in an isolated network. Validate readiness and attachment integrity before any production switch.
 5. For real recovery, stop writes, restore into a new database and media volume, run acceptance checks, then switch configuration. Preserve the old volumes until recovery is verified.
 
-## Evidence
+## Validation limits
 
-On2026-10-15, real VPS snapshots were validated and restored into disposable PostgreSQL databases and private media volumes. Candidate e66e6a8 upgraded a restored schema7 to schema9 and passed readiness, UID10001 ownership, and the single existing avatar's size/checksum checks. A fresh snapshot was taken immediately before the successful production deployment at `/opt/vyrn/operations/deploy-20261015-e66e6a8/snapshot`. Its parent directory is root-only and copied runtime.env is mode0600. Temporary databases, containers and volumes were cleaned up.
-
-A second isolated drill restored that pre-deploy snapshot, upgraded its clone to schema9, and started the retained previous Core image successfully on the clone. Production stayed on e66e6a8. This establishes restored schema/media startup and old-binary readiness compatibility for the tested state; it does not establish every old API contract or full-host disaster recovery. External transport, actual Restic repository encryption/restore, retention, offsite recovery, Nginx/TLS host reconstruction and failure alerts remain **not verified**. One avatar does not establish recovery under a large image/voice/staged-upload workload.
+Local isolated drills exercised database migration, media ownership and checksums. They do not establish large-workload or whole-host recovery. Verify actual S3 transport, encrypted repository integrity, retention, isolated restore and failure monitoring for your installation.

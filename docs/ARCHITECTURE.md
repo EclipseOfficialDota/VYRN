@@ -24,4 +24,4 @@ Media uploads enforce membership, ownership, type limits, user quota, and the fr
 
 Compose allocates 768 MiB each to Core and PostgreSQL, 192 MiB to Caddy, and 256 MiB to Coturn only when explicitly enabled. PostgreSQL has no public port. Core is read-only except its media mount and tmpfs. Log rotation is bounded. Runtime dependencies are local after images are obtained; public certificate renewal still requires ACME reachability before expiry.
 
-Private E2EE is not yet implemented on Android. Backend ciphertext envelopes and key-table schema are not an encryption protocol. The current client must not send private plaintext or be described as providing completed E2EE.
+Private messaging integrates the pinned Signal JNI library, per-device key exchange, encrypted local storage and ciphertext fanout. Targeted native/network checks pass, but complete lifecycle/UI coverage, independent security review and optimized Release acceptance remain unfinished. Backend ciphertext envelopes alone are not proof of correct end-to-end encryption; see the current acceptance matrix and test evidence.
