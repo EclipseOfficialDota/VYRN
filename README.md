@@ -1,33 +1,99 @@
-<!-- Keep the front page short; operational details live in docs/. -->
+<div align="center">
+
+<img src="assets/vyrn-logo-original.jpg" width="112" alt="VYRN logo">
+
+# VYRN
+
+[![English](docs/assets/language-en.svg)](README.md)
+[![فارسی](docs/assets/language-fa.svg)](docs/README.fa.md)
+
+**English documentation** · Click **فارسی** above to switch languages.
+
+### Your server. Your people. Your messaging network.
+
+[![Android](https://img.shields.io/badge/Android-8%2B-34d399.svg)](docs/ANDROID_TESTING.md)
+[![Go](https://img.shields.io/badge/Go-1.26.9-38bdf8.svg)](backend/go.mod)
+[![Self-hosted](https://img.shields.io/badge/Deploy-Docker_Compose-a78bfa.svg)](docs/DEPLOYMENT.md)
+[![Status](https://img.shields.io/badge/Status-Development_Preview-fbbf24.svg)](docs/ACCEPTANCE.md)
+[![CI](https://github.com/EclipseOfficialDota/VYRN/actions/workflows/ci.yml/badge.svg)](https://github.com/EclipseOfficialDota/VYRN/actions/workflows/ci.yml)
+
+**Independent messaging with a Telegram-derived Android client, a Go/PostgreSQL backend,
+Signal private-message integration and an English/Persian administration panel.**
+
+[راهنمای فارسی](docs/README.fa.md) · [Server installation](docs/DEPLOYMENT.md) ·
+[Project report — فارسی](docs/PROJECT_REPORT.fa.md) · [Feature status](docs/ACCEPTANCE.md) ·
+[Portfolio](docs/PORTFOLIO.md)
+
+</div>
+
 <p align="center">
-  <img src="assets/vyrn-logo-original.jpg" width="144" alt="VYRN logo">
-</p>
-<h1 align="center">VYRN</h1>
-<p align="center"><strong>Your server. Your messaging network.</strong><br>پیام‌رسان مستقل، روی سرور خودتان.</p>
-<p align="center">
-  <a href="https://github.com/EclipseOfficialDota/VYRN/actions/workflows/ci.yml"><img src="https://github.com/EclipseOfficialDota/VYRN/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
-  · Android 8+ · Go · PostgreSQL · Docker Compose · فارسی / English
+  <img src="docs/assets/android-login.png" width="240" alt="Recorded VYRN Android sign-in screen">
+  <img src="docs/assets/control-fa.png" width="330" alt="Recorded Persian VYRN Control overview">
 </p>
 
-**VYRN brings a Telegram-derived Android client, an independent messaging backend and a bilingual admin panel into one self-hosted project.** Accounts belong to your instance; they do not connect to Telegram or other VYRN servers.
+Recorded development screenshots: Android sign-in and Persian Control. They are not
+screenshots of a final Release. **VYRN is a development preview; no supported Stable
+Android Release is available yet.** The existing Debug prerelease is an older snapshot.
 
-[**Deploy your server →**](docs/DEPLOYMENT.md) · [**راهنمای فارسی →**](docs/OWNER_GUIDE.fa.md) · [**گزارش کار پروژه →**](docs/PROJECT_REPORT.fa.md) · [**Résumé summary →**](docs/PORTFOLIO.md)
+## Deploy your own server
 
-> **Development preview — no supported Stable Android Release yet.** The older Debug prerelease is a test snapshot. Final signing, Release runtime acceptance and several lifecycle/security/operation gates remain open.
+Start with a dedicated Ubuntu24.04 host, a domain and Docker Compose. A small evaluation
+budget is4GiB RAM, two cores and40GiB disk plus media/backup space; actual capacity depends on workload.
 
-## What you get
+```sh
+git clone https://github.com/EclipseOfficialDota/VYRN.git
+cd VYRN
+```
 
-| For users | For instance owners |
+Follow the [server setup guide](docs/DEPLOYMENT.md) to configure DNS, protected
+`/etc/vyrn/runtime.env`, your domain and allowed admin IP/VPN. Build Core, start
+PostgreSQL, bootstrap your first administrator, then start Core/Caddy.
+
+The guide includes the actual commands, HTTPS checks, upgrades and recovery.
+Each installation has its own accounts. VYRN does not connect to Telegram or federate
+with other VYRN servers.
+
+## Invite your first user
+
+1. Open `https://admin.YOUR_SERVICE_DOMAIN`.
+2. Sign in with your bootstrap email/password and current Authenticator code.
+3. Create a limited-use, expiring invitation in **Control → Invites**.
+4. Privately share the invitation and matching client APK. The person registers with
+   email, password, display name and invitation, then saves the recovery code.
+
+Later sign-in uses email/password. There is no shared administrator password.
+[Owner and user guide — فارسی](docs/OWNER_GUIDE.fa.md)
+
+## Build your Android client
+
+Build on Windows with PowerShell7, JDK21 and the pinned Android SDK/NDK.
+Install the [build prerequisites](docs/ANDROID_TESTING.md), then:
+
+```powershell
+./scripts/build-android.ps1 -Flavor dev -BuildType debug -ApiUrl https://api.vyrn.example.com
+./scripts/verify-apks.ps1
+```
+
+Replace the example API hostname with yours. Outputs include ARM64, ARMv7 and Universal
+APKs for Android8/API26+. The project's existing APK targets the project's server;
+there is no login server switcher. Final keystores stay outside Git and the VPS.
+[Production signing](docs/RELEASE_SIGNING.md) · [Source redistribution](docs/GPL_COMPLIANCE.md)
+
+## The messaging experience
+
+| Area | Implemented paths |
 | --- | --- |
-| Invite-based email/password accounts and recovery codes | Limited-use invitations and user blocking |
-| Private and group messaging, edits, deletion and reactions | English/Persian Control with Authenticator verification |
-| Read receipts, local search and durable offline queues | Password resets, session revocation and audit events |
-| File, photo and voice-message paths | Docker deployment, HTTPS and S3-compatible encrypted backup tools |
-| Encrypted local private drafts and Signal private-message integration | Your domain, database and media storage |
+| Accounts | Invite registration, email/password login, recovery codes and device sessions |
+| Conversations | Private/group messages, history, edits, deletion, reactions and read receipts |
+| Connectivity | Durable local queues, reconnect handling, local search and protected private drafts |
+| Media | File, photo and voice-message paths with size/quota checks |
+| Control | Persian/English UI, TOTP, invitations, blocking, password resets, session revocation and audit |
+| Operations | Container deployment, HTTPS, health checks and encrypted S3-compatible backup tooling |
 
-These are implemented paths with targeted tests, not complete Telegram feature parity. Voice/video **calls**, bots, stories and channels are unavailable. [Feature status](docs/ACCEPTANCE.md) · [Test evidence](docs/TEST_REPORT.md)
+These paths have targeted tests, not complete Telegram feature parity or production acceptance.
+Voice/video **calls**, bots, stories and channels are unavailable. Voice messages are separate from calls.
 
-## How it works
+## How messages move
 
 ```mermaid
 flowchart LR
@@ -38,55 +104,42 @@ flowchart LR
     Core <--> Media["Media storage"]
 ```
 
-The adapter connects Telegram's UI to VYRN's API. Core checks access and streams changes; SQLite preserves pending messages and Signal supports private-message encryption. [Architecture](docs/ARCHITECTURE.md) · [گزارش فارسی](docs/PROJECT_REPORT.fa.md)
+The adapter connects Telegram's UI to VYRN's API. Core checks access, stores authorized
+changes and streams events. SQLite preserves pending messages; Signal supports implemented
+private-message encryption paths. Group data and metadata have different privacy properties.
 
-## Self-host in five steps
+Control manages access, not private plaintext. Full lifecycle/background coverage and
+independent security review remain unfinished. [Architecture](docs/ARCHITECTURE.md) ·
+[Security](docs/SECURITY.md) · [گزارش کامل نحوهٔ کار](docs/PROJECT_REPORT.fa.md)
 
-Start with Ubuntu24.04, your domain and Docker Compose. A small evaluation budget is4GiB RAM, two cores and40GiB disk plus media/backup space; capacity is workload-dependent.
+## Validation and release status
 
-1. **Get the source:** `git clone https://github.com/EclipseOfficialDota/VYRN.git`
-2. **Configure:** DNS, `VYRN_DOMAIN`, protected runtime secrets and your allowed admin IP/VPN.
-3. **Launch:** build Core, start PostgreSQL, bootstrap the first administrator, then start Core/Caddy.
-4. **Invite:** sign in to `https://admin.YOUR_SERVICE_DOMAIN` with email/password and Authenticator; create a limited-use invitation.
-5. **Distribute:** build for your HTTPS API; supply the signed APK and corresponding source.
+The2026-10-20 critical Android record contains438 passing checks across authentication,
+outbox integration/migrations, Signal networking and sessions. These are recorded assertions,
+not438 independent user journeys. Fresh two-client retesting stopped on host emulator crashes.
 
-**[Copy the full server setup commands →](docs/DEPLOYMENT.md)** · **[مراحل نصب و ساخت کاربر به فارسی →](docs/OWNER_GUIDE.fa.md)**
+Final signing, optimized Release runtime acceptance, physical-device coverage and other
+[release gates](docs/ACCEPTANCE.md) remain open. Configure and rehearse offsite backup
+for your own installation; same-server snapshots are temporary.
 
-The project APK targets the project's server; self-hosting requires a custom build. Install the [Windows/PowerShell7 prerequisites](docs/ANDROID_TESTING.md), then:
+## Documentation and development
 
-```powershell
-./scripts/build-android.ps1 -Flavor dev -BuildType debug -ApiUrl https://api.vyrn.example.com
-./scripts/verify-apks.ps1
-```
-
-Replace the example domain. Outputs: ARM64, ARMv7 and Universal, Android8+. [Final signing — keys stay outside Git/VPS](docs/RELEASE_SIGNING.md).
-
-## From invitation to conversation
-
-- **Owner:** create an invitation in Control → share it privately with the matching APK.
-- **User:** register with email, password, display name and invitation → save the recovery code → sign in with email/password.
-- **Then:** find participants using supported app controls and start a group or private conversation. Accounts and invitations stay local to that server.
-
-Control manages access, not private plaintext. Group data/metadata have different privacy properties. Arrange tested offsite backups before relying on the instance.
-
-<details>
-<summary><strong>Explore the project — setup, engineering and portfolio</strong></summary>
-
-| Guide | What is inside |
+| Guide | Contents |
 | --- | --- |
-| [Self-hosting](docs/DEPLOYMENT.md) / [فارسی](docs/OWNER_GUIDE.fa.md) | Server setup, TLS, first admin, invitations and maintenance |
-| [Project report — فارسی](docs/PROJECT_REPORT.fa.md) | What the app does and how its parts work |
-| [Architecture](docs/ARCHITECTURE.md) / [API](docs/API.md) | Android adapter, service boundaries, requests and storage |
-| [Android development](docs/ANDROID_TESTING.md) / [Signing](docs/RELEASE_SIGNING.md) | Reproducible build, focused testing and release identity |
-| [Status](docs/ACCEPTANCE.md) / [Tests](docs/TEST_REPORT.md) | Supported paths, actual evidence and remaining gates |
-| [Backup and restore](docs/BACKUP_RESTORE.md) / [Updates](docs/UPDATE_PROCESS.md) | Encrypted backups, isolated restore and update tooling |
-| [Security](SECURITY.md) / [Design](docs/SECURITY.md) | Private vulnerability reporting and trust limits |
-| [Résumé text](docs/PORTFOLIO.md) / [Contributing](CONTRIBUTING.md) | English/Persian project profile and contribution checks |
+| [فارسی](docs/README.fa.md) / [Owner guide](docs/OWNER_GUIDE.fa.md) | معرفی، نصب، دعوت کاربر و مدیریت روزمره |
+| [Server setup](docs/DEPLOYMENT.md) | DNS, Docker, first administrator, TLS and upgrades |
+| [Project report](docs/PROJECT_REPORT.fa.md) | نحوهٔ عملکرد اپ، امکانات و کارهای باقی‌مانده |
+| [Android](docs/ANDROID_TESTING.md) / [Signing](docs/RELEASE_SIGNING.md) | Client builds, focused tests and release keys |
+| [Architecture](docs/ARCHITECTURE.md) / [API](docs/API.md) | Adapter, service boundaries, data and requests |
+| [Backups](docs/BACKUP_RESTORE.md) / [Updates](docs/UPDATE_PROCESS.md) | Encrypted recovery and update tooling |
+| [Status](docs/ACCEPTANCE.md) / [Validation](docs/TEST_REPORT.md) | Supported paths, evidence and known gaps |
+| [Security](SECURITY.md) / [Contributing](CONTRIBUTING.md) | Private reporting and development checks |
+| [Portfolio summary](docs/PORTFOLIO.md) | English/Persian résumé introduction |
 
-`android/` client and adapter · `backend/` API and migrations · `admin/` Control · `deployment/` service templates · `scripts/` build/test/operation tools. Credentials, generated upstream sources, SDKs, APKs and backups are excluded from Git.
+`android/` client · `backend/` API · `admin/` Control · `deployment/` service templates ·
+`scripts/` tooling. Generated upstream sources, SDKs, APKs, credentials and backups stay out of Git.
 
-</details>
-
-## Attribution
-
-Android UI derives from [DrKLO/Telegram](https://github.com/DrKLO/Telegram); VYRN is unaffiliated and adds its backend, adapter, branding and operation tooling. [License](LICENSE) · [Notices](NOTICE.md) · [Android terms](android/NOTICE.md) · [Corresponding-source obligations](docs/GPL_COMPLIANCE.md).
+VYRN is independent of Telegram. Its Android UI derives from
+[DrKLO/Telegram](https://github.com/DrKLO/Telegram); VYRN adds the backend, adapter,
+branding and operation tooling. Preserve [licenses](LICENSE), [notices](NOTICE.md),
+[Android terms](android/NOTICE.md) and [corresponding-source obligations](docs/GPL_COMPLIANCE.md).
