@@ -20,7 +20,7 @@
 **Independent messaging with a Telegram-derived Android client, a Go/PostgreSQL backend,
 Signal private-message integration and an English/Persian administration panel.**
 
-[راهنمای فارسی](docs/README.fa.md) · [Server installation](docs/DEPLOYMENT.md) ·
+[راهنمای فارسی](docs/README.fa.md) · [Guided setup](docs/SETUP_WIZARD.md) · [Server installation](docs/DEPLOYMENT.md) ·
 [Project report — فارسی](docs/PROJECT_REPORT.fa.md) · [Feature status](docs/ACCEPTANCE.md) ·
 [Portfolio](docs/PORTFOLIO.md)
 
@@ -37,21 +37,35 @@ Android Release is available yet.** The existing Debug prerelease is an older sn
 
 ## Deploy your own server
 
-Start with a dedicated Ubuntu24.04 host, a domain and Docker Compose. A small evaluation
+Start with a dedicated Ubuntu24.04 host, a domain and Git. The bilingual wizard can install Docker Compose. A small evaluation
 budget is4GiB RAM, two cores and40GiB disk plus media/backup space; actual capacity depends on workload.
 
 ```sh
-git clone https://github.com/EclipseOfficialDota/VYRN.git
-cd VYRN
+git clone https://github.com/EclipseOfficialDota/VYRN.git && cd VYRN && sudo bash setup.sh
 ```
 
-Follow the [server setup guide](docs/DEPLOYMENT.md) to configure DNS, protected
-`/etc/vyrn/runtime.env`, your domain and allowed admin IP/VPN. Build Core, start
-PostgreSQL, bootstrap your first administrator, then start Core/Caddy.
+Choose English or فارسی, then **Install / resume setup**. The wizard asks for your domain,
+public IPv4, admin IP/VPN and first administrator credentials. It can create missing
+Cloudflare DNS records using a hidden, unsaved token, or guide manual DNS configuration.
+It generates protected settings, builds Core, bootstraps an empty database and checks HTTPS.
 
-The guide includes the actual commands, HTTPS checks, upgrades and recovery.
+Reopen with `sudo bash setup.sh` to check status/HTTPS, enroll your authenticator or
+start/stop the instance without deleting data. [Wizard guide](docs/SETUP_WIZARD.md) ·
+[Manual setup, existing proxies and upgrades](docs/DEPLOYMENT.md).
+
 Each installation has its own accounts. VYRN does not connect to Telegram or federate
 with other VYRN servers.
+
+```text
+VYRN SETUP
+1  Install / resume     2  Service status
+3  Check HTTPS          4  Authenticator setup
+5  Start services       6  Stop services (keep data)
+7  Client instructions  0  Exit
+```
+
+Android compilation/signing stays on your Windows workstation; the wizard prints your
+instance's build command. It does not change SSH/firewall policy or replace an existing proxy.
 
 ## Invite your first user
 
@@ -126,6 +140,7 @@ for your own installation; same-server snapshots are temporary.
 
 | Guide | Contents |
 | --- | --- |
+| [Setup wizard](docs/SETUP_WIZARD.md) | Beginner-friendly terminal setup and service controls |
 | [فارسی](docs/README.fa.md) / [Owner guide](docs/OWNER_GUIDE.fa.md) | معرفی، نصب، دعوت کاربر و مدیریت روزمره |
 | [Server setup](docs/DEPLOYMENT.md) | DNS, Docker, first administrator, TLS and upgrades |
 | [Project report](docs/PROJECT_REPORT.fa.md) | نحوهٔ عملکرد اپ، امکانات و کارهای باقی‌مانده |

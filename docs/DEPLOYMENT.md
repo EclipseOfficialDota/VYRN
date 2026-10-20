@@ -2,6 +2,8 @@
 
 This guide installs the current development source on a **fresh dedicated Ubuntu24.04 LTS host**. It does not certify a Stable release. Use a test instance before inviting users. Existing Nginx/Caddy sites must keep their ports and certificates; use an inspected proxy integration instead of starting a competing listener.
 
+For guided interactive setup, run `sudo bash setup.sh` from the checkout. It offers English/Persian inputs, optional Docker/Cloudflare setup, protected configuration, empty-database bootstrap and service controls. See [the setup wizard](SETUP_WIZARD.md). The commands below remain the manual route and reference for existing proxy deployments.
+
 ## 1. Host and Docker
 
 Plan for at least4GiB RAM, two CPU cores and40GiB disk for a small evaluation, plus space for media and backup staging. These are starting budgets, not measured capacity guarantees. Core reserves10GiB free disk before accepting uploads. Build Android on a separate Windows workstation.

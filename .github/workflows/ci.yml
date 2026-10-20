@@ -26,7 +26,9 @@ jobs:
       - name: Check administrator JavaScript
         run: node --check admin/app.js
       - name: Check shell scripts
-        run: bash -n scripts/backup.sh scripts/restore-smoke.sh
+        run: bash -n setup.sh scripts/backup.sh scripts/restore-smoke.sh
+      - name: Check interactive setup contracts offline
+        run: python3 scripts/test-setup-server.py
       - name: Check DNS planning without external requests
         shell: pwsh
         run: ./scripts/test-cloudflare-dns.ps1
@@ -91,6 +93,9 @@ jobs:
       - name: Build production container
         working-directory: .
         run: docker build --tag vyrn-core:ci --file backend/Dockerfile backend
+      - name: Check real installer bootstrap and data preservation
+        working-directory: .
+        run: python3 scripts/test-setup-server.py --integration
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: backend-coverage
