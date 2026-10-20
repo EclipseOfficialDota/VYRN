@@ -181,6 +181,19 @@ class SetupTests(unittest.TestCase):
         self.assertNotIn(values['POSTGRES_PASSWORD'], output.getvalue())
         self.assertNotIn(values['VYRN_ADMIN_TOTP_SECRET'], output.getvalue())
 
+    def test_start_preserves_containers_and_waits_for_health(self):
+        starting = json.dumps([{'State': {'Running': True, 'Health': {'Status': 'starting'}}}])
+        healthy = json.dumps([{'State': {'Running': True, 'Health': {'Status': 'healthy'}}}])
+        with patch.object(setup, 'compose', side_effect=['', 'abc123', 'abc123']) as command, patch.object(setup, 'run', side_effect=[starting, healthy]) as inspect, patch.object(setup.time, 'sleep'):
+            setup.start_existing('core')
+        self.assertEqual(command.call_args_list[0].args, ('start', 'core'))
+        self.assertEqual(inspect.call_count, 2)
+
+    def test_start_missing_service_does_not_create_or_reset_it(self):
+        with patch.object(setup, 'compose', side_effect=['', '']) as command, self.assertRaises(RuntimeError):
+            setup.start_existing('core')
+        self.assertEqual(command.call_count, 2)
+
 
 def integration():
     """Real CLI bootstrap/migrations, restart and preservation; no public DNS/TLS or host install."""
@@ -205,7 +218,7 @@ def integration():
                 count = compose('exec', '-T', 'postgres', 'psql', '-U', 'vyrn', '-d', 'vyrn', '-At', '-c', 'SELECT count(*) FROM users;', capture=True)
                 assert count == '1'
                 compose('stop', 'core')
-                compose('start', '--wait', 'core')
+                setup.start_existing('core')
                 print('PASS: real bootstrap, migrations, Core health, existing-account preservation and restart')
             finally:
                 # Only this disposable uniquely named CI project may lose its volumes.

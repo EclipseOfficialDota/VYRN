@@ -327,6 +327,25 @@ def bootstrap():
     return True
 
 
+def start_existing(*services):
+    # Older Compose supports up --wait but not start --wait. Preserve containers.
+    compose('start', *services)
+    deadline = time.monotonic() + 100
+    while time.monotonic() < deadline:
+        identifiers = compose('ps', '-aq', *services, capture=True).split()
+        if len(identifiers) != len(services):
+            raise RuntimeError(tr('Some services are missing; use Install / resume setup.', 'بعضی سرویس‌ها وجود ندارند؛ نصب / ادامهٔ نصب را انتخاب کنید.'))
+        containers = json.loads(run(['docker', 'inspect', *identifiers], capture=True, timeout=30))
+        states = [container['State'] for container in containers]
+        if any(state.get('Health', {}).get('Status') == 'unhealthy' for state in states):
+            raise RuntimeError(tr('A service is unhealthy; inspect its status. Data is preserved.', 'یکی از سرویس‌ها سالم نیست؛ وضعیت آن را بررسی کنید. داده‌ها حفظ شدند.'))
+        if all(state.get('Running') and state.get('Health', {}).get('Status', 'healthy') == 'healthy' for state in states):
+            print(tr('Services running and health checks passed.', 'سرویس‌ها روشن‌اند و بررسی سلامت موفق بود.'))
+            return
+        time.sleep(2)
+    raise RuntimeError(tr('Services did not become healthy in time; data preserved.', 'سرویس‌ها در زمان مقرر سالم نشدند؛ داده‌ها حفظ شدند.'))
+
+
 def https_check(values, attempts=1):
     url = 'https://api.' + values['VYRN_DOMAIN'] + '/health/ready'
     for attempt in range(attempts):
@@ -446,7 +465,7 @@ def main():
                 elif choice == '4':
                     authenticator(values)
                 elif choice == '5':
-                    compose('start', '--wait', 'postgres', 'core', 'caddy')
+                    start_existing('postgres', 'core', 'caddy')
                 elif choice == '6' and yes(tr('Stop this instance while retaining all volumes?', 'این نصب متوقف و همهٔ داده‌ها حفظ شوند؟')):
                     compose('stop', 'caddy', 'core', 'postgres')
                 elif choice == '7':
