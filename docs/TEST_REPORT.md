@@ -2,6 +2,14 @@
 
 These are scoped development checks, not a production certification. Reports and APKs are generated under ignored `artifacts/`; historical records remain in [checkpoints](checkpoints/2026-10-20-release-gates.md) and Git history.
 
+## Installer regression patch — 2026-10-21
+
+Three focused regression methods reproduced failures before the fix: bare documentation domains were accepted, service-menu actions bypassed remote Docker environment guards, and a saved remote context was not rejected before daemon access. The menu case covers status/start/stop with both `DOCKER_HOST` and `DOCKER_CONTEXT`.
+
+The shared engine check now validates local context metadata before daemon requests in setup and service management. Bare `example.com/net/org` and their subdomains are rejected consistently; similar real names remain accepted. See [RFC2606](https://www.rfc-editor.org/rfc/rfc2606) for the example-domain reservation.
+
+All22 offline installer tests passed locally on Ubuntu24.04/WSL in0.034s, including local-engine allowance, unrelated-stack preservation and the pre-existing secret/bootstrap/health tests. Shell syntax also passed. CI runs the existing real Docker bootstrap/health/restart check against the patched commit; consult the exact [Actions run](https://github.com/EclipseOfficialDota/VYRN/actions/workflows/ci.yml) for its result. This patch does not establish fresh-host package installation, live DNS changes or full Android acceptance.
+
 ## Latest critical Android run — 2026-10-20
 
 | Suite | Recorded checks | Result |

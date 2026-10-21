@@ -34,7 +34,8 @@ class SetupTests(unittest.TestCase):
 
     def test_input_boundaries(self):
         self.assertEqual(setup.domain('Chat.Test-Domain.org'), 'chat.test-domain.org')
-        for value in ('https://chat.test.org', 'chat;id.test.org', '-a.test.org', '8.8.8.8', 'chat.example.com', 'x..org'):
+        self.assertEqual(setup.domain('myexample.com'), 'myexample.com')
+        for value in ('https://chat.test.org', 'chat;id.test.org', '-a.test.org', '8.8.8.8', 'chat.example.com', 'x..org', 'example.com', 'example.net', 'example.org'):
             with self.assertRaises(ValueError):
                 setup.domain(value)
         self.assertEqual(setup.cidrs('192.0.2.10 2001:db8::1/128'), '192.0.2.10/32 2001:db8::1/128')
@@ -107,8 +108,31 @@ class SetupTests(unittest.TestCase):
 
     def test_foreign_stack_is_not_adopted(self):
         foreign = [{'Config': {'Labels': {'com.docker.compose.project.working_dir': '/another/deployment'}}}]
-        with patch.object(setup, 'run', side_effect=['abc123', json.dumps(foreign)]), self.assertRaises(RuntimeError):
+        with patch.object(setup, 'check_engine'), patch.object(setup, 'run', side_effect=['abc123', json.dumps(foreign)]), self.assertRaises(RuntimeError):
             setup.owned_stack()
+
+    def test_service_menu_rejects_remote_overrides_before_docker_calls(self):
+        for variable in ('DOCKER_HOST', 'DOCKER_CONTEXT'):
+            for choice in ('2', '5', '6'):
+                with self.subTest(variable=variable, choice=choice), patch.dict(os.environ, {variable: 'remote-engine'}, clear=True), patch.object(sys, 'argv', ['setup-server.py', '--lang', 'en']), patch.object(setup.os, 'geteuid', return_value=0), patch.object(sys.stdin, 'isatty', return_value=True), patch.object(setup, 'settings', return_value=self.values()), patch('builtins.input', side_effect=[choice, '0']), patch.object(setup, 'yes', return_value=True), patch.object(setup, 'run', return_value='') as command, contextlib.redirect_stdout(io.StringIO()):
+                    setup.main()
+                    command.assert_not_called()
+
+    def test_saved_remote_context_is_rejected_before_contacting_engine(self):
+        def command(arguments, **options):
+            if arguments[:3] == ['docker', 'context', 'inspect']:
+                return 'ssh://remote-engine'
+            if arguments[:3] == ['docker', 'ps', '-aq']:
+                return ''
+            self.fail('Unexpected daemon call before checking its endpoint')
+        with patch.dict(os.environ, {}, clear=True), patch.object(setup, 'run', side_effect=command), self.assertRaises(RuntimeError):
+            setup.owned_stack()
+
+    def test_local_engine_still_reaches_owned_stack_check(self):
+        with patch.dict(os.environ, {}, clear=True), patch.object(setup, 'run', side_effect=['unix:///var/run/docker.sock', '27.0', 'Compose v2', '']) as command:
+            self.assertFalse(setup.owned_stack())
+        self.assertEqual(command.call_args_list[0].args[0][:3], ['docker', 'context', 'inspect'])
+        self.assertEqual(command.call_args_list[-1].args[0][:3], ['docker', 'ps', '-aq'])
 
     def test_occupied_proxy_port_is_not_stopped(self):
         with patch.object(setup.socket, 'socket') as socket:

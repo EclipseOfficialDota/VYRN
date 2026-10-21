@@ -64,7 +64,8 @@ def domain(value):
     label = r'[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?'
     if len(value) > 253 or not re.fullmatch(label + r'(?:\.' + label + ')+', value):
         raise ValueError(tr('Use a hostname such as chat.example.com, without https://.', 'دامنه مثل chat.example.com؛ بدون https://.'))
-    if value.endswith(('.example.com', '.example.net', '.example.org')):
+    reserved = ('example.com', 'example.net', 'example.org')
+    if any(value == name or value.endswith('.' + name) for name in reserved):
         raise ValueError(tr('Use your own domain, not the documentation example.', 'دامنهٔ واقعی خودتان را بدهید؛ نه نمونهٔ راهنما.'))
     if value.rsplit('.', 1)[-1].isdigit():
         raise ValueError(tr('A DNS hostname is required, not an IP address.', 'نام دامنه لازم است؛ نه آدرس IP.'))
@@ -210,14 +211,22 @@ def docker_ready():
         run(['apt-get', 'install', '-y', 'docker-ce', 'docker-ce-cli', 'containerd.io',
              'docker-buildx-plugin', 'docker-compose-plugin'])
         run(['systemctl', 'enable', '--now', 'docker'])
-    run(['docker', 'info', '--format', '{{.ServerVersion}}'], capture=True, timeout=30)
-    run(['docker', 'compose', 'version'], capture=True, timeout=30)
-    endpoint = run(['docker', 'context', 'inspect', '--format', '{{.Endpoints.docker.Host}}'], capture=True)
+    check_engine()
+
+
+def check_engine():
+    if os.environ.get('DOCKER_HOST') or os.environ.get('DOCKER_CONTEXT'):
+        raise RuntimeError('Use the local Docker context without DOCKER_HOST/DOCKER_CONTEXT overrides.')
+    # Inspect local context metadata before contacting any daemon, including status.
+    endpoint = run(['docker', 'context', 'inspect', '--format', '{{.Endpoints.docker.Host}}'], capture=True, timeout=30)
     if not endpoint.startswith('unix://'):
         raise RuntimeError('Only a local Unix-socket Docker engine is supported.')
+    run(['docker', 'info', '--format', '{{.ServerVersion}}'], capture=True, timeout=30)
+    run(['docker', 'compose', 'version'], capture=True, timeout=30)
 
 
 def owned_stack():
+    check_engine()
     identifiers = run(['docker', 'ps', '-aq', '--filter', 'label=com.docker.compose.project=vyrn'], capture=True).split()
     if not identifiers:
         return False
@@ -456,7 +465,6 @@ def main():
             elif choice in ('2', '3', '4', '5', '6', '7'):
                 values = settings()
                 if choice in ('2', '5', '6'):
-                    run(['docker', 'info', '--format', '{{.ServerVersion}}'], capture=True, timeout=30)
                     owned_stack()
                 if choice == '2':
                     compose('ps')

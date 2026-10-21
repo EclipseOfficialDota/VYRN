@@ -65,6 +65,8 @@ The Persian menu accepts Persian or English digits. Stopping services retains vo
 
 If a different VYRN checkout owns existing containers, automatic adoption is refused. Existing standalone Nginx/Caddy on80/443 is preserved; use [manual proxy integration](DEPLOYMENT.md). Remote Docker contexts and environment overrides are not supported. The panel does not change SSH authentication, firewall rules or unrelated containers. You must allow incoming80/443 in your host/provider firewall while preserving SSH access.
 
+Setup and status/start/stop actions check the selected local Docker endpoint before contacting the daemon. A saved remote context or `DOCKER_HOST`/`DOCKER_CONTEXT` override is rejected; switch back to a local engine before continuing. Use your real domain: the example.com/net/org documentation roots and their subdomains are not valid setup targets.
+
 ## After setup
 
 Open the displayed Control URL from the allowed IP. Use the administrator email/password and the current six-digit Authenticator code. Create a limited-use invitation and share it privately with the matching APK. See [owner/user instructions](OWNER_GUIDE.fa.md).
