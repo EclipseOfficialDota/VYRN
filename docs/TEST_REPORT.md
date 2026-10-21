@@ -4,6 +4,8 @@ These are scoped development checks, not a production certification. Reports and
 
 ## Installer regression patch — 2026-10-21
 
+The first CI run of this patch also found reachable standard-library advisory `GO-2026-6809` in Go1.26.9 (`crypto/x509`). The module and both Go build-image pins now require1.26.10, using the verified official multi-platform image digest. The vulnerability gate remains enabled. See the [Go advisory](https://vuln.go.dev/ID/GO-2026-6809.json) and [release history](https://go.dev/doc/devel/release#go1.26.10). Repository changes do not update already-running server binaries; those need a separate reviewed rebuild/deployment.
+
 Three focused regression methods reproduced failures before the fix: bare documentation domains were accepted, service-menu actions bypassed remote Docker environment guards, and a saved remote context was not rejected before daemon access. The menu case covers status/start/stop with both `DOCKER_HOST` and `DOCKER_CONTEXT`.
 
 The shared engine check now validates local context metadata before daemon requests in setup and service management. Bare `example.com/net/org` and their subdomains are rejected consistently; similar real names remain accepted. See [RFC2606](https://www.rfc-editor.org/rfc/rfc2606) for the example-domain reservation.

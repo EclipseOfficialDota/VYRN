@@ -12,7 +12,7 @@
 ### Your server. Your people. Your messaging network.
 
 [![Android](https://img.shields.io/badge/Android-8%2B-34d399.svg)](docs/ANDROID_TESTING.md)
-[![Go](https://img.shields.io/badge/Go-1.26.9-38bdf8.svg)](backend/go.mod)
+[![Go](https://img.shields.io/badge/Go-1.26.10-38bdf8.svg)](backend/go.mod)
 [![Self-hosted](https://img.shields.io/badge/Deploy-Docker_Compose-a78bfa.svg)](docs/DEPLOYMENT.md)
 [![Status](https://img.shields.io/badge/Status-Development_Preview-fbbf24.svg)](docs/ACCEPTANCE.md)
 [![CI](https://github.com/EclipseOfficialDota/VYRN/actions/workflows/ci.yml/badge.svg)](https://github.com/EclipseOfficialDota/VYRN/actions/workflows/ci.yml)
