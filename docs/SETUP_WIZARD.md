@@ -49,19 +49,33 @@ Docker installation follows the [official Ubuntu repository method](https://docs
 ## Terminal controls
 
 ```text
-╭── VYRN SETUP ─────────────────────╮
+──────────────────────────────────────────────────────
+  VYRN  /  Server control
+──────────────────────────────────────────────────────
+  Ubuntu 24.04 · Self-hosted setup
+
   1  Install / resume setup
+
   2  Service status
   3  Check public HTTPS
   4  Authenticator setup
+
   5  Start existing services
   6  Stop services (keep data)
+
   7  Client build / addresses
+
+  8  Remove services (keep data)
+
   0  Exit
-╰───────────────────────────────────╯
+──────────────────────────────────────────────────────
 ```
 
-The Persian menu accepts Persian or English digits. Stopping services retains volumes; there is no erase/uninstall command. On failure, rerun option1 using the same source checkout and runtime file. The database is queried again, so an already-created account is preserved even if an earlier run was interrupted after bootstrap. The wizard is not a source updater or an automatic migration rollback tool.
+Each choice opens a fresh screen. Results and errors stay visible until you press Enter to return. Screen clearing is disabled for redirected output or a `TERM=dumb` terminal. English, Persian and Arabic digits are accepted.
+
+Option6 stops services. Option8 opens a removal submenu: choose1, then type `REMOVE` to remove this instance's containers and networks. Accounts, messages, media, certificates, `/etc/vyrn/runtime.env`, Docker, DNS records and source files remain. No volumes or images are deleted. Choosing0 or leaving the confirmation blank cancels removal. Ownership and the local Docker endpoint are checked before removal; another checkout's stack is refused. To restore services afterward, run option1 from the same checkout with the retained settings. Removal causes downtime; it is not a data-erasure operation.
+
+On failure, rerun option1 using the same source checkout and runtime file. The database is queried again, so an already-created account is preserved even if an earlier run was interrupted after bootstrap. The wizard is not a source updater or an automatic migration rollback tool.
 
 If a different VYRN checkout owns existing containers, automatic adoption is refused. Existing standalone Nginx/Caddy on80/443 is preserved; use [manual proxy integration](DEPLOYMENT.md). Remote Docker contexts and environment overrides are not supported. The panel does not change SSH authentication, firewall rules or unrelated containers. You must allow incoming80/443 in your host/provider firewall while preserving SSH access.
 
@@ -82,6 +96,8 @@ The server panel does **not** compile/sign Android or collect a keystore. Run th
 ایمیل و رمز مدیر فقط وقتی حسابی وجود ندارد پرسیده می‌شوند. در مرحلهٔ Authenticator، کلید را خصوصی وارد برنامهٔ احراز هویت کنید؛ آن کلید را در کادر کد۶رقمی پنل ننویسید. رمز یا توکن را داخل چت و عکس عمومی نفرستید.
 
 اگر نصب نیمه‌تمام شد، دوباره همین پنل و گزینهٔ۱ را باز کنید؛ تنظیمات و حساب‌های موجود حفظ می‌شوند. خطای گواهی/DNS با خاموش‌کردن TLS دور زده نمی‌شود. گزینهٔ۶ فقط سرویس را متوقف می‌کند و داده‌ها را حذف نمی‌کند.
+
+با انتخاب هر گزینه صفحه پاک و بخش بعدی باز می‌شود؛ نتیجه تا زدن Enter نمایش داده می‌شود. گزینهٔ۸ منوی حذف سرویس‌ها را باز می‌کند: گزینهٔ۱ و سپس نوشتن `REMOVE` لازم است. فقط کانتینرها و شبکه‌های همین نصب حذف می‌شوند؛ پیام‌ها، حساب‌ها، رسانه، گواهی‌ها، تنظیمات، DNS، Docker و سورس باقی می‌مانند. گزینهٔ۰ یا تأیید خالی حذف را لغو می‌کند. برای راه‌اندازی دوباره، گزینهٔ۱ منوی اصلی را از همان پوشه اجرا کنید.
 
 پس از نصب، وارد آدرس پنل شوید و دعوت محدود بسازید. اپ مخصوص API خودتان را با دستور نمایش‌داده‌شده روی کامپیوتر ویندوز بسازید؛ کلید امضا روی سرور ساخته یا ذخیره نمی‌شود.
 

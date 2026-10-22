@@ -37,6 +37,18 @@ def tr(en, fa):
     return fa if LANG == 'fa' else en
 
 
+def screen(title):
+    if sys.stdout.isatty() and os.environ.get('TERM') != 'dumb':
+        print('\033[2J\033[H', end='', flush=True)
+    print('\n' + '─' * 54)
+    print('  VYRN  /  ' + title)
+    print('─' * 54)
+
+
+def choice_input():
+    return input('> ').strip().translate(str.maketrans('۰۱۲۳۴۵۶۷۸۹٠١٢٣٤٥٦٧٨٩', '01234567890123456789'))
+
+
 def ask(label, validate, default=''):
     while True:
         value = input(label + (f' [{default}]' if default else '') + ': ').strip() or default
@@ -436,6 +448,30 @@ def install():
     links(values)
 
 
+def remove():
+    values = settings()
+    screen(tr('Remove services', 'حذف سرویس‌ها'))
+    print(tr('Removes this instance’s containers and networks.', 'کانتینرها و شبکه‌های این نصب حذف می‌شوند.'))
+    print(tr('Keeps accounts, messages, media, certificates and private settings.', 'حساب‌ها، پیام‌ها، رسانه، گواهی‌ها و تنظیمات خصوصی حفظ می‌شوند.'))
+    print(tr('DNS, Docker, source files and other applications stay in place.', 'DNS، خود Docker، سورس و برنامه‌های دیگر باقی می‌مانند.'))
+    print('\n  1  ' + tr('Remove services (keep data)', 'حذف سرویس‌ها؛ حفظ داده‌ها'))
+    print('  0  ' + tr('Back', 'بازگشت'))
+    choice = choice_input()
+    if choice == '0':
+        return
+    if choice != '1':
+        raise ValueError(tr('Choose 1 or 0.', '۱ یا ۰ را انتخاب کنید.'))
+    screen(tr('Confirm removal', 'تأیید حذف'))
+    print(tr('Instance: ', 'نصب: ') + values['VYRN_DOMAIN'])
+    if input(tr('Type REMOVE to remove services, or Enter to cancel: ', 'برای حذف سرویس‌ها REMOVE بنویسید؛ برای لغو Enter: ')).strip() != 'REMOVE':
+        print(tr('Cancelled.', 'لغو شد.'))
+        return
+    # Recheck ownership and the local endpoint immediately before any mutation.
+    owned_stack()
+    compose('down')
+    print(tr('Services removed. Data and settings retained; option 1 reinstalls them.', 'سرویس‌ها حذف شدند. داده و تنظیمات حفظ شدند؛ گزینهٔ۱ آن‌ها را دوباره راه‌اندازی می‌کند.'))
+
+
 def main():
     global LANG
     parser = argparse.ArgumentParser(description='VYRN beginner setup and terminal control panel (Ubuntu24.04).')
@@ -451,17 +487,34 @@ def main():
     if not sys.stdin.isatty():
         raise RuntimeError('Interactive terminal required. Reconnect using ssh -t; do not pipe passwords.')
     LANG = options.lang or ask('Language / زبان: en or fa', language, 'en')
+    actions = {
+        '1': tr('Install / resume setup', 'نصب / ادامهٔ نصب'),
+        '2': tr('Service status', 'وضعیت سرویس‌ها'),
+        '3': tr('Check public HTTPS', 'بررسی HTTPS عمومی'),
+        '4': tr('Authenticator setup', 'تنظیم Authenticator'),
+        '5': tr('Start existing services', 'روشن‌کردن سرویس‌های موجود'),
+        '6': tr('Stop services (keep data)', 'توقف سرویس‌ها؛ حفظ داده‌ها'),
+        '7': tr('Client build / addresses', 'ساخت اپ / آدرس‌ها'),
+        '8': tr('Remove services (keep data)', 'حذف سرویس‌ها؛ حفظ داده‌ها'),
+    }
     while True:
-        print('\n╭── VYRN SETUP ─────────────────────╮')
-        print(tr('  1  Install / resume setup\n  2  Service status\n  3  Check public HTTPS\n  4  Authenticator setup\n  5  Start existing services\n  6  Stop services (keep data)\n  7  Client build / addresses\n  0  Exit',
-                 '  ۱  نصب / ادامهٔ نصب\n  ۲  وضعیت سرویس‌ها\n  ۳  بررسی HTTPS عمومی\n  ۴  تنظیم Authenticator\n  ۵  روشن‌کردن سرویس‌های موجود\n  ۶  توقف سرویس‌ها؛ حفظ داده‌ها\n  ۷  ساخت اپ / آدرس‌ها\n  ۰  خروج'))
-        print('╰───────────────────────────────────╯')
-        choice = input('> ').strip().translate(str.maketrans('۰۱۲۳۴۵۶۷۸۹', '0123456789'))
+        screen(tr('Server control', 'کنترل سرور'))
+        print('  ' + tr('Ubuntu 24.04 · Self-hosted setup', 'Ubuntu 24.04 · راه‌اندازی سلف‌هاست'))
+        for number, title in actions.items():
+            if number in ('1', '2', '5', '7', '8'):
+                print()
+            print(f'  {number}  {title}')
+        print('\n  0  ' + tr('Exit', 'خروج'))
+        print('\n' + '─' * 54)
+        choice = choice_input()
+        if choice == '0':
+            return
+        screen(actions.get(choice, tr('Choose an option', 'انتخاب گزینه')))
         try:
-            if choice == '0':
-                return
             if choice == '1':
                 install()
+            elif choice == '8':
+                remove()
             elif choice in ('2', '3', '4', '5', '6', '7'):
                 values = settings()
                 if choice in ('2', '5', '6'):
@@ -478,9 +531,12 @@ def main():
                     compose('stop', 'caddy', 'core', 'postgres')
                 elif choice == '7':
                     links(values)
+            else:
+                print(tr('Choose a number from 0 to 8.', 'یک عدد از ۰ تا ۸ انتخاب کنید.'))
         except (RuntimeError, OSError, ValueError) as error:
             print(tr('Needs attention: ', 'نیاز به بررسی: ') + str(error))
             print('https://github.com/EclipseOfficialDota/VYRN/blob/main/docs/SETUP_WIZARD.md')
+        input(tr('\nPress Enter to return to the main menu. ', '\nبرای بازگشت به منوی اصلی Enter بزنید. '))
 
 
 if __name__ == '__main__':

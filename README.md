@@ -50,7 +50,8 @@ Cloudflare DNS records using a hidden, unsaved token, or guide manual DNS config
 It generates protected settings, builds Core, bootstraps an empty database and checks HTTPS.
 
 Reopen with `sudo bash setup.sh` to check status/HTTPS, enroll your authenticator or
-start/stop the instance without deleting data. [Wizard guide](docs/SETUP_WIZARD.md) ·
+start/stop the instance. The panel clears between screens and includes confirmed service
+removal that keeps data and settings. [Wizard guide](docs/SETUP_WIZARD.md) ·
 [Manual setup, existing proxies and upgrades](docs/DEPLOYMENT.md).
 
 Each installation has its own accounts. VYRN does not connect to Telegram or federate

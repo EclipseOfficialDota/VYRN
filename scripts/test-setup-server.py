@@ -114,7 +114,7 @@ class SetupTests(unittest.TestCase):
     def test_service_menu_rejects_remote_overrides_before_docker_calls(self):
         for variable in ('DOCKER_HOST', 'DOCKER_CONTEXT'):
             for choice in ('2', '5', '6'):
-                with self.subTest(variable=variable, choice=choice), patch.dict(os.environ, {variable: 'remote-engine'}, clear=True), patch.object(sys, 'argv', ['setup-server.py', '--lang', 'en']), patch.object(setup.os, 'geteuid', return_value=0), patch.object(sys.stdin, 'isatty', return_value=True), patch.object(setup, 'settings', return_value=self.values()), patch('builtins.input', side_effect=[choice, '0']), patch.object(setup, 'yes', return_value=True), patch.object(setup, 'run', return_value='') as command, contextlib.redirect_stdout(io.StringIO()):
+                with self.subTest(variable=variable, choice=choice), patch.dict(os.environ, {variable: 'remote-engine'}, clear=True), patch.object(sys, 'argv', ['setup-server.py', '--lang', 'en']), patch.object(setup.os, 'geteuid', return_value=0), patch.object(sys.stdin, 'isatty', return_value=True), patch.object(setup, 'settings', return_value=self.values()), patch('builtins.input', side_effect=[choice, '', '0']), patch.object(setup, 'yes', return_value=True), patch.object(setup, 'run', return_value='') as command, contextlib.redirect_stdout(io.StringIO()):
                     setup.main()
                     command.assert_not_called()
 
@@ -217,6 +217,46 @@ class SetupTests(unittest.TestCase):
         with patch.object(setup, 'compose', side_effect=['', '']) as command, self.assertRaises(RuntimeError):
             setup.start_existing('core')
         self.assertEqual(command.call_count, 2)
+
+    def test_screen_clears_only_interactive_capable_terminals(self):
+        for interactive, terminal, clears in ((True, 'xterm', True), (True, 'dumb', False), (False, 'xterm', False)):
+            output = io.StringIO()
+            with self.subTest(interactive=interactive, terminal=terminal), patch.object(output, 'isatty', return_value=interactive), patch.dict(os.environ, TERM=terminal), contextlib.redirect_stdout(output):
+                setup.screen('Test screen')
+            self.assertEqual('\033[2J\033[H' in output.getvalue(), clears)
+            self.assertIn('VYRN  /  Test screen', output.getvalue())
+
+    def test_menu_clears_before_action_and_pauses_before_return(self):
+        events = []
+        def prompt(label):
+            events.append(('input', label))
+            return next(answers)
+        answers = iter(['7', '', '0'])
+        with patch.object(sys, 'argv', ['setup-server.py', '--lang', 'en']), patch.object(setup.os, 'geteuid', return_value=0), patch.object(sys.stdin, 'isatty', return_value=True), patch.object(setup, 'settings', return_value=self.values()), patch('builtins.input', side_effect=prompt), patch.object(setup, 'screen', side_effect=lambda title: events.append(('screen', title))), patch.object(setup, 'links', side_effect=lambda values: events.append(('action', 'links'))), contextlib.redirect_stdout(io.StringIO()):
+            setup.main()
+        self.assertEqual([event[0] for event in events], ['screen', 'input', 'screen', 'action', 'input', 'screen', 'input'])
+        self.assertIn('return to the main menu', events[4][1])
+
+    def test_remove_requires_exact_confirmation_and_supports_back(self):
+        for answers in (['0'], ['1', ''], ['1', 'remove']):
+            with self.subTest(answers=answers), patch.object(setup, 'settings', return_value=self.values()), patch('builtins.input', side_effect=answers), patch.object(setup, 'owned_stack') as ownership, patch.object(setup, 'compose') as command, contextlib.redirect_stdout(io.StringIO()):
+                setup.remove()
+                ownership.assert_not_called()
+                command.assert_not_called()
+
+    def test_remove_keeps_data_and_config_and_checks_ownership_first(self):
+        setup.write_config(self.values())
+        before = self.config.read_bytes()
+        events = []
+        with patch('builtins.input', side_effect=['۱', 'REMOVE']), patch.object(setup, 'owned_stack', side_effect=lambda: events.append('ownership')), patch.object(setup, 'compose', side_effect=lambda *args: events.append(args)), contextlib.redirect_stdout(io.StringIO()):
+            setup.remove()
+        self.assertEqual(events, ['ownership', ('down',)])
+        self.assertEqual(self.config.read_bytes(), before)
+
+    def test_remove_refuses_foreign_or_remote_stack(self):
+        with patch.object(setup, 'settings', return_value=self.values()), patch('builtins.input', side_effect=['1', 'REMOVE']), patch.object(setup, 'owned_stack', side_effect=RuntimeError('foreign or remote')), patch.object(setup, 'compose') as command, contextlib.redirect_stdout(io.StringIO()), self.assertRaises(RuntimeError):
+            setup.remove()
+        command.assert_not_called()
 
 
 def integration():
