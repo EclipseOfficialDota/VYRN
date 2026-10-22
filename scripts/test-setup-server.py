@@ -5,6 +5,7 @@ import io
 import json
 import os
 from pathlib import Path
+import re
 import subprocess
 import sys
 import tempfile
@@ -49,6 +50,65 @@ class SetupTests(unittest.TestCase):
         self.assertEqual(setup.email('Owner@Test-Domain.org'), 'owner@test-domain.org')
         with self.assertRaises(ValueError):
             setup.email('Owner <owner@test.org>')
+
+    def test_release_and_docker_repository_matrix(self):
+        release = Path(self.temp.name) / 'os-release'
+        expected = {'ubuntu': {'22.04': 'jammy', '24.04': 'noble', '26.04': 'resolute', '26.10': 'stonking'},
+                    'debian': {'12': 'bookworm', '13': 'trixie'}}
+        for distro, versions in expected.items():
+            for version, codename in versions.items():
+                for arch in ('amd64', 'arm64'):
+                    with self.subTest(distro=distro, version=version, arch=arch), patch.object(setup, 'OS_RELEASE', release):
+                        release.write_text(f'ID="{distro}"\nVERSION_ID="{version}"\nVERSION_CODENAME=untrusted-wrong-suite\n')
+                        self.assertEqual(setup.host_release(), (distro, version, codename))
+                        repository, key_url = setup.docker_repository(arch, '/etc/apt/keyrings/docker.asc')
+                        self.assertIn(f'URIs: https://download.docker.com/linux/{distro}\n', repository)
+                        self.assertIn(f'Suites: {codename}\n', repository)
+                        self.assertIn(f'Architectures: {arch}\n', repository)
+                        self.assertEqual(key_url, f'https://download.docker.com/linux/{distro}/gpg')
+                        with self.assertRaises(RuntimeError):
+                            setup.docker_repository('armhf', '/unused')
+
+    def test_unsupported_releases_rejected_by_python_and_shell_bootstrap(self):
+        release = Path(self.temp.name) / 'os-release'
+        shell = (setup.ROOT / 'setup.sh').read_text()
+        guard = re.search(r'    case .*?    esac', shell, re.S).group(0)
+        releases = [(distro, version, True) for distro, versions in setup.SUPPORTED.items() for version in versions]
+        releases += [('ubuntu', '20.04', False), ('ubuntu', '25.04', False), ('debian', '11', False), ('debian', '14', False), ('linuxmint', '22', False), ('', '', False)]
+        for distro, version, supported in releases:
+            with self.subTest(distro=distro, version=version), patch.object(setup, 'OS_RELEASE', release):
+                release.write_text(f'ID={distro}\nVERSION_ID={version}\nID_LIKE=ubuntu\n')
+                if supported:
+                    setup.host_release()
+                else:
+                    with self.assertRaises(RuntimeError):
+                        setup.host_release()
+                result = subprocess.run(['bash', '-c', guard], env=dict(os.environ, ID=distro, VERSION_ID=version), capture_output=True, text=True)
+                self.assertEqual(result.returncode == 0, supported)
+
+    def test_docker_install_uses_detected_repository_and_key(self):
+        release = Path(self.temp.name) / 'os-release'
+        for distro, versions in setup.SUPPORTED.items():
+            for version, codename in versions.items():
+                with self.subTest(distro=distro, version=version), tempfile.TemporaryDirectory() as temp:
+                    release.write_text(f'ID={distro}\nVERSION_ID={version}\n')
+                    def path(value):
+                        return Path(temp) / value.lstrip('/')
+                    def command(args, **options):
+                        if args[:2] == ['dpkg', '--print-architecture']:
+                            return 'amd64'
+                        if args[0] == 'curl':
+                            Path(args[-1]).write_text('public-test-key-' * 20)
+                        return ''
+                    path('/etc/apt/sources.list.d').mkdir(parents=True)
+                    with patch.object(setup, 'OS_RELEASE', release), patch.object(setup, 'Path', side_effect=path), patch.object(setup.shutil, 'which', return_value=None), patch.object(setup, 'yes', return_value=True), patch.object(setup.subprocess, 'run', return_value=subprocess.CompletedProcess([], 1, '', '')), patch.object(setup, 'run', side_effect=command) as run, patch.object(setup, 'check_engine') as check:
+                        setup.docker_ready()
+                    source = path('/etc/apt/sources.list.d/docker.sources').read_text()
+                    self.assertIn(f'Suites: {codename}\n', source)
+                    self.assertIn(f'URIs: https://download.docker.com/linux/{distro}\n', source)
+                    curl = next(call.args[0] for call in run.call_args_list if call.args[0][0] == 'curl')
+                    self.assertIn(f'https://download.docker.com/linux/{distro}/gpg', curl)
+                    check.assert_called_once()
 
     def test_secret_prompt_never_falls_back_to_echo(self):
         with patch.object(setup.getpass, 'getpass', side_effect=setup.getpass.GetPassWarning('echo disabled unavailable')):

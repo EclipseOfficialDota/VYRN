@@ -3,14 +3,14 @@ set -euo pipefail
 cd -- "$(dirname -- "${BASH_SOURCE[0]}")"
 if ! command -v python3 >/dev/null 2>&1; then
     if [[ $(id -u) != 0 || ! -f /etc/os-release ]]; then
-        echo 'Run on Ubuntu24.04: sudo bash setup.sh' >&2
+        echo 'Run on a supported Ubuntu/Debian server: sudo bash setup.sh' >&2
         exit 1
     fi
     . /etc/os-release
-    if [[ ${ID:-} != ubuntu || ${VERSION_ID:-} != 24.04 ]]; then
-        echo 'Automatic setup supports Ubuntu24.04 only.' >&2
-        exit 1
-    fi
+    case "${ID:-}:${VERSION_ID:-}" in
+        ubuntu:22.04|ubuntu:24.04|ubuntu:26.04|ubuntu:26.10|debian:12|debian:13) ;;
+        *) echo 'Automatic setup supports Ubuntu 22.04/24.04/26.04/26.10 and Debian 12/13 only.' >&2; exit 1 ;;
+    esac
     read -r -p 'Install Python3 for the setup panel? [y/N] ' answer
     [[ $answer == y || $answer == Y ]] || exit 1
     apt-get update

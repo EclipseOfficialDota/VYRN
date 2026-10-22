@@ -21,6 +21,11 @@ import warnings
 
 ROOT = Path(__file__).resolve().parents[1]
 CONFIG = Path('/etc/vyrn/runtime.env')
+OS_RELEASE = Path('/etc/os-release')
+SUPPORTED = {
+    'ubuntu': {'22.04': 'jammy', '24.04': 'noble', '26.04': 'resolute', '26.10': 'stonking'},
+    'debian': {'12': 'bookworm', '13': 'trixie'},
+}
 HOSTS = ('', 'api.', 'ws.', 'media.', 'push.', 'admin.', 'updates.')
 LANG = 'en'
 
@@ -172,21 +177,41 @@ def settings():
     return result
 
 
-def host_check():
+def host_release():
     if sys.platform != 'linux':
-        raise RuntimeError('The server setup panel runs on Ubuntu24.04, not Windows/macOS.')
-    release = dict(line.split('=', 1) for line in Path('/etc/os-release').read_text().splitlines() if '=' in line)
-    if release.get('ID', '').strip('\"') != 'ubuntu' or release.get('VERSION_ID', '').strip('\"') != '24.04':
-        raise RuntimeError('Automatic setup currently supports Ubuntu24.04 only.')
+        raise RuntimeError('The server setup panel runs on Ubuntu/Debian, not Windows/macOS.')
+    release = dict(line.split('=', 1) for line in OS_RELEASE.read_text().splitlines() if '=' in line)
+    distro = release.get('ID', '').strip('\"\x27')
+    version = release.get('VERSION_ID', '').strip('\"\x27')
+    codename = SUPPORTED.get(distro, {}).get(version)
+    if not codename:
+        raise RuntimeError('Automatic setup supports Ubuntu 22.04/24.04/26.04/26.10 and Debian 12/13 only.')
+    return distro, version, codename
+
+
+def host_check():
+    distro, version, _ = host_release()
     if shutil.disk_usage(ROOT).free < 12 * 1024**3:
         raise RuntimeError(tr('At least12GiB free is needed for builds and the10GiB media reserve.', 'حداقل۱۲گیگابایت فضای آزاد برای ساخت و ذخیرهٔ امن رسانه لازم است.'))
+    return distro, version
+
+
+def docker_repository(arch, key):
+    distro, _, codename = host_release()
+    if arch not in ('amd64', 'arm64'):
+        raise RuntimeError('Only amd64/arm64 hosts are supported by this installer.')
+    base = 'https://download.docker.com/linux/' + distro
+    repository = (f'Types: deb\nURIs: {base}\nSuites: {codename}\n'
+                  f'Components: stable\nArchitectures: {arch}\nSigned-By: {key}\n')
+    return repository, base + '/gpg'
 
 
 def docker_ready():
     if os.environ.get('DOCKER_HOST') or os.environ.get('DOCKER_CONTEXT'):
         raise RuntimeError('Use the local Docker context without DOCKER_HOST/DOCKER_CONTEXT overrides.')
     if not shutil.which('docker'):
-        if not yes(tr('Install Docker Engine from the official Ubuntu repository?', 'Docker از مخزن رسمی اوبونتو نصب شود؟')):
+        distro, _, _ = host_release()
+        if not yes(tr(f'Install Docker Engine from its official {distro} repository?', f'Docker از مخزن رسمی {distro} نصب شود؟')):
             raise RuntimeError(tr('Docker is required.', 'Docker لازم است.'))
         # Preserve conflicting installations; never uninstall another service automatically.
         for package in ('docker.io', 'podman-docker', 'containerd', 'runc'):
@@ -198,10 +223,7 @@ def docker_ready():
         key = Path('/etc/apt/keyrings/docker.asc')
         source = Path('/etc/apt/sources.list.d/docker.sources')
         arch = run(['dpkg', '--print-architecture'], capture=True)
-        if arch not in ('amd64', 'arm64'):
-            raise RuntimeError('Only amd64/arm64 hosts are supported by this installer.')
-        repository = ('Types: deb\nURIs: https://download.docker.com/linux/ubuntu\nSuites: noble\n'
-                      f'Components: stable\nArchitectures: {arch}\nSigned-By: {key}\n')
+        repository, key_url = docker_repository(arch, key)
         if Path('/etc/apt/sources.list.d/docker.list').exists():
             raise RuntimeError('Existing Docker repository needs manual review; preserved.')
         if source.exists():
@@ -213,7 +235,7 @@ def docker_ready():
             key.parent.mkdir(mode=0o755, exist_ok=True)
             try:
                 run(['curl', '--fail', '--silent', '--show-error', '--proto', '=https', '--tlsv1.2',
-                     'https://download.docker.com/linux/ubuntu/gpg', '--output', str(key)])
+                     key_url, '--output', str(key)])
                 key.chmod(0o644)
                 source.write_text(repository)
             except (RuntimeError, OSError):
@@ -474,16 +496,16 @@ def remove():
 
 def main():
     global LANG
-    parser = argparse.ArgumentParser(description='VYRN beginner setup and terminal control panel (Ubuntu24.04).')
+    parser = argparse.ArgumentParser(description='VYRN beginner setup and terminal control panel (Ubuntu/Debian).')
     parser.add_argument('--lang', choices=('en', 'fa'))
     parser.add_argument('--check', action='store_true', help='Read-only host/prerequisite report; no installation')
     options = parser.parse_args()
     if options.check:
-        host_check()
-        print('OK: Ubuntu24.04 and disk budget; Docker CLI: ' + str(bool(shutil.which('docker'))))
+        distro, version = host_check()
+        print(f'OK: {distro} {version} and disk budget; Docker CLI: ' + str(bool(shutil.which('docker'))))
         return
     if sys.platform != 'linux' or os.geteuid() != 0:
-        raise RuntimeError('Run on your Ubuntu server: sudo bash setup.sh')
+        raise RuntimeError('Run on your Ubuntu/Debian server: sudo bash setup.sh')
     if not sys.stdin.isatty():
         raise RuntimeError('Interactive terminal required. Reconnect using ssh -t; do not pipe passwords.')
     LANG = options.lang or ask('Language / زبان: en or fa', language, 'en')
@@ -499,7 +521,7 @@ def main():
     }
     while True:
         screen(tr('Server control', 'کنترل سرور'))
-        print('  ' + tr('Ubuntu 24.04 · Self-hosted setup', 'Ubuntu 24.04 · راه‌اندازی سلف‌هاست'))
+        print('  ' + tr('Ubuntu / Debian · Self-hosted setup', 'Ubuntu / Debian · راه‌اندازی سلف‌هاست'))
         for number, title in actions.items():
             if number in ('1', '2', '5', '7', '8'):
                 print()

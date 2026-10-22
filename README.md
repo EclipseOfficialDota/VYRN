@@ -37,7 +37,8 @@ Android Release is available yet.** The existing Debug prerelease is an older sn
 
 ## Deploy your own server
 
-Start with a dedicated Ubuntu24.04 host, a domain and Git. The bilingual wizard can install Docker Compose. A small evaluation
+Start with a dedicated Ubuntu (22.04/24.04/26.04/26.10) or Debian (12/13) host, a domain and Git.
+The bilingual wizard selects the matching Docker repository. A small evaluation
 budget is4GiB RAM, two cores and40GiB disk plus media/backup space; actual capacity depends on workload.
 
 ```sh

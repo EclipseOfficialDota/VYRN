@@ -1,6 +1,15 @@
 # Guided server setup / راه‌انداز تعاملی
 
-VYRN includes a small bilingual terminal panel for a dedicated Ubuntu24.04 server. It uses Python's standard library and the existing Docker Compose stack; no separate UI framework is required. This installs the development-preview server, not a certified Stable Android release.
+VYRN includes a small bilingual terminal panel for a dedicated Ubuntu or Debian server. It uses Python's standard library and the existing Docker Compose stack; no separate UI framework is required. This installs the development-preview server, not a certified Stable Android release.
+
+## Supported hosts
+
+| Distribution | Versions | Docker repository suites |
+| --- | --- | --- |
+| Ubuntu | 22.04, 24.04, 26.04, 26.10 | jammy, noble, resolute, stonking |
+| Debian | 12, 13 | bookworm, trixie |
+
+Use a 64-bit `amd64` or `arm64` host with systemd. The installer detects `/etc/os-release` and selects the distribution-specific Docker repository and signing key; it never substitutes an Ubuntu repository for Debian. Other releases and derivatives are refused. This is installer compatibility, not evidence of full installation testing on every release. The existing runtime stack and data format are unchanged.
 
 ## Start
 
@@ -26,7 +35,7 @@ Read-only prerequisite check: `bash setup.sh --check` (Python3 must already be i
 | Service domain | Your hostname, e.g. `chat.yourdomain.com`; no scheme/path |
 | Public server IPv4 | DNS targets and readiness checks |
 | Operator IP or VPN CIDRs | Restrict the admin panel; an SSH client IP is suggested when available |
-| Docker installation choice | Install Docker from its official Ubuntu repository when absent |
+| Docker installation choice | Install Docker from its matching official Ubuntu/Debian repository when absent |
 | Optional Cloudflare Zone ID/token | Create missing DNS-only A records; token input is hidden and not saved |
 | Administrator email/password | Create the first account only when the database is empty |
 | Authenticator-key display choice | Privately import the generated time-based key into your authenticator |
@@ -35,7 +44,7 @@ For Cloudflare, use a token limited to DNS editing for the intended zone and its
 
 ## Setup flow
 
-1. Check Ubuntu/disk, Docker availability, project ownership and occupied80/443 ports.
+1. Check supported Ubuntu/Debian release and disk, Docker availability, project ownership and occupied80/443 ports.
 2. Collect inputs, show the public configuration summary and save new settings only after confirmation.
 3. Generate the database password and TOTP key into `/etc/vyrn/runtime.env`, mode0600, in a private directory. Existing settings/keys are never regenerated automatically.
 4. Create optional Cloudflare records or guide manual DNS; check all seven names before building.
@@ -44,7 +53,7 @@ For Cloudflare, use a token limited to DNS editing for the intended zone and its
 7. Start Core/Caddy and check public readiness with normal certificate verification. HTTPS failure is shown as pending, not success.
 8. Offer private authenticator enrollment, display the Control address and give the exact Android build command for your API.
 
-Docker installation follows the [official Ubuntu repository method](https://docs.docker.com/engine/install/ubuntu/), not a remote shell installer. Conflicting container packages or repository settings require manual review; unrelated services are not removed. A matching repository created by an earlier interrupted attempt can be reused. Installing Docker/compiling images requires internet access and can take several minutes.
+Docker installation follows the official repository method for [Ubuntu](https://docs.docker.com/engine/install/ubuntu/) or [Debian](https://docs.docker.com/engine/install/debian/), not a remote shell installer. Conflicting container packages or repository settings require manual review; unrelated services are not removed. A matching repository created by an earlier interrupted attempt can be reused. Installing Docker/compiling images requires internet access and can take several minutes.
 
 ## Terminal controls
 
@@ -52,7 +61,7 @@ Docker installation follows the [official Ubuntu repository method](https://docs
 ──────────────────────────────────────────────────────
   VYRN  /  Server control
 ──────────────────────────────────────────────────────
-  Ubuntu 24.04 · Self-hosted setup
+  Ubuntu / Debian · Self-hosted setup
 
   1  Install / resume setup
 
@@ -89,7 +98,7 @@ The server panel does **not** compile/sign Android or collect a keystore. Run th
 
 ## راهنمای سریع فارسی
 
-دستور شروع را روی سرور Ubuntu24.04 خودتان اجرا کنید، زبان فارسی و گزینهٔ۱ را انتخاب کنید. دامنه، IPv4 عمومی و IP خودتان برای مدیریت را بدهید. اگر Docker نصب نیست، راه‌انداز برای نصب آن از مخزن رسمی اجازه می‌گیرد.
+دستور شروع را روی سرور Ubuntu نسخهٔ۲۲٫۰۴، ۲۴٫۰۴، ۲۶٫۰۴ یا ۲۶٫۱۰ یا Debian نسخهٔ۱۲ یا ۱۳ اجرا کنید، زبان فارسی و گزینهٔ۱ را انتخاب کنید. دامنه، IPv4 عمومی و IP خودتان برای مدیریت را بدهید. مخزن و کلید رسمی Docker بر اساس توزیع و نسخه انتخاب می‌شوند. نصب روی همهٔ این نسخه‌ها به‌صورت واقعی آزمایش نشده؛ تشخیص نسخه و انتخاب مخزن با تست‌های آفلاین بررسی شده است.
 
 برای DNS می‌توانید Zone ID و توکن محدود Cloudflare را در همان ترمینال بدهید؛ توکن ذخیره نمی‌شود. اگر Provider دیگری دارید، رکوردهای نمایش‌داده‌شده را آنجا بسازید و Enter بزنید تا بررسی شوند. ورودی۸۰/۴۴۳ را در Provider و فایروال مجاز کنید؛ دسترسی SSH را حفظ کنید.
 
@@ -103,4 +112,4 @@ The server panel does **not** compile/sign Android or collect a keystore. Run th
 
 ## Validation scope
 
-Run `python3 scripts/test-setup-server.py` for offline validation of inputs, secret handling, protected files, ownership, DNS planning, bootstrap guards and orchestration. CI additionally runs `python3 scripts/test-setup-server.py --integration` against a uniquely named disposable Docker project after building Core, checking real migrations/bootstrap, existing-account preservation, health and restart. That check does not install host packages, issue public certificates or edit real Cloudflare DNS. Fresh-host package installation, real DNS/provider reachability and certificate issuance need per-host verification; no blanket full-host acceptance is claimed.
+Run `python3 scripts/test-setup-server.py` for offline validation of supported/unsupported release detection, shell bootstrap parity, distribution-specific Docker repository/key selection, inputs, secret handling, protected files, ownership, DNS planning, bootstrap guards and orchestration. Docker package-install commands are mocked; tests do not change host packages. CI additionally runs `python3 scripts/test-setup-server.py --integration` against a uniquely named disposable Docker project after building Core, checking real migrations/bootstrap, existing-account preservation, health and restart. That check does not install host packages, issue public certificates or edit real Cloudflare DNS. Fresh-host package installation, real DNS/provider reachability and certificate issuance need per-host verification; no blanket full-host acceptance is claimed.
