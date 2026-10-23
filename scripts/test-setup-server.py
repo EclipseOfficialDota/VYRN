@@ -394,6 +394,89 @@ class SetupTests(unittest.TestCase):
         self.assertIn('nginx', text)
         self.assertFalse(self.config.exists())
 
+    def test_nginx_preflight_preserves_existing_sites(self):
+        site = Path(self.temp.name) / 'vyrn.conf'
+        values = dict(self.values(), VYRN_PROXY_MODE='existing')
+        for host in ('api.chat.test-domain.org', '*.test-domain.org', '.test-domain.org', '~^api'):
+            with self.subTest(host=host), patch.object(setup, 'NGINX_SITE', site), patch.object(setup.shutil, 'which', return_value='/usr/sbin/nginx'), patch.object(setup, 'run', side_effect=['active', 'server { server_name ' + host + '; }']), self.assertRaises(RuntimeError):
+                setup.nginx_preflight(values)
+            self.assertFalse(site.exists())
+        site.write_text('# unrelated site\n')
+        with patch.object(setup, 'NGINX_SITE', site), patch.object(setup.shutil, 'which', return_value='/usr/sbin/nginx'), patch.object(setup, 'run', return_value='active'), self.assertRaises(RuntimeError):
+            setup.nginx_preflight(values)
+        self.assertEqual(site.read_text(), '# unrelated site\n')
+
+    def test_nginx_repair_restores_site_on_failures_and_interrupt(self):
+        values = dict(self.values(), VYRN_PROXY_MODE='existing', VYRN_PUBLIC_IPV4='8.8.8.8')
+        setup.write_config(values)
+        for failure in ('none', 'certbot', 'validate-tls', 'https', 'interrupt', 'timer'):
+            for had_site in (False, True):
+                with self.subTest(failure=failure, had_site=had_site), tempfile.TemporaryDirectory() as temp:
+                    site = Path(temp) / 'vyrn.conf'
+                    before = b'# Managed by VYRN setup\n# previous config\n'
+                    if had_site:
+                        site.write_bytes(before)
+                        site.chmod(0o640)
+                    calls = []
+                    def command(args, **options):
+                        calls.append(args)
+                        if args == ['systemctl', 'is-active', 'nginx']:
+                            return 'active'
+                        if args == ['nginx', '-T']:
+                            return '# configuration file /etc/nginx/nginx.conf:\n' + ('# configuration file ' + str(site) + ':\n' + site.read_text() if site.exists() else '')
+                        if args[0] == 'certbot' and failure in ('certbot', 'interrupt'):
+                            raise KeyboardInterrupt() if failure == 'interrupt' else RuntimeError('certbot failed')
+                        if args == ['nginx', '-t'] and failure == 'validate-tls' and site.exists() and 'listen 443 ssl' in site.read_text():
+                            raise RuntimeError('nginx validation failed')
+                        if 'certbot.timer' in args and failure == 'timer':
+                            raise RuntimeError('timer failed')
+                        return ''
+                    def http(url, **options):
+                        body = b'{"status":"ready"}' if '/health/ready' in url else url.rsplit('/', 1)[-1].encode()
+                        response = io.BytesIO(body)
+                        response.status = 200
+                        return response
+                    with patch.object(setup, 'NGINX_SITE', site), patch.object(setup, 'WEB_ROOT', Path(temp)/'acme'), patch.object(setup, 'ADMIN_ROOT', Path(temp)/'admin'), patch.object(setup, 'host_check'), patch.object(setup, 'owned_stack'), patch.object(setup, 'dns_check', return_value=True), patch.object(setup, 'yes', return_value=True), patch.object(setup, 'ask', return_value='owner@test-domain.org'), patch.object(setup, 'ensure_backend') as backend, patch.object(setup.shutil, 'which', return_value='/usr/bin/tool'), patch.object(setup, 'run', side_effect=command), patch.object(setup.HTTP, 'open', side_effect=http), patch.object(setup, 'https_check', return_value=failure != 'https'), contextlib.redirect_stdout(io.StringIO()):
+                        if failure == 'none':
+                            setup.repair_nginx()
+                            text = site.read_text()
+                            self.assertIn('listen 443 ssl;', text)
+                            self.assertIn('allow 192.0.2.10/32;', text)
+                            self.assertIn('deny all;', text)
+                            self.assertIn('location ^~ /v1/admin/ { return 404; }', text)
+                            self.assertIn('nginx -t && systemctl reload nginx', next(args for args in calls if args[0] == 'certbot'))
+                        else:
+                            with self.assertRaises(KeyboardInterrupt if failure == 'interrupt' else RuntimeError):
+                                setup.repair_nginx()
+                            self.assertEqual(site.read_bytes() if site.exists() else None, before if had_site else None)
+                            if had_site:
+                                self.assertEqual(site.stat().st_mode & 0o777, 0o640)
+                            self.assertEqual(calls[-2:], [['nginx', '-t'], ['systemctl', 'reload', 'nginx']])
+                        backend.assert_called_once_with(values)
+                        self.assertFalse(any('stop' in args or 'disable' in args or 'restart' in args for args in calls))
+                        self.assertEqual(setup.settings(), values)
+
+    @unittest.skipUnless(setup.shutil.which('nginx') and setup.shutil.which('openssl'), 'nginx/openssl required for actual syntax validation')
+    def test_generated_nginx_config_passes_real_nginx_validation(self):
+        temp = Path(self.temp.name)
+        name = self.values()['VYRN_DOMAIN']
+        cert = temp / ('vyrn-setup-' + name)
+        cert.mkdir()
+        subprocess.run(['openssl', 'req', '-x509', '-newkey', 'ec', '-pkeyopt', 'ec_paramgen_curve:P-256', '-nodes', '-days', '1', '-subj', '/CN=' + name,
+                        '-keyout', str(cert/'privkey.pem'), '-out', str(cert/'fullchain.pem')], check=True, capture_output=True)
+        config = temp / 'nginx.conf'
+        # Validate the generated directives without binding privileged/public ports.
+        with setup.socket.socket() as http, setup.socket.socket() as https:
+            http.bind(('127.0.0.1', 0))
+            https.bind(('127.0.0.1', 0))
+            http_port, https_port = http.getsockname()[1], https.getsockname()[1]
+        with patch.object(setup, 'CERT_ROOT', temp), patch.object(setup, 'WEB_ROOT', temp/'acme'), patch.object(setup, 'ADMIN_ROOT', temp/'admin'):
+            for tls in (False, True):
+                site = setup.nginx_config(self.values(), tls=tls).replace('listen 80;', f'listen 127.0.0.1:{http_port};').replace('listen 443 ssl;', f'listen 127.0.0.1:{https_port} ssl;')
+                config.write_text('error_log stderr;\npid ' + str(temp/'nginx.pid') + ';\nevents {}\nhttp {\naccess_log off;\nclient_body_temp_path ' + str(temp/'body') + ';\nproxy_temp_path ' + str(temp/'proxy') + ';\n' + site + '\n}\n')
+                result = subprocess.run(['nginx', '-t', '-p', str(temp) + '/', '-c', str(config)], capture_output=True, text=True)
+                self.assertEqual(result.returncode, 0, result.stderr)
+
 
 def integration():
     """Real CLI bootstrap/migrations, restart and preservation; no public DNS/TLS or host install."""

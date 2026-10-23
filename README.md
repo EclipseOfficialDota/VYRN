@@ -53,6 +53,8 @@ It generates protected settings, builds Core, bootstraps an empty database and c
 After the first setup launch, reopen with **`vyrn`** from any directory to check status/HTTPS, run diagnostics, enroll your authenticator or
 start/stop the instance. The panel clears between screens and includes confirmed service
 removal that keeps data and settings. Occupied public ports offer an existing-proxy mode.
+For an active host Nginx, **Repair Core + Nginx HTTPS** starts the backend, configures the
+restricted proxy and certificate renewal, and restores the previous proxy file on failure.
 [Wizard guide](docs/SETUP_WIZARD.md) ·
 [Manual setup, existing proxies and upgrades](docs/DEPLOYMENT.md).
 

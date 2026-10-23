@@ -37,6 +37,7 @@ Use amd64/arm64 with systemd. Docker uses its matching official [Ubuntu](https:/
  9  Diagnostics / troubleshoot
 10  DNS records / check
 11  Existing proxy setup guide
+12  Repair Core + Nginx HTTPS
  0  Exit
 ```
 
@@ -54,7 +55,19 @@ Optional Cloudflare setup uses a hidden, unsaved token and preserves conflicting
 
 If80/443 are occupied, Install offers existing-proxy mode rather than stopping the listener. Accepting saves `VYRN_PROXY_MODE=existing` and uses `deployment/compose.setup-proxy.yaml`: PostgreSQL/Core only, source-based Core build and **127.0.0.1:18080**. Caddy is excluded from install/start/stop. Port18080 must be free when creating a new Core container.
 
-The current Nginx/Caddy is never edited or reloaded automatically. The Proxy setup guide prints the backend address, admin static directory, required public/admin restrictions and HTTPS steps. Configure your current proxy/certificates using [manual integration](DEPLOYMENT.md#existing-reverse-proxy-and-migration-from-earlier-settings), then retry HTTPS. Core readiness alone is not public HTTPS readiness. Replace original example domains, paths and certificate names before using `deployment/nginx-*.conf`.
+Ordinary Install and Diagnostics leave your current proxy unchanged. For an active host Nginx, choose **12: Repair Core + Nginx HTTPS** for an explicit automatic repair. Caddy, Apache, container proxies and complex/conflicting configurations still use [manual integration](DEPLOYMENT.md#existing-reverse-proxy-and-migration-from-earlier-settings). Core readiness alone is not public HTTPS readiness.
+
+### Automatic Nginx repair
+
+The screenshot case where DNS passes but no Core container is running requires starting Core as well as configuring HTTPS. Option12 checks the protected existing-proxy settings, local engine/checkout ownership, active host Nginx and all seven DNS names. It refuses an unrelated existing site that overlaps those names, a foreign installer-site file or unsupported proxy mode. The action previews its changes, asks for confirmation/Let's Encrypt terms acceptance and a renewal contact email.
+
+It builds/starts missing backend services and bootstraps only an empty database, preserving existing accounts/secrets. Once local Core readiness passes, it installs Certbot if absent, copies only the three public admin assets into `/var/lib/vyrn/admin`, and creates its own `/etc/nginx/conf.d/vyrn-setup.conf`.
+
+Certificate issuance uses Certbot's [webroot method](https://eff-certbot.readthedocs.io/en/stable/using.html#webroot), through the running Nginx. No service is stopped, disabled or killed to free80/443. It validates the site, verifies public HTTP challenge reachability for each name, obtains/reuses the instance certificate, validates/reloads HTTPS, verifies API readiness and enables `certbot.timer`. A deploy hook validates/reloads Nginx after future successful renewal. See [Nginx reload behavior](https://nginx.org/en/docs/beginners_guide.html#control).
+
+API hosts deny administrative endpoints. The HTTPS admin hostname serves the copied assets and proxies `/v1/`, restricted to configured operator/VPN CIDRs. The backend remains on loopback; root/updates return503 because no public web client/update service is configured by this repair.
+
+On an exception or Ctrl+C during proxy changes, the prior VYRN site file and mode are restored (or a newly created file is removed), then Nginx is validated/reloaded. An unsuccessful restoration reload is reported explicitly. This rollback covers the proxy file, not backend startup, package installs, copied public assets or issued certificates; those remain for retry. It cannot recover from power loss/SIGKILL. Provider firewall faults, broken IPv6/DNS and CA rate limits require correction before retry; the repair does not bypass TLS or change firewall rules. End-to-end issuance and renewal need host-specific verification.
 
 Settings without a proxy-mode field retain standalone Caddy behavior. Do not switch an already-running installation by casually editing that field; inspect containers and migrate using the manual guide.
 
@@ -74,7 +87,7 @@ Errors show a `NEXT` action. These cover common failures, not every possible hos
 | apt locks/errors | Check network/repositories and wait for apt/dpkg processes. Never delete locks or blindly remove container packages. |
 | Low disk | Inspect `df -h`/`docker system df`; expand disk or remove reviewed unused files. Do not erase volumes. |
 | DNS/Cloudflare | Run DNS records / check; verify A/AAAA/proxy records, zone/token scope and propagation. Conflicts remain untouched. |
-| HTTPS pending | Check DNS, inbound TCP80/443, proxy/certificates; existing-proxy mode needs manual proxy setup. TLS remains enabled. |
+| HTTPS pending / no Core container | For host Nginx in existing-proxy mode, use Repair Core + Nginx HTTPS (12). Check DNS/inbound80/443 if challenge verification fails. Other proxies use manual setup. |
 | Unhealthy service | Service status, Diagnostics, then inspect Compose logs privately. Correct database/config/disk issues and resume. |
 | Authenticator denied | Current six-digit code, not the setup key. Check server `timedatectl status` and automatic phone time. |
 | Admin403 | Use the allowed IP/VPN and inspect proxy restrictions; never allow the entire internet. |
@@ -89,6 +102,6 @@ Stop retains containers/data. Remove requires typing `REMOVE` and deletes only t
 
 ## Validation and limits
 
-`python3 scripts/test-setup-server.py` checks release/repository selection, secrets/files, ownership, DNS/bootstrap, navigation/colors, launcher quoting/preservation, proxy selection, diagnostics and removal guards. Host installs/failure scenarios are mocked. CI validates both Compose configurations and runs the existing isolated bootstrap/migration/health/restart test. Fresh-host installs, certificates and provider reachability need host-specific verification.
+`python3 scripts/test-setup-server.py` checks release/repository selection, secrets/files, ownership, DNS/bootstrap, navigation/colors, launcher quoting/preservation, proxy selection, diagnostics, removal and Nginx repair. Repair tests exercise success, CA failure, invalid TLS configuration, HTTPS failure, interruption and renewal-timer failure with both new and existing site files. External operations are mocked. When Nginx/OpenSSL are available, generated HTTP/TLS configurations are also validated with real `nginx -t`, disposable certificates and unprivileged loopback ports. CI validates both Compose configurations and runs the existing isolated backend bootstrap/migration/health/restart test. Fresh-host installs, public issuance/renewal and provider reachability need host-specific verification.
 
 Final Android signing/acceptance, external backup credentials/restore rehearsal and calls remain separate gates. The panel does not build APKs or collect keystores.

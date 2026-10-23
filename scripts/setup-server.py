@@ -24,6 +24,10 @@ ROOT = Path(__file__).resolve().parents[1]
 CONFIG = Path('/etc/vyrn/runtime.env')
 OS_RELEASE = Path('/etc/os-release')
 COMMAND = Path('/usr/local/bin/vyrn')
+NGINX_SITE = Path('/etc/nginx/conf.d/vyrn-setup.conf')
+WEB_ROOT = Path('/var/lib/vyrn/acme')
+ADMIN_ROOT = Path('/var/lib/vyrn/admin')
+CERT_ROOT = Path('/etc/letsencrypt/live')
 SUPPORTED = {
     'ubuntu': {'22.04': 'jammy', '24.04': 'noble', '26.04': 'resolute', '26.10': 'stonking'},
     'debian': {'12': 'bookworm', '13': 'trixie'},
@@ -425,7 +429,7 @@ def https_check(values, attempts=1):
         if attempt + 1 < attempts:
             time.sleep(5)
     print('HTTPS not ready. Check DNS, inbound80/443, certificates and Core; no TLS bypass is used.')
-    print('Next: run Diagnostics and DNS / records. In existing-proxy mode configure your host proxy and certificate first (Proxy setup guide).')
+    print('Next: run Diagnostics and DNS / records. For host Nginx, use Repair Core + Nginx HTTPS (12); other proxies use the Proxy setup guide.')
     return False
 
 
@@ -488,6 +492,17 @@ def install():
             break
         if not yes('DNS is not ready. Retry?'):
             return
+    ensure_backend(values)
+    if values.get('VYRN_PROXY_MODE') == 'existing':
+        print('For automatic host-Nginx setup, choose Repair Core + Nginx HTTPS (option 12).')
+        proxy_help(values)
+    ready = https_check(values, attempts=8)
+    print('Services started; public HTTPS verified.' if ready else 'Services started; public HTTPS still needs attention.')
+    authenticator(values)
+    links(values)
+
+
+def ensure_backend(values):
     print('\n[1/4] Validate configuration and prepare Core')
     compose('config', '-q')
     (ROOT / 'artifacts/updates').mkdir(parents=True, exist_ok=True)
@@ -502,11 +517,159 @@ def install():
     bootstrap()
     print('[4/4] Start Core/HTTPS and verify')
     compose('up', '-d', '--no-build', '--wait', *services(values)[1:])
-    if values.get('VYRN_PROXY_MODE') == 'existing':
-        proxy_help(values)
-    ready = https_check(values, attempts=8)
-    print('Services started; public HTTPS verified.' if ready else 'Services started; public HTTPS still needs attention.')
-    authenticator(values)
+
+
+def nginx_config(values, *, tls=False):
+    name = domain(values['VYRN_DOMAIN'])
+    hosts = ' '.join(prefix + name for prefix in HOSTS)
+    challenge = f'location ^~ /.well-known/acme-challenge/ {{ root {WEB_ROOT}; }}'
+    config = ('# Managed by VYRN setup\nserver {\n    listen 80;\n'
+              f'    server_name {hosts};\n    {challenge}\n'
+              '    location / { return 301 https://$host$request_uri; }\n}\n')
+    if not tls:
+        return config
+    certificate = CERT_ROOT / ('vyrn-setup-' + name)
+    ssl = (f'    ssl_certificate {certificate}/fullchain.pem;\n'
+           f'    ssl_certificate_key {certificate}/privkey.pem;\n'
+           '    ssl_protocols TLSv1.2 TLSv1.3;\n'
+           '    add_header X-Content-Type-Options nosniff always;\n'
+           '    add_header Referrer-Policy no-referrer always;\n'
+           '    client_max_body_size 251m;\n')
+    proxy = ('        proxy_pass http://127.0.0.1:18080;\n'
+             '        proxy_http_version 1.1;\n'
+             '        proxy_set_header Host $host;\n'
+             '        proxy_set_header X-Real-IP $remote_addr;\n'
+             '        proxy_set_header X-Forwarded-For $remote_addr;\n'
+             '        proxy_set_header X-Forwarded-Proto https;\n'
+             '        proxy_set_header Upgrade $http_upgrade;\n'
+             '        proxy_set_header Connection "upgrade";\n'
+             '        proxy_read_timeout 75s;\n')
+    config += ('server {\n    listen 443 ssl;\n    server_name ' + ' '.join(p + name for p in ('api.', 'ws.', 'media.', 'push.')) + ';\n' + ssl +
+               '    location = /metrics { return 404; }\n'
+               '    location = /v1/admin { return 404; }\n'
+               '    location ^~ /v1/admin/ { return 404; }\n'
+               '    location / {\n' + proxy + '    }\n}\n')
+    config += ('server {\n    listen 443 ssl;\n    server_name admin.' + name + ';\n' + ssl +
+               ''.join('    allow ' + network + ';\n' for network in cidrs(values['VYRN_ADMIN_ALLOWED_CIDRS']).split()) +
+               '    deny all;\n' + f'    root {ADMIN_ROOT};\n'
+               '    location /v1/ {\n' + proxy + '    }\n'
+               '    location / { try_files $uri $uri/ /index.html; }\n}\n')
+    return config + ('server {\n    listen 443 ssl;\n    server_name ' + name + ' updates.' + name + ';\n' + ssl +
+                     '    location / { return 503 "VYRN: service unavailable.\\n"; }\n}\n')
+
+
+def nginx_preflight(values):
+    if values.get('VYRN_PROXY_MODE') != 'existing':
+        raise RuntimeError('Automatic Nginx repair requires existing-proxy mode. Use Install for a standalone instance.')
+    if not shutil.which('nginx'):
+        raise RuntimeError('Automatic repair supports host Nginx only. Use the proxy guide for Caddy/Apache/container proxies.')
+    if run(['systemctl', 'is-active', 'nginx'], capture=True, timeout=15) != 'active':
+        raise RuntimeError('Host Nginx is not active. Inspect systemctl status nginx before repair.')
+    if NGINX_SITE.is_symlink() or (NGINX_SITE.exists() and not NGINX_SITE.read_text().startswith('# Managed by VYRN setup\n')):
+        raise RuntimeError('Foreign Nginx configuration at ' + str(NGINX_SITE) + '; preserved.')
+    dump = run(['nginx', '-T'], capture=True, timeout=30)
+    # Exclude only this installer-owned file, not unrelated server blocks.
+    for section in re.split(r'# configuration file ', dump):
+        if section.startswith(str(NGINX_SITE) + ':'):
+            continue
+        for names in re.findall(r'\bserver_name\s+([^;]+);', re.sub(r'#.*', '', section)):
+            for host in names.split():
+                for prefix in HOSTS:
+                    target = prefix + values['VYRN_DOMAIN']
+                    if host.startswith('~') or host == target or (host.startswith('*.') and target.endswith(host[1:])) or (host.startswith('.') and (target == host[1:] or target.endswith(host))):
+                        raise RuntimeError('An existing Nginx server_name conflicts with the VYRN hostnames; preserved. Review that site before automatic repair.')
+
+
+def repair_nginx():
+    values = settings()
+    host_check()
+    owned_stack()
+    nginx_preflight(values)
+    address = public_ip(values.get('VYRN_PUBLIC_IPV4', ''))
+    if not dns_check(values, address):
+        raise RuntimeError('DNS is not ready. Correct all seven records before automatic HTTPS repair.')
+    print('Repair will build/start this instance if needed, install Certbot if missing, and configure its own Nginx site.')
+    print('Other sites remain running. Only a validated reload is used; no port-owning process is killed or disabled.')
+    print('On failure or Ctrl+C, the previous VYRN Nginx file is restored. Existing accounts/secrets are retained.')
+    print('Certificate issuance requires acceptance of https://letsencrypt.org/repository/ terms.')
+    if not yes('Repair ' + values['VYRN_DOMAIN'] + ' and accept the certificate terms?'):
+        return
+    contact = ask('Certificate renewal contact email', email)
+    ensure_backend(values)
+    with HTTP.open('http://127.0.0.1:18080/health/ready', timeout=10) as response:
+        if response.status != 200 or json.loads(response.read(4096)).get('status') != 'ready':
+            raise RuntimeError('Local Core is not ready; Nginx settings were not changed.')
+    if not shutil.which('certbot'):
+        run(['apt-get', 'update'])
+        run(['apt-get', 'install', '-y', 'certbot'])
+    for directory in (WEB_ROOT, ADMIN_ROOT):
+        if any(parent.is_symlink() for parent in (directory, *directory.parents)):
+            raise RuntimeError('Symlink in Nginx content directory; preserved.')
+        directory.mkdir(parents=True, exist_ok=True)
+        if directory.stat().st_uid != os.geteuid() or directory.stat().st_mode & 0o022:
+            raise RuntimeError('Nginx content directory must be administrator-owned and not writable by other users.')
+        directory.chmod(0o755)
+    # Copy only the three public admin assets; the checkout may live under /root.
+    for name in ('index.html', 'app.js', 'style.css'):
+        target = ADMIN_ROOT / name
+        if target.is_symlink():
+            raise RuntimeError('Symlink in admin assets; preserved.')
+        shutil.copyfile(ROOT / 'admin' / name, target)
+        target.chmod(0o644)
+    before = NGINX_SITE.read_bytes() if NGINX_SITE.exists() else None
+    mode = NGINX_SITE.stat().st_mode & 0o777 if before is not None else 0o644
+    try:
+        # Retain existing HTTPS during renewal; an initial install needs HTTP only.
+        if before is None:
+            NGINX_SITE.write_text(nginx_config(values))
+            NGINX_SITE.chmod(0o644)
+        run(['nginx', '-t'], timeout=30)
+        loaded = run(['nginx', '-T'], capture=True, timeout=30)
+        if '# configuration file ' + str(NGINX_SITE) + ':' not in loaded:
+            raise RuntimeError('Nginx does not include the installer site directory; restore completed. Use the proxy guide.')
+        run(['systemctl', 'reload', 'nginx'], timeout=30)
+        challenge = WEB_ROOT / '.well-known/acme-challenge'
+        if challenge.is_symlink() or challenge.parent.is_symlink():
+            raise RuntimeError('Symlink in certificate challenge directory; preserved.')
+        challenge.mkdir(parents=True, exist_ok=True)
+        token = secrets.token_hex(16)
+        probe = challenge / token
+        probe.write_text(token)
+        try:
+            for prefix in HOSTS:
+                host = prefix + values['VYRN_DOMAIN']
+                print('Checking public HTTP challenge: ' + host, flush=True)
+                with HTTP.open('http://' + host + '/.well-known/acme-challenge/' + token, timeout=10) as response:
+                    if response.status != 200 or response.read(128).decode() != token:
+                        raise RuntimeError('HTTP certificate challenge is unreachable; inspect DNS, IPv6 and provider port 80.')
+        finally:
+            probe.unlink(missing_ok=True)
+        args = ['certbot', 'certonly', '--webroot', '-w', str(WEB_ROOT), '--non-interactive', '--agree-tos',
+                '--email', contact, '--cert-name', 'vyrn-setup-' + values['VYRN_DOMAIN'], '--keep-until-expiring',
+                '--deploy-hook', 'nginx -t && systemctl reload nginx']
+        for prefix in HOSTS:
+            args += ['-d', prefix + values['VYRN_DOMAIN']]
+        run(args, timeout=600)
+        NGINX_SITE.write_text(nginx_config(values, tls=True))
+        NGINX_SITE.chmod(0o644)
+        run(['nginx', '-t'], timeout=30)
+        run(['systemctl', 'reload', 'nginx'], timeout=30)
+        if not https_check(values, attempts=3):
+            raise RuntimeError('Public HTTPS verification failed after repair; inspect DNS, IPv6, certificates and inbound port 443.')
+        run(['systemctl', 'enable', '--now', 'certbot.timer'], timeout=30)
+    except BaseException:
+        if before is None:
+            NGINX_SITE.unlink(missing_ok=True)
+        else:
+            NGINX_SITE.write_bytes(before)
+            NGINX_SITE.chmod(mode)
+        try:
+            run(['nginx', '-t'], timeout=30)
+            run(['systemctl', 'reload', 'nginx'], timeout=30)
+        except (RuntimeError, OSError):
+            print(color('RESTORE NEEDS ATTENTION: previous site file is restored, but Nginx validation/reload failed. Run nginx -t and systemctl status nginx.', '1;31'))
+        raise
+    print(color('REPAIRED: Core ready, public HTTPS verified and certificate renewal timer enabled.', '1;32'))
     links(values)
 
 
@@ -533,6 +696,10 @@ def show_error(error):
     text = str(error).lower()
     if isinstance(error, FileNotFoundError) and not CONFIG.exists():
         solution = 'No instance settings found. Choose Install / resume setup first. Do not copy settings from another server.'
+    elif 'nginx' in text and ('foreign' in text or 'conflict' in text):
+        solution = 'An existing site/configuration overlaps these hostnames. It was not replaced. Inspect nginx -T privately and migrate that site before retrying option 12.'
+    elif 'nginx' in text or 'certbot' in text or 'certificate' in text or 'https' in text:
+        solution = 'Use Repair Core + Nginx HTTPS (12) for an active host Nginx. Check Core readiness, all seven DNS records, stale AAAA records and inbound TCP 80/443. Failed repairs restore the previous VYRN Nginx file; certificates/data are retained.'
     elif 'port' in text and 'occupied' in text:
         solution = 'Open Diagnostics to identify the listener. For an existing proxy, use the Proxy setup guide and existing-proxy install mode.'
     elif 'docker_host' in text or 'context' in text or 'unix-socket' in text:
@@ -648,6 +815,7 @@ def main():
         '9': 'Diagnostics / troubleshoot',
         '10': 'DNS records / check',
         '11': 'Existing proxy setup guide',
+        '12': 'Repair Core + Nginx HTTPS',
     }
     while True:
         screen('Server control')
@@ -673,6 +841,8 @@ def main():
                 dns_menu()
             elif choice == '11':
                 proxy_help(settings() if CONFIG.exists() else None)
+            elif choice == '12':
+                repair_nginx()
             elif choice in ('2', '3', '4', '5', '6', '7'):
                 values = settings()
                 if choice in ('2', '5', '6'):
@@ -690,7 +860,7 @@ def main():
                 elif choice == '7':
                     links(values)
             else:
-                print('Choose a number from 0 to 11.')
+                print('Choose a number from 0 to 12.')
         except (RuntimeError, OSError, ValueError) as error:
             show_error(error)
         input('\nPress Enter to return to the main menu. ')
