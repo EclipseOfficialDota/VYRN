@@ -17,4 +17,7 @@ if ! command -v python3 >/dev/null 2>&1; then
     apt-get install -y python3
 fi
 export PYTHONUTF8=1
+if [[ $(id -u) == 0 && " ${*} " != *' --check '* ]]; then
+    python3 scripts/setup-server.py --install-command
+fi
 exec python3 scripts/setup-server.py "$@"

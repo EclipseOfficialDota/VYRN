@@ -1,0 +1,6 @@
+# Setup wizard: build Core from source and leave public ports to the host proxy.
+services:
+  core:
+    ports: ["127.0.0.1:18080:8080"]
+  caddy:
+    profiles: [standalone-proxy]

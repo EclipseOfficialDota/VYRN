@@ -38,21 +38,22 @@ Android Release is available yet.** The existing Debug prerelease is an older sn
 ## Deploy your own server
 
 Start with a dedicated Ubuntu (22.04/24.04/26.04/26.10) or Debian (12/13) host, a domain and Git.
-The bilingual wizard selects the matching Docker repository. A small evaluation
+The English terminal wizard selects the matching Docker repository. A small evaluation
 budget is4GiB RAM, two cores and40GiB disk plus media/backup space; actual capacity depends on workload.
 
 ```sh
 git clone https://github.com/EclipseOfficialDota/VYRN.git && cd VYRN && sudo bash setup.sh
 ```
 
-Choose English or فارسی, then **Install / resume setup**. The wizard asks for your domain,
+Choose **Install / resume setup**. The wizard asks for your domain,
 public IPv4, admin IP/VPN and first administrator credentials. It can create missing
 Cloudflare DNS records using a hidden, unsaved token, or guide manual DNS configuration.
 It generates protected settings, builds Core, bootstraps an empty database and checks HTTPS.
 
-Reopen with `sudo bash setup.sh` to check status/HTTPS, enroll your authenticator or
+After the first setup launch, reopen with **`vyrn`** from any directory to check status/HTTPS, run diagnostics, enroll your authenticator or
 start/stop the instance. The panel clears between screens and includes confirmed service
-removal that keeps data and settings. [Wizard guide](docs/SETUP_WIZARD.md) ·
+removal that keeps data and settings. Occupied public ports offer an existing-proxy mode.
+[Wizard guide](docs/SETUP_WIZARD.md) ·
 [Manual setup, existing proxies and upgrades](docs/DEPLOYMENT.md).
 
 Each installation has its own accounts. VYRN does not connect to Telegram or federate

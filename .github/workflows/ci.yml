@@ -40,6 +40,7 @@ jobs:
           VYRN_ADMIN_ALLOWED_CIDRS: 192.0.2.10/32
         run: |
           docker compose -f deployment/compose.yaml config -q
+          docker compose -f deployment/compose.yaml -f deployment/compose.setup-proxy.yaml config -q
           docker run --rm --network none --memory 128m --cpus 1 \
             -e VYRN_DOMAIN -e VYRN_ADMIN_ALLOWED_CIDRS \
             -v "$PWD/deployment/Caddyfile:/etc/caddy/Caddyfile:ro" \

@@ -2,7 +2,7 @@
 
 This guide installs the current development source on a **fresh dedicated Ubuntu24.04 LTS host**. It does not certify a Stable release. Use a test instance before inviting users. Existing Nginx/Caddy sites must keep their ports and certificates; use an inspected proxy integration instead of starting a competing listener.
 
-For guided interactive setup, run `sudo bash setup.sh` from the checkout. It offers English/Persian inputs, optional Docker/Cloudflare setup, protected configuration, empty-database bootstrap and service controls. See [the setup wizard](SETUP_WIZARD.md). The commands below remain the manual route and reference for existing proxy deployments.
+For guided interactive setup, run `sudo bash setup.sh` from the checkout, then reopen using `vyrn`. The English-only panel offers optional Docker/Cloudflare setup, protected configuration, empty-database bootstrap, diagnostics, existing-proxy mode and service controls. See [the setup wizard](SETUP_WIZARD.md). The commands below remain the manual route and reference for existing proxy deployments.
 
 ## 1. Host and Docker
 

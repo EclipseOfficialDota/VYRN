@@ -1,115 +1,94 @@
-# Guided server setup / راه‌انداز تعاملی
+# Server setup and terminal control
 
-VYRN includes a small bilingual terminal panel for a dedicated Ubuntu or Debian server. It uses Python's standard library and the existing Docker Compose stack; no separate UI framework is required. This installs the development-preview server, not a certified Stable Android release.
+The English-only VYRN panel uses Python's standard library and Docker Compose. It installs the development preview, not a certified Stable Android release.
+
+## Start
+
+```sh
+git clone https://github.com/EclipseOfficialDota/VYRN.git
+cd VYRN
+sudo bash setup.sh
+```
+
+The first root launch registers `/usr/local/bin/vyrn`. Afterward, reopen from any directory using **`vyrn`**; it requests sudo privileges if needed. Keep the checkout in place. After moving it, rerun `sudo bash setup.sh` from the new location. An unrelated existing `vyrn` command or symlink is preserved, not overwritten.
+
+Update an unchanged checkout with `git pull --ff-only`, then `sudo bash setup.sh`. Read-only prerequisites: `bash setup.sh --check` (Python3 must already exist to avoid its optional install prompt). The interactive panel requires an SSH terminal and root/sudo. Android builds stay on your workstation.
 
 ## Supported hosts
 
-| Distribution | Versions | Docker repository suites |
+| Distribution | Versions | Docker suites |
 | --- | --- | --- |
 | Ubuntu | 22.04, 24.04, 26.04, 26.10 | jammy, noble, resolute, stonking |
 | Debian | 12, 13 | bookworm, trixie |
 
-Use a 64-bit `amd64` or `arm64` host with systemd. The installer detects `/etc/os-release` and selects the distribution-specific Docker repository and signing key; it never substitutes an Ubuntu repository for Debian. Other releases and derivatives are refused. This is installer compatibility, not evidence of full installation testing on every release. The existing runtime stack and data format are unchanged.
+Use amd64/arm64 with systemd. Docker uses its matching official [Ubuntu](https://docs.docker.com/engine/install/ubuntu/) or [Debian](https://docs.docker.com/engine/install/debian/) repository/key. Other releases/derivatives are refused. Detection and command planning are tested; installation on every release has not been verified.
 
-## Start
-
-Install Git if missing (`sudo apt-get update && sudo apt-get install -y git`), then:
-
-```sh
-git clone https://github.com/EclipseOfficialDota/VYRN.git && cd VYRN && sudo bash setup.sh
-```
-
-Choose English or فارسی. To open directly in Persian later:
-
-```sh
-cd /path/to/VYRN
-sudo bash setup.sh --lang fa
-```
-
-Read-only prerequisite check: `bash setup.sh --check` (Python3 must already be installed to avoid the optional Python-install prompt). The panel itself requires an interactive root/sudo terminal. If needed, connect with `ssh -t`. Server setup does not run on Windows/macOS; Android builds stay on the Windows workstation.
-
-## What it asks
-
-| Input | Purpose |
-| --- | --- |
-| Service domain | Your hostname, e.g. `chat.yourdomain.com`; no scheme/path |
-| Public server IPv4 | DNS targets and readiness checks |
-| Operator IP or VPN CIDRs | Restrict the admin panel; an SSH client IP is suggested when available |
-| Docker installation choice | Install Docker from its matching official Ubuntu/Debian repository when absent |
-| Optional Cloudflare Zone ID/token | Create missing DNS-only A records; token input is hidden and not saved |
-| Administrator email/password | Create the first account only when the database is empty |
-| Authenticator-key display choice | Privately import the generated time-based key into your authenticator |
-
-For Cloudflare, use a token limited to DNS editing for the intended zone and its corresponding Zone ID. Existing conflicting DNS records are preserved; the wizard stops for correction. With another provider, it prints the exact seven records and lets you recheck after saving them in that provider's panel. Domain registration and DNS propagation cannot be automated by this script.
-
-## Setup flow
-
-1. Check supported Ubuntu/Debian release and disk, Docker availability, project ownership and occupied80/443 ports.
-2. Collect inputs, show the public configuration summary and save new settings only after confirmation.
-3. Generate the database password and TOTP key into `/etc/vyrn/runtime.env`, mode0600, in a private directory. Existing settings/keys are never regenerated automatically.
-4. Create optional Cloudflare records or guide manual DNS; check all seven names before building.
-5. Validate Compose, build Core when no Core container exists, start PostgreSQL and inspect actual database state.
-6. Bootstrap only if there are no users; take the new password twice with hidden input and pass it through the environment, not argv or a saved password file.
-7. Start Core/Caddy and check public readiness with normal certificate verification. HTTPS failure is shown as pending, not success.
-8. Offer private authenticator enrollment, display the Control address and give the exact Android build command for your API.
-
-Docker installation follows the official repository method for [Ubuntu](https://docs.docker.com/engine/install/ubuntu/) or [Debian](https://docs.docker.com/engine/install/debian/), not a remote shell installer. Conflicting container packages or repository settings require manual review; unrelated services are not removed. A matching repository created by an earlier interrupted attempt can be reused. Installing Docker/compiling images requires internet access and can take several minutes.
-
-## Terminal controls
+## Menu
 
 ```text
-──────────────────────────────────────────────────────
-  VYRN  /  Server control
-──────────────────────────────────────────────────────
-  Ubuntu / Debian · Self-hosted setup
-
-  1  Install / resume setup
-
-  2  Service status
-  3  Check public HTTPS
-  4  Authenticator setup
-
-  5  Start existing services
-  6  Stop services (keep data)
-
-  7  Client build / addresses
-
-  8  Remove services (keep data)
-
-  0  Exit
-──────────────────────────────────────────────────────
+ 1  Install / resume setup
+ 2  Service status
+ 3  Check public HTTPS
+ 4  Authenticator setup
+ 5  Start existing services
+ 6  Stop services (keep data)
+ 7  Client build / addresses
+ 8  Remove services (keep data)
+ 9  Diagnostics / troubleshoot
+10  DNS records / check
+11  Existing proxy setup guide
+ 0  Exit
 ```
 
-Each choice opens a fresh screen. Results and errors stay visible until you press Enter to return. Screen clearing is disabled for redirected output or a `TERM=dumb` terminal. English, Persian and Arabic digits are accepted.
+Selections clear the screen; results remain until Enter. Cyan marks navigation, green success, yellow pending states and red failures/removal. Redirected output and `TERM=dumb` receive no color or clear codes. `NO_COLOR=1 vyrn` disables colors.
 
-Option6 stops services. Option8 opens a removal submenu: choose1, then type `REMOVE` to remove this instance's containers and networks. Accounts, messages, media, certificates, `/etc/vyrn/runtime.env`, Docker, DNS records and source files remain. No volumes or images are deleted. Choosing0 or leaving the confirmation blank cancels removal. Ownership and the local Docker endpoint are checked before removal; another checkout's stack is refused. To restore services afterward, run option1 from the same checkout with the retained settings. Removal causes downtime; it is not a data-erasure operation.
+Diagnostics is read-only: OS/disk, local Docker/Compose, TCP listeners, protected settings, stack ownership, service status, DNS and public HTTPS. It continues after individual failures and does not print runtime secrets. No packages, firewall rules or services are changed by diagnostics.
 
-On failure, rerun option1 using the same source checkout and runtime file. The database is queried again, so an already-created account is preserved even if an earlier run was interrupted after bootstrap. The wizard is not a source updater or an automatic migration rollback tool.
+## Installation
 
-If a different VYRN checkout owns existing containers, automatic adoption is refused. Existing standalone Nginx/Caddy on80/443 is preserved; use [manual proxy integration](DEPLOYMENT.md). Remote Docker contexts and environment overrides are not supported. The panel does not change SSH authentication, firewall rules or unrelated containers. You must allow incoming80/443 in your host/provider firewall while preserving SSH access.
+The wizard checks host/disk, local engine, stack ownership and ports. It asks for domain, public IPv4 and operator IP/VPN CIDRs, then confirms before saving. Database/TOTP secrets are generated into `/etc/vyrn/runtime.env` (0600, private0700 directory); existing secrets are preserved.
 
-Setup and status/start/stop actions check the selected local Docker endpoint before contacting the daemon. A saved remote context or `DOCKER_HOST`/`DOCKER_CONTEXT` override is rejected; switch back to a local engine before continuing. Use your real domain: the example.com/net/org documentation roots and their subdomains are not valid setup targets.
+Optional Cloudflare setup uses a hidden, unsaved token and preserves conflicting records. Alternatively create the seven printed DNS-only A records manually. DNS is checked before building. The wizard validates Compose, builds missing Core, starts PostgreSQL and queries actual database state. Administrator credentials are requested only for an empty database; passwords are hidden and passed through the environment, not argv. It starts selected services and verifies HTTPS without bypassing TLS.
 
-## After setup
+### Existing reverse proxy
 
-Open the displayed Control URL from the allowed IP. Use the administrator email/password and the current six-digit Authenticator code. Create a limited-use invitation and share it privately with the matching APK. See [owner/user instructions](OWNER_GUIDE.fa.md).
+If80/443 are occupied, Install offers existing-proxy mode rather than stopping the listener. Accepting saves `VYRN_PROXY_MODE=existing` and uses `deployment/compose.setup-proxy.yaml`: PostgreSQL/Core only, source-based Core build and **127.0.0.1:18080**. Caddy is excluded from install/start/stop. Port18080 must be free when creating a new Core container.
 
-The server panel does **not** compile/sign Android or collect a keystore. Run the displayed client command on your Windows build workstation. Final signing, complete Release acceptance, external S3 credentials/backup rehearsal and calls remain separate gates. Calls stay unavailable. No production deployment is triggered merely by adding this script to the repository.
+The current Nginx/Caddy is never edited or reloaded automatically. The Proxy setup guide prints the backend address, admin static directory, required public/admin restrictions and HTTPS steps. Configure your current proxy/certificates using [manual integration](DEPLOYMENT.md#existing-reverse-proxy-and-migration-from-earlier-settings), then retry HTTPS. Core readiness alone is not public HTTPS readiness. Replace original example domains, paths and certificate names before using `deployment/nginx-*.conf`.
 
-## راهنمای سریع فارسی
+Settings without a proxy-mode field retain standalone Caddy behavior. Do not switch an already-running installation by casually editing that field; inspect containers and migrate using the manual guide.
 
-دستور شروع را روی سرور Ubuntu نسخهٔ۲۲٫۰۴، ۲۴٫۰۴، ۲۶٫۰۴ یا ۲۶٫۱۰ یا Debian نسخهٔ۱۲ یا ۱۳ اجرا کنید، زبان فارسی و گزینهٔ۱ را انتخاب کنید. دامنه، IPv4 عمومی و IP خودتان برای مدیریت را بدهید. مخزن و کلید رسمی Docker بر اساس توزیع و نسخه انتخاب می‌شوند. نصب روی همهٔ این نسخه‌ها به‌صورت واقعی آزمایش نشده؛ تشخیص نسخه و انتخاب مخزن با تست‌های آفلاین بررسی شده است.
+## Troubleshooting
 
-برای DNS می‌توانید Zone ID و توکن محدود Cloudflare را در همان ترمینال بدهید؛ توکن ذخیره نمی‌شود. اگر Provider دیگری دارید، رکوردهای نمایش‌داده‌شده را آنجا بسازید و Enter بزنید تا بررسی شوند. ورودی۸۰/۴۴۳ را در Provider و فایروال مجاز کنید؛ دسترسی SSH را حفظ کنید.
+Errors show a `NEXT` action. These cover common failures, not every possible host/provider fault.
 
-ایمیل و رمز مدیر فقط وقتی حسابی وجود ندارد پرسیده می‌شوند. در مرحلهٔ Authenticator، کلید را خصوصی وارد برنامهٔ احراز هویت کنید؛ آن کلید را در کادر کد۶رقمی پنل ننویسید. رمز یا توکن را داخل چت و عکس عمومی نفرستید.
+| Problem | Next step |
+| --- | --- |
+| Port80/443 occupied | Diagnostics identifies listeners; accept existing-proxy mode on a new install. Preserve unrelated sites. |
+| Port18080 occupied | Inspect its listener; use the correct existing checkout or resolve the conflict before installing Core. |
+| No settings | Run Install / resume setup; never copy another server's secrets. |
+| Insecure settings | Inspect root ownership, directory0700/file0600; never print/regenerate keys blindly. |
+| Docker failure | Check `systemctl status docker`, local context, `docker compose version`, registry access and disk; retry after correction. |
+| Remote Docker context | Unset `DOCKER_HOST`/`DOCKER_CONTEXT`; select a local Unix-socket context. Remote operations are refused. |
+| Another checkout owns stack | Use its Compose working_dir; do not adopt/delete it from another checkout. |
+| apt locks/errors | Check network/repositories and wait for apt/dpkg processes. Never delete locks or blindly remove container packages. |
+| Low disk | Inspect `df -h`/`docker system df`; expand disk or remove reviewed unused files. Do not erase volumes. |
+| DNS/Cloudflare | Run DNS records / check; verify A/AAAA/proxy records, zone/token scope and propagation. Conflicts remain untouched. |
+| HTTPS pending | Check DNS, inbound TCP80/443, proxy/certificates; existing-proxy mode needs manual proxy setup. TLS remains enabled. |
+| Unhealthy service | Service status, Diagnostics, then inspect Compose logs privately. Correct database/config/disk issues and resume. |
+| Authenticator denied | Current six-digit code, not the setup key. Check server `timedatectl status` and automatic phone time. |
+| Admin403 | Use the allowed IP/VPN and inspect proxy restrictions; never allow the entire internet. |
+| `vyrn` missing/stale | Run `sudo bash setup.sh` from the intended checkout; ensure `/usr/local/bin` is in PATH. Foreign commands are preserved. |
+| Noninteractive input | Reconnect with `ssh -t`; do not pipe passwords. |
 
-اگر نصب نیمه‌تمام شد، دوباره همین پنل و گزینهٔ۱ را باز کنید؛ تنظیمات و حساب‌های موجود حفظ می‌شوند. خطای گواهی/DNS با خاموش‌کردن TLS دور زده نمی‌شود. گزینهٔ۶ فقط سرویس را متوقف می‌کند و داده‌ها را حذف نمی‌کند.
+Firewall rules and SSH authentication are never changed. Preserve SSH when reviewing provider/host inbound80/443. Inspect logs locally before sharing them.
 
-با انتخاب هر گزینه صفحه پاک و بخش بعدی باز می‌شود؛ نتیجه تا زدن Enter نمایش داده می‌شود. گزینهٔ۸ منوی حذف سرویس‌ها را باز می‌کند: گزینهٔ۱ و سپس نوشتن `REMOVE` لازم است. فقط کانتینرها و شبکه‌های همین نصب حذف می‌شوند؛ پیام‌ها، حساب‌ها، رسانه، گواهی‌ها، تنظیمات، DNS، Docker و سورس باقی می‌مانند. گزینهٔ۰ یا تأیید خالی حذف را لغو می‌کند. برای راه‌اندازی دوباره، گزینهٔ۱ منوی اصلی را از همان پوشه اجرا کنید.
+## Removal and recovery
 
-پس از نصب، وارد آدرس پنل شوید و دعوت محدود بسازید. اپ مخصوص API خودتان را با دستور نمایش‌داده‌شده روی کامپیوتر ویندوز بسازید؛ کلید امضا روی سرور ساخته یا ذخیره نمی‌شود.
+Stop retains containers/data. Remove requires typing `REMOVE` and deletes only this instance's containers/networks. Accounts, messages, media, certificates, settings, DNS, Docker, images, checkout and launcher remain. Choose0 or leave confirmation blank to cancel. Local engine/ownership are checked immediately before removal. Run Install from the same checkout to recreate services using retained settings/data; this is not data erasure or migration rollback.
 
-## Validation scope
+## Validation and limits
 
-Run `python3 scripts/test-setup-server.py` for offline validation of supported/unsupported release detection, shell bootstrap parity, distribution-specific Docker repository/key selection, inputs, secret handling, protected files, ownership, DNS planning, bootstrap guards and orchestration. Docker package-install commands are mocked; tests do not change host packages. CI additionally runs `python3 scripts/test-setup-server.py --integration` against a uniquely named disposable Docker project after building Core, checking real migrations/bootstrap, existing-account preservation, health and restart. That check does not install host packages, issue public certificates or edit real Cloudflare DNS. Fresh-host package installation, real DNS/provider reachability and certificate issuance need per-host verification; no blanket full-host acceptance is claimed.
+`python3 scripts/test-setup-server.py` checks release/repository selection, secrets/files, ownership, DNS/bootstrap, navigation/colors, launcher quoting/preservation, proxy selection, diagnostics and removal guards. Host installs/failure scenarios are mocked. CI validates both Compose configurations and runs the existing isolated bootstrap/migration/health/restart test. Fresh-host installs, certificates and provider reachability need host-specific verification.
+
+Final Android signing/acceptance, external backup credentials/restore rehearsal and calls remain separate gates. The panel does not build APKs or collect keystores.

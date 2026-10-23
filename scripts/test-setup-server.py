@@ -284,7 +284,7 @@ class SetupTests(unittest.TestCase):
             with self.subTest(interactive=interactive, terminal=terminal), patch.object(output, 'isatty', return_value=interactive), patch.dict(os.environ, TERM=terminal), contextlib.redirect_stdout(output):
                 setup.screen('Test screen')
             self.assertEqual('\033[2J\033[H' in output.getvalue(), clears)
-            self.assertIn('VYRN  /  Test screen', output.getvalue())
+            self.assertIn('VYRN  /  Test screen', re.sub(r'\033\[[0-9;]*m', '', output.getvalue()))
 
     def test_menu_clears_before_action_and_pauses_before_return(self):
         events = []
@@ -308,7 +308,7 @@ class SetupTests(unittest.TestCase):
         setup.write_config(self.values())
         before = self.config.read_bytes()
         events = []
-        with patch('builtins.input', side_effect=['۱', 'REMOVE']), patch.object(setup, 'owned_stack', side_effect=lambda: events.append('ownership')), patch.object(setup, 'compose', side_effect=lambda *args: events.append(args)), contextlib.redirect_stdout(io.StringIO()):
+        with patch('builtins.input', side_effect=['1', 'REMOVE']), patch.object(setup, 'owned_stack', side_effect=lambda: events.append('ownership')), patch.object(setup, 'compose', side_effect=lambda *args: events.append(args)), contextlib.redirect_stdout(io.StringIO()):
             setup.remove()
         self.assertEqual(events, ['ownership', ('down',)])
         self.assertEqual(self.config.read_bytes(), before)
@@ -317,6 +317,82 @@ class SetupTests(unittest.TestCase):
         with patch.object(setup, 'settings', return_value=self.values()), patch('builtins.input', side_effect=['1', 'REMOVE']), patch.object(setup, 'owned_stack', side_effect=RuntimeError('foreign or remote')), patch.object(setup, 'compose') as command, contextlib.redirect_stdout(io.StringIO()), self.assertRaises(RuntimeError):
             setup.remove()
         command.assert_not_called()
+
+    def test_command_registration_quotes_paths_and_preserves_foreign_commands(self):
+        command = Path(self.temp.name) / 'bin/vyrn'
+        checkout = Path(self.temp.name) / "repo with ' quote"
+        with patch.object(setup, 'COMMAND', command), patch.object(setup, 'ROOT', checkout), patch.object(setup.os, 'geteuid', return_value=0):
+            setup.install_command()
+            first = command.read_bytes()
+            self.assertEqual(command.stat().st_mode & 0o777, 0o755)
+            self.assertIn(b'exec sudo /bin/bash', first)
+            subprocess.run(['bash', '-n', str(command)], check=True)
+            checkout.mkdir()
+            (checkout / 'setup.sh').write_text('#!/bin/bash\nprintf "%s\\n" "$@"\n')
+            fake_bin = Path(self.temp.name) / 'fake-bin'
+            fake_bin.mkdir()
+            (fake_bin / 'id').write_text('#!/bin/sh\necho 0\n')
+            (fake_bin / 'id').chmod(0o755)
+            result = subprocess.run([str(command), '--check', 'two words'], cwd=self.temp.name,
+                                    env=dict(os.environ, PATH=str(fake_bin) + ':' + os.environ['PATH']),
+                                    check=True, capture_output=True, text=True)
+            self.assertEqual(result.stdout.splitlines(), ['--check', 'two words'])
+            setup.install_command()
+            self.assertEqual(first, command.read_bytes())
+            command.write_text('#!/bin/sh\necho unrelated\n')
+            with self.assertRaises(RuntimeError):
+                setup.install_command()
+            self.assertIn('unrelated', command.read_text())
+            command.unlink()
+            command.symlink_to(self.config)
+            with self.assertRaises(RuntimeError):
+                setup.install_command()
+
+    def test_no_color_and_english_only_menu(self):
+        output = io.StringIO()
+        with patch.object(output, 'isatty', return_value=True), patch.dict(os.environ, {'TERM': 'xterm', 'NO_COLOR': ''}), contextlib.redirect_stdout(output):
+            self.assertEqual(setup.color('test'), 'test')
+        source = Path(setup.__file__).read_text()
+        self.assertIsNone(re.search('[\u0600-\u06ff]', source))
+        self.assertNotIn('Language /', source)
+
+    def test_existing_proxy_compose_and_services_exclude_caddy(self):
+        values = dict(self.values(), VYRN_PROXY_MODE='existing')
+        setup.write_config(values)
+        with patch.object(setup, 'run', return_value='') as command:
+            setup.compose('config', '-q')
+        args = command.call_args.args[0]
+        self.assertIn(str(setup.ROOT / 'deployment/compose.setup-proxy.yaml'), args)
+        self.assertEqual(setup.services(values), ('postgres', 'core'))
+        self.assertNotIn('COMPOSE_PROFILES', command.call_args.kwargs['env'])
+
+    def test_occupied_ports_offer_existing_proxy_install_without_caddy(self):
+        events = []
+        def command(*args, **options):
+            events.append(args)
+            return ''
+        with patch.object(setup, 'ROOT', Path(self.temp.name)), patch.object(setup, 'host_check'), patch.object(setup, 'docker_ready'), patch.object(setup, 'owned_stack', return_value=False), patch.object(setup, 'free_ports', side_effect=[RuntimeError('Port 80 is occupied'), None]), patch.object(setup, 'ask', side_effect=['chat.test-domain.org', '8.8.8.8', '192.0.2.10/32']), patch.object(setup, 'yes', return_value=True), patch.object(setup, 'cloudflare_dns'), patch.object(setup, 'dns_check', return_value=True), patch('builtins.input', return_value=''), patch.object(setup, 'compose', side_effect=command), patch.object(setup, 'bootstrap'), patch.object(setup, 'https_check', return_value=False), patch.object(setup, 'authenticator'), contextlib.redirect_stdout(io.StringIO()):
+            setup.install()
+        self.assertEqual(setup.settings()['VYRN_PROXY_MODE'], 'existing')
+        self.assertIn(('up', '-d', '--no-build', '--wait', 'core'), events)
+        self.assertFalse(any('caddy' in args for args in events))
+
+    def test_declining_existing_proxy_keeps_host_unchanged(self):
+        with patch.object(setup, 'host_check'), patch.object(setup, 'docker_ready'), patch.object(setup, 'owned_stack', return_value=False), patch.object(setup, 'free_ports', side_effect=RuntimeError('Port 80 is occupied')), patch.object(setup, 'yes', return_value=False), patch.object(setup, 'compose') as command, contextlib.redirect_stdout(io.StringIO()):
+            setup.install()
+        command.assert_not_called()
+        self.assertFalse(self.config.exists())
+
+    def test_error_guidance_and_diagnostics_continue_without_configuration(self):
+        output = io.StringIO()
+        with patch.object(setup, 'host_check', side_effect=RuntimeError('12GiB free needed')), patch.object(setup, 'check_engine', side_effect=RuntimeError('docker failed')), patch.object(setup, 'run', return_value='LISTEN 0 100 0.0.0.0:80 0.0.0.0:* nginx'), contextlib.redirect_stdout(output):
+            setup.diagnostics()
+        text = output.getvalue()
+        self.assertIn('enlarge the disk', text)
+        self.assertIn('systemctl status docker', text)
+        self.assertIn('Install / resume setup first', text)
+        self.assertIn('nginx', text)
+        self.assertFalse(self.config.exists())
 
 
 def integration():

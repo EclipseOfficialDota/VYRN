@@ -41,15 +41,15 @@
 این عددها تضمین ظرفیت نیستند.
 
 ```sh
-git clone https://github.com/EclipseOfficialDota/VYRN.git && cd VYRN && sudo bash setup.sh --lang fa
+git clone https://github.com/EclipseOfficialDota/VYRN.git && cd VYRN && sudo bash setup.sh
 ```
 
-گزینهٔ۱ را انتخاب کنید. پنل، دامنه، IPv4 عمومی و IP مدیر را می‌پرسد؛ تنظیمات محرمانه را
+پنل فقط انگلیسی است. گزینهٔ۱ را انتخاب کنید. پنل، دامنه، IPv4 عمومی و IP مدیر را می‌پرسد؛ تنظیمات محرمانه را
 می‌سازد، Core و دیتابیس را راه می‌اندازد، مدیر اولیه را فقط در دیتابیس خالی می‌سازد و
 HTTPS را بررسی می‌کند. DNS اختیاری Cloudflare با توکن مخفی و بدون ذخیره‌کردن آن انجام
 می‌شود؛ برای Provider دیگر، رکوردها را نشان می‌دهد و بررسی می‌کند.
 
-با اجرای دوبارهٔ `sudo bash setup.sh --lang fa`، وضعیت و HTTPS را ببینید، Authenticator
+پس از اولین اجرا، با دستور `vyrn` از هر مسیری، وضعیت و HTTPS را ببینید، Authenticator
 را تنظیم کنید یا سرویس‌ها را بدون حذف داده روشن/متوقف کنید.
 [راهنمای راه‌انداز](SETUP_WIZARD.md) · [نصب دستی و پراکسی موجود](DEPLOYMENT.md)
 

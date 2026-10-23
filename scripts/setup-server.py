@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 import re
 import secrets
+import shlex
 import shutil
 import socket
 import stat
@@ -22,12 +23,12 @@ import warnings
 ROOT = Path(__file__).resolve().parents[1]
 CONFIG = Path('/etc/vyrn/runtime.env')
 OS_RELEASE = Path('/etc/os-release')
+COMMAND = Path('/usr/local/bin/vyrn')
 SUPPORTED = {
     'ubuntu': {'22.04': 'jammy', '24.04': 'noble', '26.04': 'resolute', '26.10': 'stonking'},
     'debian': {'12': 'bookworm', '13': 'trixie'},
 }
 HOSTS = ('', 'api.', 'ws.', 'media.', 'push.', 'admin.', 'updates.')
-LANG = 'en'
 
 
 class NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -38,20 +39,22 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
 HTTP = urllib.request.build_opener(NoRedirect)
 
 
-def tr(en, fa):
-    return fa if LANG == 'fa' else en
+def color(text, code='36'):
+    if sys.stdout.isatty() and os.environ.get('TERM') != 'dumb' and 'NO_COLOR' not in os.environ:
+        return f'\033[{code}m{text}\033[0m'
+    return text
 
 
 def screen(title):
     if sys.stdout.isatty() and os.environ.get('TERM') != 'dumb':
         print('\033[2J\033[H', end='', flush=True)
-    print('\n' + '─' * 54)
-    print('  VYRN  /  ' + title)
-    print('─' * 54)
+    print('\n' + color('─' * 54))
+    print(color('  VYRN', '1;36') + '  /  ' + color(title, '1;37'))
+    print(color('─' * 54))
 
 
 def choice_input():
-    return input('> ').strip().translate(str.maketrans('۰۱۲۳۴۵۶۷۸۹٠١٢٣٤٥٦٧٨٩', '01234567890123456789'))
+    return input(color('> ', '1;36')).strip()
 
 
 def ask(label, validate, default=''):
@@ -60,11 +63,11 @@ def ask(label, validate, default=''):
         try:
             return validate(value)
         except ValueError as error:
-            print(tr('Please correct: ', 'لطفاً اصلاح کنید: ') + str(error))
+            print('Please correct: ' + str(error))
 
 
 def yes(label):
-    return input(label + ' [y/N]: ').strip().lower() in ('y', 'yes', 'بله')
+    return input(label + ' [y/N]: ').strip().lower() in ('y', 'yes')
 
 
 def hidden(prompt):
@@ -73,51 +76,45 @@ def hidden(prompt):
         try:
             return getpass.getpass(prompt)
         except getpass.GetPassWarning:
-            raise RuntimeError(tr('Hidden input unavailable; use an interactive SSH terminal.', 'ورودی مخفی در دسترس نیست؛ با ترمینال تعاملی SSH وصل شوید.')) from None
+            raise RuntimeError('Hidden input unavailable; use an interactive SSH terminal.') from None
 
 
 def domain(value):
     value = value.lower()
     label = r'[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?'
     if len(value) > 253 or not re.fullmatch(label + r'(?:\.' + label + ')+', value):
-        raise ValueError(tr('Use a hostname such as chat.example.com, without https://.', 'دامنه مثل chat.example.com؛ بدون https://.'))
+        raise ValueError('Use a hostname such as chat.example.com, without https://.')
     reserved = ('example.com', 'example.net', 'example.org')
     if any(value == name or value.endswith('.' + name) for name in reserved):
-        raise ValueError(tr('Use your own domain, not the documentation example.', 'دامنهٔ واقعی خودتان را بدهید؛ نه نمونهٔ راهنما.'))
+        raise ValueError('Use your own domain, not the documentation example.')
     if value.rsplit('.', 1)[-1].isdigit():
-        raise ValueError(tr('A DNS hostname is required, not an IP address.', 'نام دامنه لازم است؛ نه آدرس IP.'))
+        raise ValueError('A DNS hostname is required, not an IP address.')
     return value
 
 
 def public_ip(value):
     address = ipaddress.IPv4Address(value)
     if not address.is_global:
-        raise ValueError(tr('Enter the server public IPv4.', 'IPv4 عمومی سرور را وارد کنید.'))
+        raise ValueError('Enter the server public IPv4.')
     return str(address)
 
 
 def cidrs(value):
     networks = [ipaddress.ip_network(part, strict=False) for part in value.split()]
     if not networks or any(n.prefixlen == 0 or n.is_multicast or n.is_unspecified for n in networks):
-        raise ValueError(tr('Use your operator IP/VPN CIDR; do not allow the entire internet.', 'IP خودتان یا محدودهٔ VPN؛ کل اینترنت را مجاز نکنید.'))
+        raise ValueError('Use your operator IP/VPN CIDR; do not allow the entire internet.')
     return ' '.join(map(str, networks))
 
 
 def email(value):
     if len(value) > 254 or not re.fullmatch(r'[A-Za-z0-9.!#$%&\x27*+/=?^_`{|}~-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+', value):
-        raise ValueError(tr('Enter a plain email address.', 'یک ایمیل ساده و معتبر وارد کنید.'))
+        raise ValueError('Enter a plain email address.')
     return value.lower()
-
-
-def language(value):
-    if value not in ('en', 'fa'):
-        raise ValueError('en / fa')
-    return value
 
 
 def zone_id(value):
     if not re.fullmatch('[a-fA-F0-9]{32}', value):
-        raise ValueError('32 hexadecimal characters / ۳۲ کاراکتر هگز')
+        raise ValueError('32 hexadecimal characters')
     return value
 
 
@@ -128,9 +125,9 @@ def run(arguments, *, capture=False, env=None, timeout=1800):
                                 stdout=subprocess.PIPE if capture else None,
                                 stderr=subprocess.PIPE if capture else None, timeout=timeout)
     except (OSError, subprocess.TimeoutExpired):
-        raise RuntimeError(tr('Command unavailable or timed out; retry this step.', 'دستور در دسترس نیست یا زمان آن تمام شد؛ این مرحله را دوباره اجرا کنید.')) from None
+        raise RuntimeError(f'{arguments[0]} unavailable or timed out; retry this step.') from None
     if result.returncode:
-        raise RuntimeError(tr('Step failed. Existing data is preserved; fix the prerequisite and retry.', 'مرحله ناموفق بود. داده‌ها حفظ شدند؛ پیش‌نیاز را اصلاح و دوباره تلاش کنید.'))
+        raise RuntimeError(f'{arguments[0]} failed (exit {result.returncode}). Review the step output; data was not automatically reset.')
     return result.stdout.strip() if capture else ''
 
 
@@ -140,15 +137,18 @@ def compose(*arguments, **options):
     for key in ('POSTGRES_PASSWORD', 'VYRN_DOMAIN', 'VYRN_ADMIN_TOTP_SECRET',
                 'VYRN_ADMIN_ALLOWED_CIDRS', 'COMPOSE_PROFILES', 'COMPOSE_FILE', 'COMPOSE_PROJECT_NAME'):
         environment.pop(key, None)
+    files = ['-f', str(ROOT / 'deployment/compose.yaml')]
+    if CONFIG.exists() and settings().get('VYRN_PROXY_MODE') == 'existing':
+        files += ['-f', str(ROOT / 'deployment/compose.setup-proxy.yaml')]
     return run(['docker', 'compose', '--project-name', 'vyrn', '--env-file', str(CONFIG),
-                '-f', str(ROOT / 'deployment/compose.yaml'), *arguments], env=environment, **options)
+                *files, *arguments], env=environment, **options)
 
 
 def private_directory():
     CONFIG.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     info = CONFIG.parent.lstat()
     if not stat.S_ISDIR(info.st_mode) or info.st_uid != os.geteuid() or info.st_mode & 0o077:
-        raise RuntimeError(tr('Configuration directory must be private and owned by this administrator.', 'پوشهٔ تنظیمات باید خصوصی و متعلق به مدیر اجراکننده باشد.'))
+        raise RuntimeError('Configuration directory must be private and owned by this administrator.')
 
 
 def write_config(values):
@@ -163,7 +163,7 @@ def write_config(values):
 def settings():
     info = CONFIG.lstat()
     if not stat.S_ISREG(info.st_mode) or info.st_uid != os.geteuid() or info.st_mode & 0o077:
-        raise RuntimeError(tr('Runtime file must be a private regular file owned by this administrator.', 'فایل تنظیمات باید عادی، خصوصی و متعلق به مدیر اجراکننده باشد.'))
+        raise RuntimeError('Runtime file must be a private regular file owned by this administrator.')
     result = {}
     for line in CONFIG.read_text(encoding='utf-8').splitlines():
         if line and not line.startswith('#') and '=' in line:
@@ -171,10 +171,33 @@ def settings():
             result[key.strip()] = value.strip().strip('\"\x27')
     for key in ('VYRN_DOMAIN', 'POSTGRES_PASSWORD', 'VYRN_ADMIN_TOTP_SECRET', 'VYRN_ADMIN_ALLOWED_CIDRS'):
         if not result.get(key):
-            raise RuntimeError(tr(f'Missing {key}; inspect the private config without replacing it.', f'{key} موجود نیست؛ فایل خصوصی را بررسی کنید و جایگزین نکنید.'))
+            raise RuntimeError(f'Missing {key}; inspect the private config without replacing it.')
     domain(result['VYRN_DOMAIN'])
     cidrs(result['VYRN_ADMIN_ALLOWED_CIDRS'])
+    if result.get('VYRN_PROXY_MODE', 'standalone') not in ('standalone', 'existing'):
+        raise ValueError('VYRN_PROXY_MODE must be standalone or existing; inspect the private settings.')
     return result
+
+
+def services(values):
+    return ('postgres', 'core') if values.get('VYRN_PROXY_MODE') == 'existing' else ('postgres', 'core', 'caddy')
+
+
+def install_command():
+    if sys.platform != 'linux' or os.geteuid() != 0:
+        raise RuntimeError('Register the command with: sudo bash setup.sh')
+    marker = '# Managed by VYRN setup\n'
+    if COMMAND.is_symlink() or (COMMAND.exists() and marker not in COMMAND.read_text()):
+        raise RuntimeError('/usr/local/bin/vyrn already exists and is not managed by this installer; preserved.')
+    script = shlex.quote(str(ROOT / 'setup.sh'))
+    content = ('#!/bin/sh\n' + marker + f'if [ ! -f {script} ]; then\n'
+               '  echo "VYRN checkout moved or was removed. Run sudo bash setup.sh from its new location." >&2\n'
+               f'  exit 1\nfi\nif [ "$(id -u)" -ne 0 ]; then\n  exec sudo /bin/bash {script} "$@"\nfi\n'
+               f'exec /bin/bash {script} "$@"\n')
+    COMMAND.parent.mkdir(parents=True, exist_ok=True)
+    if not COMMAND.exists() or COMMAND.read_text() != content:
+        COMMAND.write_text(content)
+    COMMAND.chmod(0o755)
 
 
 def host_release():
@@ -192,7 +215,7 @@ def host_release():
 def host_check():
     distro, version, _ = host_release()
     if shutil.disk_usage(ROOT).free < 12 * 1024**3:
-        raise RuntimeError(tr('At least12GiB free is needed for builds and the10GiB media reserve.', 'حداقل۱۲گیگابایت فضای آزاد برای ساخت و ذخیرهٔ امن رسانه لازم است.'))
+        raise RuntimeError('At least12GiB free is needed for builds and the10GiB media reserve.')
     return distro, version
 
 
@@ -211,13 +234,13 @@ def docker_ready():
         raise RuntimeError('Use the local Docker context without DOCKER_HOST/DOCKER_CONTEXT overrides.')
     if not shutil.which('docker'):
         distro, _, _ = host_release()
-        if not yes(tr(f'Install Docker Engine from its official {distro} repository?', f'Docker از مخزن رسمی {distro} نصب شود؟')):
-            raise RuntimeError(tr('Docker is required.', 'Docker لازم است.'))
+        if not yes(f'Install Docker Engine from its official {distro} repository?'):
+            raise RuntimeError('Docker is required.')
         # Preserve conflicting installations; never uninstall another service automatically.
         for package in ('docker.io', 'podman-docker', 'containerd', 'runc'):
             probe = subprocess.run(['dpkg-query', '-W', '-f=${Status}', package], capture_output=True, text=True)
             if probe.returncode == 0 and probe.stdout.strip() == 'install ok installed':
-                raise RuntimeError(tr('Existing container packages need manual review; see Docker install guide.', 'بسته‌های کانتینری موجود نیاز به بررسی دستی دارند؛ راهنمای Docker را ببینید.'))
+                raise RuntimeError('Existing container packages need manual review; see Docker install guide.')
         run(['apt-get', 'update'])
         run(['apt-get', 'install', '-y', 'ca-certificates', 'curl'])
         key = Path('/etc/apt/keyrings/docker.asc')
@@ -268,18 +291,18 @@ def owned_stack():
     for container in containers:
         directory = container['Config']['Labels'].get('com.docker.compose.project.working_dir', '')
         if not directory or Path(directory).resolve() != ROOT:
-            raise RuntimeError(tr('Another VYRN deployment owns these containers. Use its checkout or the manual guide.', 'این کانتینرها متعلق به نصب دیگری هستند؛ از پوشهٔ همان نصب یا راهنمای دستی استفاده کنید.'))
+            raise RuntimeError('Another VYRN deployment owns these containers. Use its checkout or the manual guide.')
     return any(c['Config']['Labels'].get('com.docker.compose.service') == 'caddy' and
                c['State']['Running'] for c in containers)
 
 
-def free_ports():
-    for port in (80, 443):
+def free_ports(ports=(80, 443)):
+    for port in ports:
         with socket.socket() as probe:
             try:
                 probe.bind(('0.0.0.0', port))
             except OSError:
-                raise RuntimeError(tr(f'Port{port} is occupied. Preserve the existing proxy; use the manual integration guide.', f'پورت{port} اشغال است؛ پراکسی موجود را حفظ و راهنمای اتصال دستی را استفاده کنید.')) from None
+                raise RuntimeError(f'Port {port} is occupied. Use existing-proxy mode or inspect the listener in Diagnostics; do not stop unrelated services.') from None
 
 
 def dns_check(values, address):
@@ -292,17 +315,17 @@ def dns_check(values, address):
         except RuntimeError:
             addresses = set()
         ok = address in addresses
-        print(('  OK  ' if ok else '  --  ') + name + ' → ' + address)
+        print(color('  OK  ', '32') + name + ' → ' + address if ok else color('  WAIT  ', '33') + name + ' → ' + address)
         if not ok:
             missing.append(name)
     return not missing
 
 
 def cloudflare_dns(values, address):
-    if not yes(tr('Use Cloudflare to create missing DNS records automatically?', 'رکوردهای DNS ناموجود با Cloudflare خودکار ساخته شوند؟')):
+    if not yes('Use Cloudflare to create missing DNS records automatically?'):
         return
     zone = ask('Cloudflare Zone ID', zone_id)
-    token = hidden(tr('Cloudflare API token (hidden, not saved): ', 'توکن Cloudflare (مخفی؛ ذخیره نمی‌شود): '))
+    token = hidden('Cloudflare API token (hidden, not saved): ')
     if not token or any(char.isspace() for char in token):
         raise RuntimeError('Cloudflare token is empty or contains whitespace.')
     headers = {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'}
@@ -318,7 +341,7 @@ def cloudflare_dns(values, address):
                 raise ValueError()
             return result['result']
         except (OSError, ValueError, KeyError):
-            raise RuntimeError(tr('Cloudflare rejected the request; credentials/response not printed.', 'درخواست Cloudflare رد شد؛ اطلاعات محرمانه و پاسخ چاپ نشدند.')) from None
+            raise RuntimeError('Cloudflare rejected the request; credentials/response not printed.') from None
 
     try:
         missing = []
@@ -328,7 +351,7 @@ def cloudflare_dns(values, address):
             if not records:
                 missing.append(name)
             elif len(records) != 1 or records[0].get('type') != 'A' or records[0].get('content') != address or records[0].get('proxied'):
-                raise RuntimeError(tr('DNS conflict preserved at ', 'رکورد متعارض حفظ شد: ') + name)
+                raise RuntimeError('DNS conflict preserved at ' + name)
         for name in missing:
             api(base, {'type': 'A', 'name': name, 'content': address, 'ttl': 300, 'proxied': False})
             print('  OK  ' + name)
@@ -346,17 +369,17 @@ def bootstrap():
         if not count.isdecimal():
             raise RuntimeError('Cannot establish database state; bootstrap refused.')
         if int(count):
-            print(tr('Existing accounts preserved; initial bootstrap skipped.', 'حساب‌های موجود حفظ شدند؛ مدیر اولیه دوباره ساخته نمی‌شود.'))
+            print('Existing accounts preserved; initial bootstrap skipped.')
             return False
-    owner = ask(tr('New administrator email', 'ایمیل مدیر جدید'), email)
+    owner = ask('New administrator email', email)
     while True:
-        password = hidden(tr('New administrator password (12+ characters): ', 'رمز مدیر جدید (حداقل۱۲کاراکتر): '))
+        password = hidden('New administrator password (12+ characters): ')
         if len(password) < 12 or len(password.encode()) > 1024 or '\x00' in password:
-            print(tr('Use12+ characters and at most1024 bytes.', 'حداقل۱۲کاراکتر و حداکثر۱۰۲۴بایت.'))
+            print('Use12+ characters and at most1024 bytes.')
             continue
-        if password == hidden(tr('Repeat password: ', 'تکرار رمز: ')):
+        if password == hidden('Repeat password: '):
             break
-        print(tr('Passwords differ.', 'رمزها یکسان نیستند.'))
+        print('Passwords differ.')
     environment = os.environ.copy()
     environment.update(VYRN_BOOTSTRAP_EMAIL=owner, VYRN_BOOTSTRAP_PASSWORD=password,
                        VYRN_BOOTSTRAP_INVITE=secrets.token_hex(24))
@@ -377,16 +400,16 @@ def start_existing(*services):
     while time.monotonic() < deadline:
         identifiers = compose('ps', '-aq', *services, capture=True).split()
         if len(identifiers) != len(services):
-            raise RuntimeError(tr('Some services are missing; use Install / resume setup.', 'بعضی سرویس‌ها وجود ندارند؛ نصب / ادامهٔ نصب را انتخاب کنید.'))
+            raise RuntimeError('Some services are missing; use Install / resume setup.')
         containers = json.loads(run(['docker', 'inspect', *identifiers], capture=True, timeout=30))
         states = [container['State'] for container in containers]
         if any(state.get('Health', {}).get('Status') == 'unhealthy' for state in states):
-            raise RuntimeError(tr('A service is unhealthy; inspect its status. Data is preserved.', 'یکی از سرویس‌ها سالم نیست؛ وضعیت آن را بررسی کنید. داده‌ها حفظ شدند.'))
+            raise RuntimeError('A service is unhealthy; inspect its status. Data is preserved.')
         if all(state.get('Running') and state.get('Health', {}).get('Status', 'healthy') == 'healthy' for state in states):
-            print(tr('Services running and health checks passed.', 'سرویس‌ها روشن‌اند و بررسی سلامت موفق بود.'))
+            print('Services running and health checks passed.')
             return
         time.sleep(2)
-    raise RuntimeError(tr('Services did not become healthy in time; data preserved.', 'سرویس‌ها در زمان مقرر سالم نشدند؛ داده‌ها حفظ شدند.'))
+    raise RuntimeError('Services did not become healthy in time; data preserved.')
 
 
 def https_check(values, attempts=1):
@@ -395,111 +418,216 @@ def https_check(values, attempts=1):
         try:
             with HTTP.open(url, timeout=10) as response:
                 if response.status == 200 and json.loads(response.read(4096)).get('status') == 'ready':
-                    print('  OK  ' + url)
+                    print(color('  OK  ', '32') + url)
                     return True
         except (OSError, ValueError):
             pass
         if attempt + 1 < attempts:
             time.sleep(5)
-    print(tr('HTTPS not ready. Check DNS, inbound80/443, certificates and Core; no TLS bypass is used.', 'HTTPS آماده نیست؛ DNS، ورودی۸۰/۴۴۳، گواهی و Core را بررسی کنید. اعتبارسنجی TLS خاموش نمی‌شود.'))
+    print('HTTPS not ready. Check DNS, inbound80/443, certificates and Core; no TLS bypass is used.')
+    print('Next: run Diagnostics and DNS / records. In existing-proxy mode configure your host proxy and certificate first (Proxy setup guide).')
     return False
 
 
 def authenticator(values):
-    if yes(tr('Show the authenticator setup key in this private terminal? Never share it.', 'کلید Authenticator در این ترمینال خصوصی نمایش داده شود؟ آن را به کسی ندهید.')):
-        print(tr('Time-based · SHA1 · 6 digits · 30 seconds', 'زمان‌محور · SHA1 · ۶رقمی · ۳۰ثانیه'))
+    if yes('Show the authenticator setup key in this private terminal? Never share it.'):
+        print('Time-based · SHA1 · 6 digits · 30 seconds')
         print(values['VYRN_ADMIN_TOTP_SECRET'])
-        input(tr('Save it in your authenticator, then press Enter. ', 'در Authenticator ذخیره کنید؛ سپس Enter بزنید. '))
+        input('Save it in your authenticator, then press Enter. ')
 
 
 def links(values):
-    print('\n' + tr('Control: ', 'پنل: ') + 'https://admin.' + values['VYRN_DOMAIN'])
-    print(tr('Client build on your Windows workstation:', 'ساخت اپ روی کامپیوتر ویندوز خودتان:'))
+    print('\n' + 'Control: ' + 'https://admin.' + values['VYRN_DOMAIN'])
+    print('Client build on your Windows workstation:')
     print('./scripts/build-android.ps1 -Flavor dev -BuildType debug -ApiUrl https://api.' + values['VYRN_DOMAIN'])
-    print(tr('Create invitations in Control. Final signing/offsite backups are separate; calls remain unavailable.', 'دعوت‌ها را در پنل بسازید. امضای نهایی و بکاپ خارجی جدا هستند؛ تماس‌ها غیرفعال‌اند.'))
+    print('Create invitations in Control. Final signing/offsite backups are separate; calls remain unavailable.')
 
 
 def install():
     host_check()
     docker_ready()
-    if not owned_stack():
-        free_ports()
+    running_proxy = owned_stack()
+    existing_proxy = False
     if CONFIG.exists() or CONFIG.is_symlink():
         values = settings()
-        print(tr('Using existing protected settings; secrets will not be replaced.', 'تنظیمات خصوصی موجود استفاده می‌شود؛ رمزها جایگزین نمی‌شوند.'))
+        print('Using existing protected settings; secrets will not be replaced.')
     else:
-        name = ask(tr('Service domain, e.g. chat.yourdomain.com', 'دامنهٔ سرویس؛ مثل chat.yourdomain.com'), domain)
-        address = ask(tr('Server public IPv4', 'IPv4 عمومی سرور'), public_ip)
+        if not running_proxy:
+            try:
+                free_ports()
+            except RuntimeError as error:
+                print(color(str(error), '33'))
+                print('Existing-proxy mode builds PostgreSQL/Core only, bound to 127.0.0.1:18080.')
+                print('You must configure HTTPS and restricted admin access in your current proxy; it will not be edited automatically.')
+                if not yes('Continue using the existing reverse proxy?'):
+                    return
+                existing_proxy = True
+        name = ask('Service domain, e.g. chat.yourdomain.com', domain)
+        address = ask('Server public IPv4', public_ip)
         default = os.environ.get('SSH_CLIENT', '').split()
         default = default[0] if default else ''
-        allowed = ask(tr('Your administrator IP or VPN CIDRs (space separated)', 'IP خودتان یا CIDRهای VPN، با فاصله'), cidrs, default)
+        allowed = ask('Your administrator IP or VPN CIDRs (space separated)', cidrs, default)
         print(f'\nDomain: {name}\nServer: {address}\nAdmin network: {allowed}\nConfig: {CONFIG}')
-        if not yes(tr('Save settings and set up this instance?', 'تنظیمات ذخیره و این نصب راه‌اندازی شود؟')):
+        if not yes('Save settings and set up this instance?'):
             return
         values = dict(VYRN_DOMAIN=name, VYRN_PUBLIC_IPV4=address, VYRN_ADMIN_ALLOWED_CIDRS=allowed,
+                      VYRN_PROXY_MODE='existing' if existing_proxy else 'standalone',
                       POSTGRES_PASSWORD=secrets.token_hex(32),
                       VYRN_ADMIN_TOTP_SECRET=base64.b32encode(secrets.token_bytes(20)).decode())
         write_config(values)
-    address = public_ip(values['VYRN_PUBLIC_IPV4']) if values.get('VYRN_PUBLIC_IPV4') else ask(tr('Server public IPv4 for DNS checks', 'IPv4 عمومی سرور برای بررسی DNS'), public_ip)
+    if values.get('VYRN_PROXY_MODE') != 'existing' and not running_proxy:
+        free_ports()
+    address = public_ip(values['VYRN_PUBLIC_IPV4']) if values.get('VYRN_PUBLIC_IPV4') else ask('Server public IPv4 for DNS checks', public_ip)
     cloudflare_dns(values, address)
-    print(tr('\nCreate these DNS-only A records; remove broken AAAA records. Allow80/443 at the provider/host.', '\nرکوردهای A زیر را DNS-only بسازید؛ AAAA خراب را حذف کنید. ورودی۸۰/۴۴۳ را در میزبان و Provider مجاز کنید.'))
+    print('\nCreate these DNS-only A records; remove broken AAAA records. Allow80/443 at the provider/host.')
     for prefix in HOSTS:
         print(f'  {prefix}{values["VYRN_DOMAIN"]}  →  {address}')
     while True:
-        input(tr('After saving DNS records, press Enter to check. ', 'پس از ذخیرهٔ DNS، برای بررسی Enter بزنید. '))
+        input('After saving DNS records, press Enter to check. ')
         if dns_check(values, address):
             break
-        if not yes(tr('DNS is not ready. Retry?', 'DNS هنوز آماده نیست. دوباره بررسی شود؟')):
+        if not yes('DNS is not ready. Retry?'):
             return
-    print(tr('\n[1/4] Validate configuration and prepare Core', '\n[۱/۴] بررسی تنظیمات و آماده‌کردن Core'))
+    print('\n[1/4] Validate configuration and prepare Core')
     compose('config', '-q')
     (ROOT / 'artifacts/updates').mkdir(parents=True, exist_ok=True)
     existing = compose('ps', '-aq', 'core', capture=True)
     if not existing:
+        if values.get('VYRN_PROXY_MODE') == 'existing':
+            free_ports((18080,))
         compose('build', 'core')
-    print(tr('[2/4] Start database', '[۲/۴] راه‌اندازی دیتابیس'))
+    print('[2/4] Start database')
     compose('up', '-d', '--wait', 'postgres')
-    print(tr('[3/4] Create first administrator only if database is empty', '[۳/۴] ساخت مدیر اولیه فقط در دیتابیس خالی'))
+    print('[3/4] Create first administrator only if database is empty')
     bootstrap()
-    print(tr('[4/4] Start Core/HTTPS and verify', '[۴/۴] اجرای Core و HTTPS و بررسی'))
-    compose('up', '-d', '--no-build', '--wait', 'core', 'caddy')
+    print('[4/4] Start Core/HTTPS and verify')
+    compose('up', '-d', '--no-build', '--wait', *services(values)[1:])
+    if values.get('VYRN_PROXY_MODE') == 'existing':
+        proxy_help(values)
     ready = https_check(values, attempts=8)
-    print(tr('Services started; public HTTPS verified.' if ready else 'Services started; public HTTPS still needs attention.',
-             'سرویس‌ها اجرا و HTTPS عمومی تأیید شد.' if ready else 'سرویس‌ها اجرا شدند؛ HTTPS عمومی هنوز نیاز به بررسی دارد.'))
+    print('Services started; public HTTPS verified.' if ready else 'Services started; public HTTPS still needs attention.')
     authenticator(values)
     links(values)
 
 
+def proxy_help(values=None):
+    print(color('EXISTING REVERSE PROXY', '1;36'))
+    print('1. Keep your existing Nginx/Caddy running on 80/443. Choose Install and accept existing-proxy mode.')
+    print('2. Core will listen ONLY at http://127.0.0.1:18080; PostgreSQL stays private.')
+    print('3. Route API/WebSocket/media/push hostnames to that backend with WebSocket upgrades.')
+    print('4. Public API hostnames must deny /v1/admin and /v1/admin/* (404).')
+    print('5. Serve the admin static directory below on the admin hostname; proxy /v1/ to Core.')
+    print('   Restrict the entire admin host to your operator IP/VPN. Keep the real client IP in X-Real-IP.')
+    print('   Admin files: ' + str(ROOT / 'admin'))
+    if values:
+        print('   Admin hostname: admin.' + values['VYRN_DOMAIN'])
+        print('   Allowed networks: ' + values['VYRN_ADMIN_ALLOWED_CIDRS'])
+    print('6. Obtain valid HTTPS certificates for your hostnames. Never disable certificate verification.')
+    print('7. Validate your proxy configuration before reload (Nginx: sudo nginx -t). Then run Check public HTTPS.')
+    print('Reference: https://github.com/EclipseOfficialDota/VYRN/blob/main/docs/DEPLOYMENT.md#existing-reverse-proxy-and-migration-from-earlier-settings')
+    print('Templates in deployment/nginx-*.conf are examples: replace domains, paths and certificate names before use.')
+
+
+def show_error(error):
+    print(color('NEEDS ATTENTION: ', '1;31') + str(error))
+    text = str(error).lower()
+    if isinstance(error, FileNotFoundError) and not CONFIG.exists():
+        solution = 'No instance settings found. Choose Install / resume setup first. Do not copy settings from another server.'
+    elif 'port' in text and 'occupied' in text:
+        solution = 'Open Diagnostics to identify the listener. For an existing proxy, use the Proxy setup guide and existing-proxy install mode.'
+    elif 'docker_host' in text or 'context' in text or 'unix-socket' in text:
+        solution = 'Unset DOCKER_HOST and DOCKER_CONTEXT; select a local Unix-socket context with docker context use. Remote engines are refused.'
+    elif 'another vyrn' in text:
+        solution = 'Use the original checkout identified by the Compose working_dir label; do not adopt or delete another installation.'
+    elif 'docker' in text and ('repository' in text or 'key' in text or 'packages' in text):
+        solution = 'Review the existing Docker package/repository configuration using the official distro guide. It was preserved; do not blindly remove container packages.'
+    elif 'docker' in text:
+        solution = 'Run Diagnostics. Check systemctl status docker, local engine access, docker compose version, registry connectivity and free disk. Retry Install after correction.'
+    elif 'apt-get' in text:
+        solution = 'Check DNS/internet and apt repository errors. Wait for other apt/dpkg processes; never delete lock files. Correct repositories, then retry.'
+    elif 'private' in text or 'runtime' in text or 'missing vyrn' in text:
+        solution = 'Inspect /etc/vyrn ownership and permissions locally: directory 0700, runtime.env 0600, owned by root. Do not print or regenerate existing secrets.'
+    elif 'cloudflare' in text or 'dns conflict' in text:
+        solution = 'Check the zone ID, token DNS-edit scope and the displayed hostname. Resolve conflicting A/AAAA/proxy records in your provider; existing records were preserved.'
+    elif 'gib' in text or 'space' in text:
+        solution = 'Inspect df -h and docker system df. Free reviewed unused files or enlarge the disk; do not delete volumes to make space.'
+    elif 'healthy' in text or 'services' in text:
+        solution = 'Choose Service status and Diagnostics. Inspect docker compose logs privately; correct database/configuration/disk errors, then resume Install. Never reset volumes as a login fix.'
+    else:
+        solution = 'Run Diagnostics, correct the reported prerequisite, then retry the same action. Existing passwords and data are not automatically replaced.'
+    print(color('NEXT: ', '1;33') + solution)
+    print('Help: https://github.com/EclipseOfficialDota/VYRN/blob/main/docs/SETUP_WIZARD.md#troubleshooting')
+
+
+def diagnostics():
+    print('Read-only checks. No packages, services, firewall rules or settings will be changed.\n')
+    checks = [('OS and disk', host_check), ('Local Docker engine / Compose', check_engine)]
+    for label, check in checks:
+        try:
+            check()
+            print(color('PASS  ', '32') + label)
+        except (RuntimeError, OSError, ValueError) as error:
+            print(color('FAIL  ', '31') + label)
+            show_error(error)
+    try:
+        listeners = run(['ss', '-lntp'], capture=True, timeout=10)
+        print('\nTCP listeners on 80 / 443 / 18080:')
+        print('\n'.join(line for line in listeners.splitlines() if re.search(r':(?:80|443|18080)\s', line)) or 'None')
+    except (RuntimeError, OSError) as error:
+        show_error(error)
+    try:
+        values = settings()
+        print(color('\nPASS  ', '32') + 'Protected settings; mode: ' + values.get('VYRN_PROXY_MODE', 'standalone'))
+        owned_stack()
+        compose('ps')
+        dns_menu(values)
+        https_check(values)
+    except (RuntimeError, OSError, ValueError) as error:
+        show_error(error)
+    print('\nFor firewall checks, preserve SSH and review provider inbound TCP 80/443; no firewall is changed here.')
+    print('For authenticator failures, use the current six-digit code, not the setup key; check timedatectl status on the server and automatic time on your phone.')
+
+
+def dns_menu(values=None):
+    values = values or settings()
+    address = values.get('VYRN_PUBLIC_IPV4') or ask('Server public IPv4', public_ip)
+    if not dns_check(values, public_ip(address)):
+        print(color('NEXT: ', '33') + 'Point all seven DNS-only A records above to this IP. Remove stale AAAA records only if IPv6 is not configured. Wait for propagation, then retry.')
+
+
 def remove():
     values = settings()
-    screen(tr('Remove services', 'حذف سرویس‌ها'))
-    print(tr('Removes this instance’s containers and networks.', 'کانتینرها و شبکه‌های این نصب حذف می‌شوند.'))
-    print(tr('Keeps accounts, messages, media, certificates and private settings.', 'حساب‌ها، پیام‌ها، رسانه، گواهی‌ها و تنظیمات خصوصی حفظ می‌شوند.'))
-    print(tr('DNS, Docker, source files and other applications stay in place.', 'DNS، خود Docker، سورس و برنامه‌های دیگر باقی می‌مانند.'))
-    print('\n  1  ' + tr('Remove services (keep data)', 'حذف سرویس‌ها؛ حفظ داده‌ها'))
-    print('  0  ' + tr('Back', 'بازگشت'))
+    screen('Remove services')
+    print('Removes this instance’s containers and networks.')
+    print('Keeps accounts, messages, media, certificates and private settings.')
+    print('DNS, Docker, source files and other applications stay in place.')
+    print('\n  1  ' + 'Remove services (keep data)')
+    print('  0  ' + 'Back')
     choice = choice_input()
     if choice == '0':
         return
     if choice != '1':
-        raise ValueError(tr('Choose 1 or 0.', '۱ یا ۰ را انتخاب کنید.'))
-    screen(tr('Confirm removal', 'تأیید حذف'))
-    print(tr('Instance: ', 'نصب: ') + values['VYRN_DOMAIN'])
-    if input(tr('Type REMOVE to remove services, or Enter to cancel: ', 'برای حذف سرویس‌ها REMOVE بنویسید؛ برای لغو Enter: ')).strip() != 'REMOVE':
-        print(tr('Cancelled.', 'لغو شد.'))
+        raise ValueError('Choose 1 or 0.')
+    screen('Confirm removal')
+    print('Instance: ' + values['VYRN_DOMAIN'])
+    if input('Type REMOVE to remove services, or Enter to cancel: ').strip() != 'REMOVE':
+        print('Cancelled.')
         return
     # Recheck ownership and the local endpoint immediately before any mutation.
     owned_stack()
     compose('down')
-    print(tr('Services removed. Data and settings retained; option 1 reinstalls them.', 'سرویس‌ها حذف شدند. داده و تنظیمات حفظ شدند؛ گزینهٔ۱ آن‌ها را دوباره راه‌اندازی می‌کند.'))
+    print('Services removed. Data and settings retained; option 1 reinstalls them.')
 
 
 def main():
-    global LANG
     parser = argparse.ArgumentParser(description='VYRN beginner setup and terminal control panel (Ubuntu/Debian).')
-    parser.add_argument('--lang', choices=('en', 'fa'))
+    parser.add_argument('--lang', choices=('en',), help=argparse.SUPPRESS)
+    parser.add_argument('--install-command', action='store_true', help='Register the vyrn terminal command')
     parser.add_argument('--check', action='store_true', help='Read-only host/prerequisite report; no installation')
     options = parser.parse_args()
+    if options.install_command:
+        install_command()
+        return
     if options.check:
         distro, version = host_check()
         print(f'OK: {distro} {version} and disk budget; Docker CLI: ' + str(bool(shutil.which('docker'))))
@@ -508,35 +636,43 @@ def main():
         raise RuntimeError('Run on your Ubuntu/Debian server: sudo bash setup.sh')
     if not sys.stdin.isatty():
         raise RuntimeError('Interactive terminal required. Reconnect using ssh -t; do not pipe passwords.')
-    LANG = options.lang or ask('Language / زبان: en or fa', language, 'en')
     actions = {
-        '1': tr('Install / resume setup', 'نصب / ادامهٔ نصب'),
-        '2': tr('Service status', 'وضعیت سرویس‌ها'),
-        '3': tr('Check public HTTPS', 'بررسی HTTPS عمومی'),
-        '4': tr('Authenticator setup', 'تنظیم Authenticator'),
-        '5': tr('Start existing services', 'روشن‌کردن سرویس‌های موجود'),
-        '6': tr('Stop services (keep data)', 'توقف سرویس‌ها؛ حفظ داده‌ها'),
-        '7': tr('Client build / addresses', 'ساخت اپ / آدرس‌ها'),
-        '8': tr('Remove services (keep data)', 'حذف سرویس‌ها؛ حفظ داده‌ها'),
+        '1': 'Install / resume setup',
+        '2': 'Service status',
+        '3': 'Check public HTTPS',
+        '4': 'Authenticator setup',
+        '5': 'Start existing services',
+        '6': 'Stop services (keep data)',
+        '7': 'Client build / addresses',
+        '8': 'Remove services (keep data)',
+        '9': 'Diagnostics / troubleshoot',
+        '10': 'DNS records / check',
+        '11': 'Existing proxy setup guide',
     }
     while True:
-        screen(tr('Server control', 'کنترل سرور'))
-        print('  ' + tr('Ubuntu / Debian · Self-hosted setup', 'Ubuntu / Debian · راه‌اندازی سلف‌هاست'))
+        screen('Server control')
+        print('  ' + 'Ubuntu / Debian · Self-hosted setup')
         for number, title in actions.items():
             if number in ('1', '2', '5', '7', '8'):
                 print()
-            print(f'  {number}  {title}')
-        print('\n  0  ' + tr('Exit', 'خروج'))
+            print('  ' + color(number.rjust(2), '1;31' if number == '8' else '1;36') + '  ' + title)
+        print('\n  0  ' + 'Exit')
         print('\n' + '─' * 54)
         choice = choice_input()
         if choice == '0':
             return
-        screen(actions.get(choice, tr('Choose an option', 'انتخاب گزینه')))
+        screen(actions.get(choice, 'Choose an option'))
         try:
             if choice == '1':
                 install()
             elif choice == '8':
                 remove()
+            elif choice == '9':
+                diagnostics()
+            elif choice == '10':
+                dns_menu()
+            elif choice == '11':
+                proxy_help(settings() if CONFIG.exists() else None)
             elif choice in ('2', '3', '4', '5', '6', '7'):
                 values = settings()
                 if choice in ('2', '5', '6'):
@@ -548,17 +684,16 @@ def main():
                 elif choice == '4':
                     authenticator(values)
                 elif choice == '5':
-                    start_existing('postgres', 'core', 'caddy')
-                elif choice == '6' and yes(tr('Stop this instance while retaining all volumes?', 'این نصب متوقف و همهٔ داده‌ها حفظ شوند؟')):
-                    compose('stop', 'caddy', 'core', 'postgres')
+                    start_existing(*services(values))
+                elif choice == '6' and yes('Stop this instance while retaining all volumes?'):
+                    compose('stop', *reversed(services(values)))
                 elif choice == '7':
                     links(values)
             else:
-                print(tr('Choose a number from 0 to 8.', 'یک عدد از ۰ تا ۸ انتخاب کنید.'))
+                print('Choose a number from 0 to 11.')
         except (RuntimeError, OSError, ValueError) as error:
-            print(tr('Needs attention: ', 'نیاز به بررسی: ') + str(error))
-            print('https://github.com/EclipseOfficialDota/VYRN/blob/main/docs/SETUP_WIZARD.md')
-        input(tr('\nPress Enter to return to the main menu. ', '\nبرای بازگشت به منوی اصلی Enter بزنید. '))
+            show_error(error)
+        input('\nPress Enter to return to the main menu. ')
 
 
 if __name__ == '__main__':
@@ -568,5 +703,5 @@ if __name__ == '__main__':
         print('\nStopped; existing data/configuration preserved.')
         sys.exit(130)
     except (RuntimeError, OSError) as error:
-        print(str(error), file=sys.stderr)
+        show_error(error)
         sys.exit(1)
