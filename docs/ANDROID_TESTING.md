@@ -1,6 +1,19 @@
 # Android development and testing
 
-The build workflow uses Windows/PowerShell7, Git, JDK21, Android SDK platform36/build-tools36.0.0 and NDK27.2.12479018. The normal app supports API26+. Do not install test fixtures on a real phone or production instance without explicit authorization.
+The build workflow uses PowerShell7, Git, JDK21, Android SDK platform36/build-tools36.0.0 and NDK27.2.12479018. Windows and Linux entry points are provided. The normal app supports API26+. Do not install test fixtures on a real phone or production instance without explicit authorization.
+
+## Linux VPS build
+
+On an x86_64 Ubuntu 24.04 host, from the repository checkout:
+
+```bash
+git pull --ff-only origin main
+sudo bash scripts/build-android-linux.sh --install-tools -ApiUrl https://api.your-domain.com
+```
+
+The opt-in flag installs build packages, including JDK21 and PowerShell7 via the [Microsoft Ubuntu repository](https://learn.microsoft.com/en-us/powershell/scripting/install/install-ubuntu). The script downloads [Google command-line tools](https://developer.android.com/studio#command-line-tools-only), verifies the pinned SHA-256, asks you to review SDK licenses, installs the pinned SDK/NDK/CMake packages and fetches the pinned Telegram sources/submodules. It does not deploy or restart server services. Subsequent builds omit `--install-tools`. On other Linux distributions, install the prerequisites manually and set `JAVA_HOME` and `ANDROID_HOME` before running it. Native Android SDK/NDK tools require an x86_64 build host here.
+
+Outputs are in `artifacts/*.apk`; the build log is `.local/android-build.log`. Download the APK using SFTP on your SSH port. Builds default to Debug, use one Gradle worker, no emulator and no persistent Gradle daemon. Allow several GiB RAM plus native compiler overhead and substantial disk space for the SDK, source and build cache; a small server capable of running Docker Lite may not have enough memory to build Android. This is a Linux build entry point, not evidence of a completed Linux APK build; the lightweight orchestration check is `python3 scripts/test-android-linux.py`. Final Release builds still require all four signing variables; do not put the keystore in the public checkout.
 
 ## Normal build
 

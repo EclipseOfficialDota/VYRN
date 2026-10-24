@@ -11,16 +11,25 @@ if($ApiUrl -notmatch '^https://[a-zA-Z][a-zA-Z0-9.-]+(:[0-9]+)?$'){throw 'API mu
 if($Abis -notmatch '^(arm64-v8a|armeabi-v7a|x86_64)(,(arm64-v8a|armeabi-v7a|x86_64))*$'){throw 'Invalid ABI list'}
 if($BuildType -eq 'release'){foreach($name in @('VYRN_KEYSTORE_PATH','VYRN_KEY_ALIAS','VYRN_STORE_PASSWORD','VYRN_KEY_PASSWORD')){if(![Environment]::GetEnvironmentVariable($name)){throw "Required environment variable missing: $name"}}}
 & (Join-Path $root 'android/prepare-upstream.ps1')
-$env:JAVA_HOME=Join-Path $root '.tools/jdk21/jdk-21.0.12.1+1'
-if(!(Test-Path -LiteralPath (Join-Path $env:JAVA_HOME 'bin/java.exe'))){throw 'Run scripts/setup-jdk.ps1 first; libsignal requires JDK21'}
-$env:ANDROID_HOME=Join-Path $root '.tools/android-sdk'
+if($env:OS -eq 'Windows_NT'){
+    $env:JAVA_HOME=Join-Path $root '.tools/jdk21/jdk-21.0.12.1+1'
+    $java=Join-Path $env:JAVA_HOME 'bin/java.exe'
+}else{
+    if(!$env:JAVA_HOME){throw 'Set JAVA_HOME to a Linux JDK21 installation'}
+    $java=Join-Path $env:JAVA_HOME 'bin/java'
+}
+if(!(Test-Path -LiteralPath $java)){throw 'JDK21 is required; Windows: run scripts/setup-jdk.ps1. Linux: set JAVA_HOME.'}
+if($env:OS -eq 'Windows_NT' -or !$env:ANDROID_HOME){$env:ANDROID_HOME=Join-Path $root '.tools/android-sdk'}
 $env:ANDROID_SDK_ROOT=$env:ANDROID_HOME
 $env:GRADLE_USER_HOME=Join-Path $root '.local/gradle'
 New-Item -ItemType Directory -Path $env:GRADLE_USER_HOME -Force | Out-Null
-$proxy=[Net.WebRequest]::GetSystemWebProxy().GetProxy([uri]'https://dl.google.com')
-$javaOptions='-Djavax.net.ssl.trustStoreType=Windows-ROOT -Djavax.net.ssl.trustStore=NONE'
-if($proxy.Host -ne 'dl.google.com'){$javaOptions+=" -Dhttps.proxyHost=$($proxy.Host) -Dhttps.proxyPort=$($proxy.Port) -Dhttp.proxyHost=$($proxy.Host) -Dhttp.proxyPort=$($proxy.Port)"}
-$env:JAVA_TOOL_OPTIONS=$javaOptions
+if($env:OS -eq 'Windows_NT'){
+    $proxy=[Net.WebRequest]::GetSystemWebProxy().GetProxy([uri]'https://dl.google.com')
+    $javaOptions='-Djavax.net.ssl.trustStoreType=Windows-ROOT -Djavax.net.ssl.trustStore=NONE'
+    if($proxy.Host -ne 'dl.google.com'){$javaOptions+=" -Dhttps.proxyHost=$($proxy.Host) -Dhttps.proxyPort=$($proxy.Port) -Dhttp.proxyHost=$($proxy.Host) -Dhttp.proxyPort=$($proxy.Port)"}
+    $env:JAVA_TOOL_OPTIONS=$javaOptions
+}
+New-Item -ItemType Directory -Path (Join-Path $root 'artifacts') -Force | Out-Null
 $sdkProperty='sdk.dir='+$env:ANDROID_HOME.Replace('\','/')
 [IO.File]::WriteAllText((Join-Path $root 'android/upstream/local.properties'),$sdkProperty,[Text.UTF8Encoding]::new($false))
 $task=':VyrnApp:assemble'+[char]::ToUpper($Flavor[0])+$Flavor.Substring(1)+[char]::ToUpper($BuildType[0])+$BuildType.Substring(1)
@@ -40,7 +49,7 @@ Push-Location (Join-Path $root 'android/upstream')
 try {
     $log=Join-Path $root '.local/android-build.log'
     # Keep builds responsive on the owner's PC: one worker, bounded JVM, no idle daemon.
-    & (Join-Path $env:JAVA_HOME 'bin/java.exe') -XX:ActiveProcessorCount=2 -classpath gradle/wrapper/gradle-wrapper.jar org.gradle.wrapper.GradleWrapperMain @tasks "-PVYRN_ABIS=$Abis" "-PVYRN_API_URL=$ApiUrl" "-PVYRN_LOCAL_TLS=$($LocalTest.IsPresent.ToString().ToLowerInvariant())" '-Dorg.gradle.jvmargs=-Xmx3g -XX:MaxMetaspaceSize=768m -XX:ActiveProcessorCount=2 -Dfile.encoding=UTF-8' --console=plain --no-daemon --no-parallel --max-workers=1 --no-watch-fs *> $log
+    & $java -XX:ActiveProcessorCount=2 -classpath gradle/wrapper/gradle-wrapper.jar org.gradle.wrapper.GradleWrapperMain @tasks "-PVYRN_ABIS=$Abis" "-PVYRN_API_URL=$ApiUrl" "-PVYRN_LOCAL_TLS=$($LocalTest.IsPresent.ToString().ToLowerInvariant())" '-Dorg.gradle.jvmargs=-Xmx3g -XX:MaxMetaspaceSize=768m -XX:ActiveProcessorCount=2 -Dfile.encoding=UTF-8' --console=plain --no-daemon --no-parallel --max-workers=1 --no-watch-fs *> $log
     if($LASTEXITCODE -ne 0){Get-Content -LiteralPath $log -Tail 75;throw 'Android build failed'}
     Get-Content -LiteralPath $log -Tail 5
 } finally { Pop-Location }
