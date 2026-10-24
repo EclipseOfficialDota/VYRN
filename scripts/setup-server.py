@@ -295,7 +295,8 @@ def owned_stack():
     containers = json.loads(run(['docker', 'inspect', *identifiers], capture=True))
     for container in containers:
         directory = container['Config']['Labels'].get('com.docker.compose.project.working_dir', '')
-        if not directory or Path(directory).resolve() != ROOT:
+        # Compose defaults to the first compose file's directory, not subprocess cwd.
+        if not directory or Path(directory).resolve() not in (ROOT, ROOT / 'deployment'):
             raise RuntimeError('Another VYRN deployment owns these containers. Use its checkout or the manual guide.')
     return any(c['Config']['Labels'].get('com.docker.compose.service') == 'caddy' and
                c['State']['Running'] for c in containers)

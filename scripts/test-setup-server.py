@@ -171,6 +171,16 @@ class SetupTests(unittest.TestCase):
         with patch.object(setup, 'check_engine'), patch.object(setup, 'run', side_effect=['abc123', json.dumps(foreign)]), self.assertRaises(RuntimeError):
             setup.owned_stack()
 
+    def test_compose_working_directories_belong_to_this_checkout(self):
+        for directory in (setup.ROOT, setup.ROOT / 'deployment'):
+            for running in (False, True):
+                containers = [{'Config': {'Labels': {
+                    'com.docker.compose.project.working_dir': str(directory),
+                    'com.docker.compose.service': 'caddy',
+                }}, 'State': {'Running': running}}]
+                with self.subTest(directory=directory, running=running), patch.object(setup, 'check_engine'), patch.object(setup, 'run', side_effect=['abc123', json.dumps(containers)]):
+                    self.assertEqual(setup.owned_stack(), running)
+
     def test_service_menu_rejects_remote_overrides_before_docker_calls(self):
         for variable in ('DOCKER_HOST', 'DOCKER_CONTEXT'):
             for choice in ('1', '2', '3'):
