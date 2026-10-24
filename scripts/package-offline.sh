@@ -17,6 +17,7 @@ for arch in amd64 arm64; do
     cp "$root/deployment/compose.yaml" "$root/deployment/compose.lite.yaml" "$root/deployment/Caddyfile" "$bundle/deployment/"
     cp "$root/admin/index.html" "$root/admin/app.js" "$root/admin/style.css" "$bundle/admin/"
     cp "$root/docs/DOCKER_LITE.md" "$bundle/README.md"
+    cp "$root/LICENSE" "$root/NOTICE.md" "$bundle/"
     printf '%s\n' "$core" > "$bundle/image.ref"
     if [[ $arch == amd64 ]]; then
         runtime="vyrn-runtime-${revision:0:12}.tar.gz"
@@ -35,10 +36,13 @@ for arch in amd64 arm64; do
     docker tag "$caddy" "$caddy_tag"
     printf 'services:\n  postgres:\n    image: %s\n  caddy:\n    image: %s\n' "$pg_tag" "$caddy_tag" > "$bundle/deployment/compose.offline.yaml"
     docker image save --output "$bundle/images.tar" "$core" "$pg_tag" "$caddy_tag"
-    (cd "$bundle" && sha256sum images.tar image.ref deployment/* admin/* > SHA256SUMS)
+    (cd "$bundle" && sha256sum images.tar image.ref LICENSE NOTICE.md deployment/* admin/* > SHA256SUMS)
     archive="vyrn-offline-$arch-${revision:0:12}.tar.gz"
     tar -C "$bundle" -czf "$output/$archive" .
     (cd "$output" && sha256sum "$archive" > "$archive.sha256")
+    # Classic Docker cannot rebind the same pinned index digest to a second CPU
+    # architecture. Drop only these digest aliases; our per-arch tags keep layers.
+    docker image rm "$postgres" "$caddy" >/dev/null
     rm -rf -- "$bundle"
     trap - EXIT
 done

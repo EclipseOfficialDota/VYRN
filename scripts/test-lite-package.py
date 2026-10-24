@@ -19,6 +19,8 @@ elif args[:2] == ['image', 'inspect']:
     print(state.read_text())
 elif args[:2] == ['image', 'save']:
     pathlib.Path(args[args.index('--output')+1]).write_bytes(b'packaging-test-only-not-an-image')
+elif args[:2] == ['image', 'rm']:
+    assert all('@sha256:' in ref for ref in args[2:])
 elif args[0] != 'tag':
     raise SystemExit('unexpected Docker operation')
 ''')
@@ -35,6 +37,7 @@ elif args[0] != 'tag':
             assert not any('runtime.env' in name or '.git' in name for name in names)
             assert './deployment/compose.lite.yaml' in names
             assert './admin/index.html' in names
+            assert './LICENSE' in names and './NOTICE.md' in names
             if 'offline' in archive.name:
                 assert './images.tar' in names
                 arch = 'amd64' if 'amd64' in archive.name else 'arm64'
