@@ -35,4 +35,13 @@ with tempfile.TemporaryDirectory() as directory:
     result = subprocess.run(['bash', str(script)], env=env, capture_output=True, text=True)
     assert result.returncode == 1 and 'x86_64' in result.stderr
     assert log.read_text().splitlines() == lines
+    (tools / 'uname').write_text('#!/bin/sh\necho x86_64\n')
+    (tools / 'curl').write_text('#!/bin/sh\nprintf "%s\\n" "$*" > "$CALLS.download"\nexit 22\n')
+    (tools / 'curl').chmod(0o755)
+    env['ANDROID_HOME'] = str(temp / 'missing-sdk')
+    result = subprocess.run(['bash', str(script)], env=env, capture_output=True, text=True)
+    assert result.returncode == 22
+    assert 'https://dl.google.com/android/repository/commandlinetools-linux-13114758_latest.zip' in Path(str(log) + '.download').read_text()
+    assert not (temp / 'missing-sdk').exists()
+    assert log.read_text().splitlines() == lines  # No build after a failed SDK download.
 print('PASS: Linux syntax, SDK license/package order, pinned source fetch, API forwarding and architecture guard')

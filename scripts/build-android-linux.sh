@@ -38,8 +38,8 @@ command -v pwsh >/dev/null || { echo 'Install PowerShell7 first; see docs/ANDROI
 if [[ ! -x $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager ]]; then
     temp=$(mktemp -d)
     trap 'rm -rf -- "$temp"' EXIT
-    curl --fail --location --proto '=https' https://dl.google.com/android/repository/commandlinetools-linux-15859902_latest.zip -o "$temp/sdk.zip"
-    echo "4e4c464f145a7512b57d088ac6c278c03c9eea610886b35a5e0804e74eedf583  $temp/sdk.zip" | sha256sum --check
+    curl --fail --location --retry 3 --connect-timeout 30 --proto '=https' https://dl.google.com/android/repository/commandlinetools-linux-13114758_latest.zip -o "$temp/sdk.zip"
+    echo "7ec965280a073311c339e571cd5de778b9975026cfcbe79f2b1cdcb1e15317ee  $temp/sdk.zip" | sha256sum --check
     unzip -q "$temp/sdk.zip" -d "$temp"
     mkdir -p "$ANDROID_HOME/cmdline-tools"
     [[ ! -e $ANDROID_HOME/cmdline-tools/latest ]] || { echo 'Existing incomplete SDK preserved; repair it manually.' >&2; exit 1; }
