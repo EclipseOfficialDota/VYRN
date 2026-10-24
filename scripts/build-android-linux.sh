@@ -38,9 +38,21 @@ command -v pwsh >/dev/null || { echo 'Install PowerShell7 first; see docs/ANDROI
 if [[ ! -x $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager ]]; then
     temp=$(mktemp -d)
     trap 'rm -rf -- "$temp"' EXIT
-    curl --fail --location --retry 3 --connect-timeout 30 --proto '=https' https://dl.google.com/android/repository/commandlinetools-linux-13114758_latest.zip -o "$temp/sdk.zip"
-    echo "7ec965280a073311c339e571cd5de778b9975026cfcbe79f2b1cdcb1e15317ee  $temp/sdk.zip" | sha256sum --check
-    unzip -q "$temp/sdk.zip" -d "$temp"
+    archive=${VYRN_ANDROID_TOOLS_ZIP:-"$PWD/.local/android/commandlinetools-linux-13114758_latest.zip"}
+    if [[ -f $archive ]]; then
+        echo 'Using local Android command-line tools archive.'
+    elif [[ -n ${VYRN_ANDROID_TOOLS_ZIP:-} ]]; then
+        echo 'VYRN_ANDROID_TOOLS_ZIP does not point to a regular archive file.' >&2
+        exit 1
+    else
+        archive="$temp/sdk.zip"
+        if ! curl --fail --location --retry 3 --connect-timeout 30 --proto '=https' https://dl.google.com/android/repository/commandlinetools-linux-13114758_latest.zip -o "$archive"; then
+            echo 'SDK download failed. Place the verified archive in .local/android/commandlinetools-linux-13114758_latest.zip and retry. See docs/ANDROID_TESTING.md.' >&2
+            exit 22
+        fi
+    fi
+    echo "7ec965280a073311c339e571cd5de778b9975026cfcbe79f2b1cdcb1e15317ee  $archive" | sha256sum --check
+    unzip -q "$archive" -d "$temp"
     mkdir -p "$ANDROID_HOME/cmdline-tools"
     [[ ! -e $ANDROID_HOME/cmdline-tools/latest ]] || { echo 'Existing incomplete SDK preserved; repair it manually.' >&2; exit 1; }
     mv -- "$temp/cmdline-tools" "$ANDROID_HOME/cmdline-tools/latest"

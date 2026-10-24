@@ -17,6 +17,10 @@ The opt-in flag installs build packages, including JDK21 and PowerShell7 via the
 
 Outputs are in `artifacts/*.apk`; the build log is `.local/android-build.log`. Download the APK using SFTP on your SSH port. Builds default to Debug, use one Gradle worker, no emulator and no persistent Gradle daemon. Allow several GiB RAM plus native compiler overhead and substantial disk space for the SDK, source and build cache; a small server capable of running Docker Lite may not have enough memory to build Android. This is a Linux build entry point, not evidence of a completed Linux APK build; the lightweight orchestration check is `python3 scripts/test-android-linux.py`. Final Release builds still require all four signing variables; do not put the keystore in the public checkout.
 
+### Local SDK tools archive
+
+If the build host cannot download Google's command-line tools, download the original `commandlinetools-linux-13114758_latest.zip` from Google on a machine with access and transfer it privately via SFTP into `.local/android/` in your checkout. The build menu and Linux script automatically prefer that local file and verify SHA-256 `7ec965280a073311c339e571cd5de778b9975026cfcbe79f2b1cdcb1e15317ee` before extraction. A corrupt local file fails closed without downloading a replacement. `VYRN_ANDROID_TOOLS_ZIP` can select another local file. The archive remains ignored by Git; SDK licenses still require acceptance. Do not republish the SDK archive as a project release: Google's SDK license restricts redistribution. This only supplies the command-line tools, not the SDK platforms, NDK, Gradle or Maven dependencies; those still require network access or separately prepared local caches.
+
 ## Normal build
 
 ```powershell

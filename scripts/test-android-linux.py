@@ -2,6 +2,7 @@
 import os
 from pathlib import Path
 import subprocess
+import shutil
 import tempfile
 
 root = Path(__file__).resolve().parents[1]
@@ -9,6 +10,10 @@ script = root / 'scripts/build-android-linux.sh'
 subprocess.run(['bash', '-n', str(script)], check=True)
 with tempfile.TemporaryDirectory() as directory:
     temp = Path(directory)
+    copied_script = temp / 'checkout/scripts/build-android-linux.sh'
+    copied_script.parent.mkdir(parents=True)
+    shutil.copyfile(script, copied_script)
+    script = copied_script
     log = temp / 'calls'
     tools = temp / 'bin'
     tools.mkdir()
@@ -44,4 +49,14 @@ with tempfile.TemporaryDirectory() as directory:
     assert 'https://dl.google.com/android/repository/commandlinetools-linux-13114758_latest.zip' in Path(str(log) + '.download').read_text()
     assert not (temp / 'missing-sdk').exists()
     assert log.read_text().splitlines() == lines  # No build after a failed SDK download.
+    downloads = Path(str(log) + '.download').read_text()
+    archive = temp / 'checkout/.local/android/commandlinetools-linux-13114758_latest.zip'
+    archive.parent.mkdir(parents=True)
+    archive.write_bytes(b'corrupt archive')
+    result = subprocess.run(['bash', str(script)], env=env, capture_output=True, text=True)
+    assert result.returncode != 0 and 'Using local Android' in result.stdout
+    assert archive.read_bytes() == b'corrupt archive'
+    assert not (temp / 'missing-sdk').exists()
+    assert Path(str(log) + '.download').read_text() == downloads
+    assert log.read_text().splitlines() == lines
 print('PASS: Linux syntax, SDK license/package order, pinned source fetch, API forwarding and architecture guard')
