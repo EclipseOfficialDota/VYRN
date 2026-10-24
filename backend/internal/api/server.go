@@ -19,14 +19,15 @@ import (
 )
 
 type Config struct {
-	AdminDir        string
-	MediaDir        string
-	MinFreeBytes    uint64
-	UploadLimit     int64
-	QuotaBytes      int64
-	AdminTOTPSecret string
-	AllowedOrigin   string
-	TrustedProxy    *net.IPNet
+	PasswordConcurrency int
+	AdminDir            string
+	MediaDir            string
+	MinFreeBytes        uint64
+	UploadLimit         int64
+	QuotaBytes          int64
+	AdminTOTPSecret     string
+	AllowedOrigin       string
+	TrustedProxy        *net.IPNet
 }
 
 type Server struct {
@@ -51,6 +52,12 @@ type Principal struct {
 type contextKey struct{}
 
 func New(db *pgxpool.Pool, cfg Config, logger *slog.Logger) (*Server, error) {
+	if cfg.PasswordConcurrency == 0 {
+		cfg.PasswordConcurrency = 2
+	}
+	if cfg.PasswordConcurrency < 1 || cfg.PasswordConcurrency > 2 {
+		return nil, errors.New("password concurrency must be 1 or 2")
+	}
 	dummy, err := security.HashPassword("constant timing placeholder, never a user password")
 	if err != nil {
 		return nil, err
@@ -61,7 +68,7 @@ func New(db *pgxpool.Pool, cfg Config, logger *slog.Logger) (*Server, error) {
 	if cfg.QuotaBytes == 0 {
 		cfg.QuotaBytes = 2 << 30
 	}
-	return &Server{db: db, cfg: cfg, log: logger, passwordSlots: make(chan struct{}, 2), uploadSlots: make(chan struct{}, 2), dummyHash: dummy, limiter: NewLimiter()}, nil
+	return &Server{db: db, cfg: cfg, log: logger, passwordSlots: make(chan struct{}, cfg.PasswordConcurrency), uploadSlots: make(chan struct{}, 2), dummyHash: dummy, limiter: NewLimiter()}, nil
 }
 
 func (s *Server) Handler() http.Handler {

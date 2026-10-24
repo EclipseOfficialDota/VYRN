@@ -6,6 +6,7 @@ import (
 	"embed"
 	"fmt"
 	"io/fs"
+	"net/url"
 	"sort"
 
 	"github.com/jackc/pgx/v5"
@@ -15,13 +16,33 @@ import (
 //go:embed migrations/*.sql
 var migrations embed.FS
 
-func Open(ctx context.Context, url string) (*pgxpool.Pool, error) {
-	cfg, err := pgxpool.ParseConfig(url)
+func poolConfig(connection string) (*pgxpool.Config, error) {
+	cfg, err := pgxpool.ParseConfig(connection)
 	if err != nil {
 		return nil, fmt.Errorf("invalid database configuration")
 	}
-	cfg.MaxConns = 12
-	cfg.MinConns = 1
+	parsed, _ := url.Parse(connection)
+	query := url.Values{}
+	if parsed != nil && (parsed.Scheme == "postgres" || parsed.Scheme == "postgresql") {
+		query = parsed.Query()
+	}
+	if !query.Has("pool_max_conns") {
+		cfg.MaxConns = 12
+	}
+	if !query.Has("pool_min_conns") {
+		cfg.MinConns = 1
+	}
+	if cfg.MinConns > cfg.MaxConns {
+		return nil, fmt.Errorf("minimum pool size exceeds maximum")
+	}
+	return cfg, nil
+}
+
+func Open(ctx context.Context, connection string) (*pgxpool.Pool, error) {
+	cfg, err := poolConfig(connection)
+	if err != nil {
+		return nil, err
+	}
 	return pgxpool.NewWithConfig(ctx, cfg)
 }
 

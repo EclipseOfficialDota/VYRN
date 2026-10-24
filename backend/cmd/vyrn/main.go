@@ -2,8 +2,11 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/tls"
+	"encoding/base32"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net"
 	"net/http"
@@ -26,6 +29,29 @@ func main() {
 	}
 }
 func run() error {
+	if len(os.Args) == 2 && os.Args[1] == "token" {
+		token, err := security.Token()
+		if err == nil {
+			_, err = fmt.Fprintln(os.Stdout, token)
+		}
+		return err
+	}
+	if len(os.Args) == 2 && os.Args[1] == "init-env" {
+		password, err := security.Token()
+		if err != nil {
+			return err
+		}
+		secret := make([]byte, 20)
+		if _, err = rand.Read(secret); err != nil {
+			return err
+		}
+		image := os.Getenv("VYRN_IMAGE")
+		if image == "" {
+			image = "ghcr.io/eclipseofficialdota/vyrn-lite:preview"
+		}
+		_, err = fmt.Fprintf(os.Stdout, "VYRN_IMAGE=%s\nVYRN_DOMAIN=\nVYRN_ADMIN_ALLOWED_CIDRS=127.0.0.1/32\nPOSTGRES_PASSWORD=%s\nVYRN_ADMIN_TOTP_SECRET=%s\n", image, password, base32.StdEncoding.EncodeToString(secret))
+		return err
+	}
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 	slog.SetDefault(logger)
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -108,7 +134,14 @@ func run() error {
 			return errors.New("invalid_proxy_network")
 		}
 	}
-	server, err := api.New(db, api.Config{AdminDir: os.Getenv("VYRN_ADMIN_DIR"), MediaDir: media, MinFreeBytes: reserve, AdminTOTPSecret: os.Getenv("VYRN_ADMIN_TOTP_SECRET"), AllowedOrigin: os.Getenv("VYRN_ADMIN_ORIGIN"), TrustedProxy: proxy}, logger)
+	passwordConcurrency := 2
+	if value := os.Getenv("VYRN_PASSWORD_CONCURRENCY"); value != "" {
+		passwordConcurrency, err = strconv.Atoi(value)
+		if err != nil || passwordConcurrency < 1 || passwordConcurrency > 2 {
+			return errors.New("invalid_password_concurrency")
+		}
+	}
+	server, err := api.New(db, api.Config{PasswordConcurrency: passwordConcurrency, AdminDir: os.Getenv("VYRN_ADMIN_DIR"), MediaDir: media, MinFreeBytes: reserve, AdminTOTPSecret: os.Getenv("VYRN_ADMIN_TOTP_SECRET"), AllowedOrigin: os.Getenv("VYRN_ADMIN_ORIGIN"), TrustedProxy: proxy}, logger)
 	if err != nil {
 		return errors.New("api_initialization")
 	}

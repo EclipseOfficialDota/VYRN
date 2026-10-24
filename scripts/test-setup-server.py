@@ -558,18 +558,23 @@ class SetupTests(unittest.TestCase):
         self.assertTrue(json.loads((self.config.parent/'setup-state.json').read_text())['complete'])
 
 
-def integration():
+def integration(lite=False):
     """Real CLI bootstrap/migrations, restart and preservation; no public DNS/TLS or host install."""
     project = 'vyrn-setup-ci-' + uuid.uuid4().hex[:12]
     with tempfile.TemporaryDirectory() as temp:
         config = Path(temp) / 'runtime.env'
-        config.write_text('VYRN_DOMAIN=chat.test-domain.org\nPOSTGRES_PASSWORD=isolated-ci-only\nVYRN_ADMIN_TOTP_SECRET=JBSWY3DPEHPK3PXP\nVYRN_ADMIN_ALLOWED_CIDRS=127.0.0.1/32\n')
+        image = 'vyrn-core:lite-ci' if lite else 'vyrn-core:ci'
+        config.write_text(f'VYRN_IMAGE={image}\nVYRN_DOMAIN=chat.test-domain.org\nPOSTGRES_PASSWORD=isolated-ci-only\nVYRN_ADMIN_TOTP_SECRET=JBSWY3DPEHPK3PXP\nVYRN_ADMIN_ALLOWED_CIDRS=127.0.0.1/32\n')
         config.chmod(0o600)
         override = Path(temp) / 'compose.yaml'
-        override.write_text('services:\n  core:\n    image: vyrn-core:ci\n')
+        override.write_text(f'services:\n  core:\n    image: {image}\n')
+        files = ['-f', str(setup.ROOT/'deployment/compose.yaml')]
+        if lite:
+            files += ['-f', str(setup.ROOT/'deployment/compose.lite.yaml')]
+        files += ['-f', str(override)]
         def compose(*arguments, **options):
             return setup.run(['docker', 'compose', '--project-name', project, '--env-file', str(config),
-                              '-f', str(setup.ROOT/'deployment/compose.yaml'), '-f', str(override), *arguments], **options)
+                              *files, *arguments], **options)
         with patch.object(setup, 'compose', side_effect=compose):
             try:
                 compose('up', '-d', '--wait', 'postgres')
@@ -583,15 +588,26 @@ def integration():
                 compose('stop', 'core')
                 setup.start_existing('core')
                 print('PASS: real bootstrap, migrations, Core health, existing-account preservation and restart')
+                if lite:
+                    identifiers = compose('ps', '-q', 'core', 'postgres', capture=True).split()
+                    samples = []
+                    for _ in range(3):
+                        setup.time.sleep(10)
+                        output = setup.run(['docker', 'stats', '--no-stream', '--format', '{{json .}}', *identifiers], capture=True)
+                        samples.append([json.loads(line) for line in output.splitlines()])
+                    destination = setup.ROOT / 'artifacts/lite-runtime.json'
+                    destination.parent.mkdir(exist_ok=True)
+                    destination.write_text(json.dumps({'scope': 'Core/PostgreSQL after bootstrap and restart; idle samples, not a capacity benchmark; no Caddy or host overhead', 'samples': samples}, indent=2))
+                    print('PASS: Lite bootstrap/health/restart under container limits; idle samples recorded')
             finally:
                 # Only this disposable uniquely named CI project may lose its volumes.
                 subprocess.run(['docker', 'compose', '--project-name', project, '--env-file', str(config),
-                                '-f', str(setup.ROOT/'deployment/compose.yaml'), '-f', str(override),
+                                *files,
                                 'down', '--volumes'], cwd=setup.ROOT, check=True, timeout=120)
 
 
 if __name__ == '__main__':
     if '--integration' in sys.argv:
-        integration()
+        integration(lite='--lite' in sys.argv)
     else:
         unittest.main()

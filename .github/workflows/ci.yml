@@ -29,18 +29,23 @@ jobs:
         run: bash -n setup.sh scripts/backup.sh scripts/restore-smoke.sh
       - name: Check interactive setup contracts offline
         run: python3 scripts/test-setup-server.py
+      - name: Check offline distribution packaging without a daemon
+        run: python3 scripts/test-lite-package.py
       - name: Check DNS planning without external requests
         shell: pwsh
         run: ./scripts/test-cloudflare-dns.ps1
       - name: Validate custom-domain self-host configuration
         env:
           VYRN_DOMAIN: chat.example.com
+          VYRN_IMAGE: vyrn-core:ci
           POSTGRES_PASSWORD: disposable-config-check-only
           VYRN_ADMIN_TOTP_SECRET: JBSWY3DPEHPK3PXP
           VYRN_ADMIN_ALLOWED_CIDRS: 192.0.2.10/32
         run: |
           docker compose -f deployment/compose.yaml config -q
           docker compose -f deployment/compose.yaml -f deployment/compose.setup-proxy.yaml config -q
+          docker compose -f deployment/compose.yaml -f deployment/compose.lite.yaml config -q
+          python3 scripts/test-lite-compose.py
           docker run --rm --network none --memory 128m --cpus 1 \
             -e VYRN_DOMAIN -e VYRN_ADMIN_ALLOWED_CIDRS \
             -v "$PWD/deployment/Caddyfile:/etc/caddy/Caddyfile:ro" \
@@ -97,9 +102,54 @@ jobs:
       - name: Check real installer bootstrap and data preservation
         working-directory: .
         run: python3 scripts/test-setup-server.py --integration
+      - name: Exercise Lite runtime and record scoped idle samples
+        working-directory: .
+        run: |
+          docker build --tag vyrn-core:lite-ci --file backend/Dockerfile.lite backend
+          python3 scripts/test-setup-server.py --integration --lite
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: lite-runtime-samples
+          path: artifacts/lite-runtime.json
+          retention-days: 7
+          if-no-files-found: error
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: backend-coverage
           path: backend/coverage.out
           retention-days: 7
           if-no-files-found: error
+
+  publish-containers:
+    needs: [repository, backend]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    permissions:
+      contents: write
+      packages: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Publish tested source for AMD64 and ARM64
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          printf '%s' "$GH_TOKEN" | docker login ghcr.io -u "$GITHUB_REPOSITORY_OWNER" --password-stdin
+          docker buildx create --name vyrn-publish --driver docker-container --use
+          docker buildx build --platform linux/amd64,linux/arm64 --file backend/Dockerfile.lite \
+            --tag ghcr.io/eclipseofficialdota/vyrn-lite:sha-$GITHUB_SHA \
+            --tag ghcr.io/eclipseofficialdota/vyrn-lite:preview --push backend
+      - name: Package all runtime images for offline transfer
+        run: bash scripts/package-offline.sh "$GITHUB_SHA" artifacts/offline
+      - name: Publish server preview bundles
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          printf '%s\n' 'Server container development preview; this is not a Stable Android release.' \
+            'Bundles include Core, PostgreSQL and Caddy images, Compose files, public admin assets and checksums for offline installation.' \
+            'See docs/DOCKER_LITE.md for setup, resource limits and validation scope.' > artifacts/offline/release-notes.md
+          gh release create "containers-${GITHUB_SHA:0:12}" artifacts/offline/*.tar.gz artifacts/offline/*.sha256 \
+            --target "$GITHUB_SHA" --prerelease --title "Docker preview ${GITHUB_SHA:0:12}" \
+            --notes-file artifacts/offline/release-notes.md

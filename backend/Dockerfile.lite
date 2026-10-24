@@ -1,0 +1,18 @@
+FROM --platform=$BUILDPLATFORM golang:1.26.10-alpine@sha256:9ce231b28998b32e116927c61aa5c406183061d4f3f2d61b292c88e7f6bdf7ca AS build
+ARG TARGETOS=linux
+ARG TARGETARCH=amd64
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+RUN apk add --no-cache ca-certificates tzdata && mkdir /runtime-media && chown 10001:10001 /runtime-media
+RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -ldflags='-s -w' -o /vyrn ./cmd/vyrn
+FROM alpine:3.22@sha256:5291449c3df73caf6ed85e649dec1b9e818b39a5d8c871e97afc13e9cd5e8fa8
+LABEL org.opencontainers.image.source="https://github.com/EclipseOfficialDota/VYRN"
+COPY --from=build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
+COPY --from=build /usr/share/zoneinfo /usr/share/zoneinfo
+COPY --from=build --chown=10001:10001 /runtime-media /media
+COPY --from=build /vyrn /usr/local/bin/vyrn
+USER 10001:10001
+EXPOSE 8080
+ENTRYPOINT ["/usr/local/bin/vyrn"]

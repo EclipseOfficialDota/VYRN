@@ -58,6 +58,15 @@ restricted proxy and certificate renewal, and restores the previous proxy file o
 [Wizard guide](docs/SETUP_WIZARD.md) ·
 [Manual setup, existing proxies and upgrades](docs/DEPLOYMENT.md).
 
+### Optional Docker Lite — alongside the original
+
+The original installer/menu and source build remain supported. [Docker Lite](docs/DOCKER_LITE.md)
+is a separate image-only option for small workloads: prebuilt AMD64/ARM64 images,
+smaller runtime budgets, and architecture-specific offline image bundles. It uses its own
+project/volumes/network; it does not migrate or replace existing installations.
+Container publication follows passing CI. See [server preview bundles](https://github.com/EclipseOfficialDota/VYRN/releases)
+and the guide for registry availability, offline TLS limits and measured validation scope.
+
 Each installation has its own accounts. VYRN does not connect to Telegram or federate
 with other VYRN servers.
 

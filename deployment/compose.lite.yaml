@@ -1,0 +1,43 @@
+# Docker Compose 2.24.4+; prebuilt runtime only, never compile on the server.
+name: vyrn-lite
+services:
+  postgres:
+    command: [postgres, -c, shared_buffers=32MB, -c, max_connections=16, -c, work_mem=1MB, -c, maintenance_work_mem=16MB, -c, autovacuum_max_workers=1, -c, wal_buffers=4MB]
+    mem_limit: 192m
+    cpus: 0.5
+    healthcheck:
+      interval: 30s
+    logging:
+      driver: json-file
+      options: {max-size: "2m", max-file: "2"}
+  core:
+    build: !reset null
+    image: ${VYRN_IMAGE:?Set VYRN_IMAGE to the tested published image tag or digest}
+    pull_policy: missing
+    environment:
+      DATABASE_URL: postgres://vyrn:${POSTGRES_PASSWORD}@postgres:5432/vyrn?sslmode=disable&pool_max_conns=4&pool_min_conns=0
+      GOMEMLIMIT: 192MiB
+      GOMAXPROCS: "1"
+      VYRN_PASSWORD_CONCURRENCY: "1"
+      VYRN_TRUSTED_PROXY: 172.29.71.0/24
+    mem_limit: 256m
+    cpus: 1.0
+    healthcheck:
+      interval: 30s
+    logging:
+      driver: json-file
+      options: {max-size: "2m", max-file: "2"}
+  caddy:
+    environment:
+      VYRN_DOMAIN: ${VYRN_DOMAIN:?Set your service domain in runtime.env}
+      GOMEMLIMIT: 64MiB
+      GOMAXPROCS: "1"
+    mem_limit: 96m
+    cpus: 0.25
+    logging:
+      driver: json-file
+      options: {max-size: "2m", max-file: "2"}
+networks:
+  edge:
+    ipam:
+      config: !override [{subnet: 172.29.71.0/24}]
