@@ -14,6 +14,7 @@ import socket
 import stat
 import subprocess
 import sys
+import tempfile
 import time
 import urllib.error
 import urllib.request
@@ -429,7 +430,7 @@ def https_check(values, attempts=1):
         if attempt + 1 < attempts:
             time.sleep(5)
     print('HTTPS not ready. Check DNS, inbound80/443, certificates and Core; no TLS bypass is used.')
-    print('Next: run Diagnostics and DNS / records. For host Nginx, use Repair Core + Nginx HTTPS (12); other proxies use the Proxy setup guide.')
+    print('Next: use Domain and HTTPS or the failed-stage repair action. Host Nginx can use Diagnose and repair > Repair Core and host Nginx HTTPS.')
     return False
 
 
@@ -448,8 +449,90 @@ def links(values):
 
 
 def install():
-    host_check()
-    docker_ready()
+    try:
+        setup_step('1/6  Check this server', host_check)
+        setup_step('2/6  Prepare Docker', docker_ready, start_docker, 'Start the local Docker engine')
+        values = setup_step('3/6  Configure this instance', configure_instance)
+        address = public_ip(values['VYRN_PUBLIC_IPV4']) if values.get('VYRN_PUBLIC_IPV4') else ask('Server public IPv4', public_ip)
+        def verify_dns():
+            if not dns_check(values, address):
+                raise RuntimeError('DNS is not ready. Point every displayed hostname to this server and check stale AAAA records.')
+        setup_step('4/6  Connect your domain', verify_dns,
+                   lambda: cloudflare_dns(values, address), 'Create missing DNS records with Cloudflare')
+        setup_step('5/6  Build and start your backend', lambda: ensure_backend(values))
+        def verify_https():
+            if not https_check(values):
+                raise RuntimeError('Public HTTPS still needs attention. Backend startup alone does not configure an existing proxy.')
+        repair = repair_nginx if values.get('VYRN_PROXY_MODE') == 'existing' else lambda: compose('up', '-d', '--no-build', '--wait', 'core', 'caddy')
+        label = 'Configure / repair host Nginx and HTTPS' if values.get('VYRN_PROXY_MODE') == 'existing' else 'Start / reconcile Core and Caddy'
+        setup_step('6/6  Verify public HTTPS', verify_https, repair, label)
+        save_progress('Setup completed', complete=True)
+        screen('Setup complete')
+        print(color('READY  Backend and public HTTPS verified.', '1;32'))
+        authenticator(values)
+        links(values)
+    except SetupPaused:
+        print(color('Setup paused. Correct the prerequisite and choose Resume setup; existing data and secrets remain.', '33'))
+
+
+class SetupPaused(Exception):
+    pass
+
+
+def save_progress(stage, *, complete=False):
+    if not CONFIG.exists():
+        return
+    private_directory()
+    # Store only stage/status metadata, never exception text, inputs or secrets.
+    with tempfile.NamedTemporaryFile(mode='w', dir=CONFIG.parent, delete=False, encoding='utf-8') as target:
+        json.dump({'stage': stage, 'complete': complete, 'checked_at': time.strftime('%Y-%m-%d %H:%M UTC', time.gmtime())}, target)
+        name = target.name
+    os.replace(name, CONFIG.parent / 'setup-state.json')
+
+
+def setup_step(title, action, repair=None, repair_label=''):
+    while True:
+        screen('Easy setup  /  ' + title)
+        try:
+            save_progress(title)
+            result = action()
+            print(color('PASS  ' + title, '32'), flush=True)
+            return result
+        except (RuntimeError, OSError, ValueError) as error:
+            show_error(error)
+        while True:
+            print('\n  1  Retry this step\n  2  Run read-only diagnostics')
+            if repair:
+                print('  3  ' + repair_label)
+            print('  0  Pause setup and return')
+            choice = choice_input()
+            if choice in ('', '0'):
+                raise SetupPaused()
+            if choice == '1':
+                break
+            if choice not in ('2', '3') or (choice == '3' and repair is None):
+                continue
+            try:
+                if choice == '2':
+                    diagnostics()
+                else:
+                    repair()
+                    break  # Verify the original condition again; a repair is not proof.
+            except (RuntimeError, OSError, ValueError) as error:
+                show_error(error)
+
+
+def start_docker():
+    if os.environ.get('DOCKER_HOST') or os.environ.get('DOCKER_CONTEXT'):
+        raise RuntimeError('Unset DOCKER_HOST/DOCKER_CONTEXT before local Docker repair.')
+    endpoint = run(['docker', 'context', 'inspect', '--format', '{{.Endpoints.docker.Host}}'], capture=True, timeout=15)
+    if not endpoint.startswith('unix://'):
+        raise RuntimeError('Select a local Unix-socket Docker context before repair.')
+    run(['systemctl', 'start', 'docker'], timeout=60)
+    check_engine()
+
+
+def configure_instance():
     running_proxy = owned_stack()
     existing_proxy = False
     if CONFIG.exists() or CONFIG.is_symlink():
@@ -464,7 +547,7 @@ def install():
                 print('Existing-proxy mode builds PostgreSQL/Core only, bound to 127.0.0.1:18080.')
                 print('You must configure HTTPS and restricted admin access in your current proxy; it will not be edited automatically.')
                 if not yes('Continue using the existing reverse proxy?'):
-                    return
+                    raise SetupPaused()
                 existing_proxy = True
         name = ask('Service domain, e.g. chat.yourdomain.com', domain)
         address = ask('Server public IPv4', public_ip)
@@ -473,7 +556,7 @@ def install():
         allowed = ask('Your administrator IP or VPN CIDRs (space separated)', cidrs, default)
         print(f'\nDomain: {name}\nServer: {address}\nAdmin network: {allowed}\nConfig: {CONFIG}')
         if not yes('Save settings and set up this instance?'):
-            return
+            raise SetupPaused()
         values = dict(VYRN_DOMAIN=name, VYRN_PUBLIC_IPV4=address, VYRN_ADMIN_ALLOWED_CIDRS=allowed,
                       VYRN_PROXY_MODE='existing' if existing_proxy else 'standalone',
                       POSTGRES_PASSWORD=secrets.token_hex(32),
@@ -481,25 +564,7 @@ def install():
         write_config(values)
     if values.get('VYRN_PROXY_MODE') != 'existing' and not running_proxy:
         free_ports()
-    address = public_ip(values['VYRN_PUBLIC_IPV4']) if values.get('VYRN_PUBLIC_IPV4') else ask('Server public IPv4 for DNS checks', public_ip)
-    cloudflare_dns(values, address)
-    print('\nCreate these DNS-only A records; remove broken AAAA records. Allow80/443 at the provider/host.')
-    for prefix in HOSTS:
-        print(f'  {prefix}{values["VYRN_DOMAIN"]}  →  {address}')
-    while True:
-        input('After saving DNS records, press Enter to check. ')
-        if dns_check(values, address):
-            break
-        if not yes('DNS is not ready. Retry?'):
-            return
-    ensure_backend(values)
-    if values.get('VYRN_PROXY_MODE') == 'existing':
-        print('For automatic host-Nginx setup, choose Repair Core + Nginx HTTPS (option 12).')
-        proxy_help(values)
-    ready = https_check(values, attempts=8)
-    print('Services started; public HTTPS verified.' if ready else 'Services started; public HTTPS still needs attention.')
-    authenticator(values)
-    links(values)
+    return values
 
 
 def ensure_backend(values):
@@ -669,6 +734,7 @@ def repair_nginx():
         except (RuntimeError, OSError):
             print(color('RESTORE NEEDS ATTENTION: previous site file is restored, but Nginx validation/reload failed. Run nginx -t and systemctl status nginx.', '1;31'))
         raise
+    save_progress('Nginx repair completed', complete=True)
     print(color('REPAIRED: Core ready, public HTTPS verified and certificate renewal timer enabled.', '1;32'))
     links(values)
 
@@ -697,9 +763,9 @@ def show_error(error):
     if isinstance(error, FileNotFoundError) and not CONFIG.exists():
         solution = 'No instance settings found. Choose Install / resume setup first. Do not copy settings from another server.'
     elif 'nginx' in text and ('foreign' in text or 'conflict' in text):
-        solution = 'An existing site/configuration overlaps these hostnames. It was not replaced. Inspect nginx -T privately and migrate that site before retrying option 12.'
+        solution = 'An existing site/configuration overlaps these hostnames. It was not replaced. Inspect nginx -T privately and migrate that site before retrying Nginx repair.'
     elif 'nginx' in text or 'certbot' in text or 'certificate' in text or 'https' in text:
-        solution = 'Use Repair Core + Nginx HTTPS (12) for an active host Nginx. Check Core readiness, all seven DNS records, stale AAAA records and inbound TCP 80/443. Failed repairs restore the previous VYRN Nginx file; certificates/data are retained.'
+        solution = 'Use the failed-stage repair action or Diagnose and repair > Repair Core and host Nginx HTTPS. Check Core readiness, DNS/AAAA and inbound TCP 80/443. Failed repairs restore the previous VYRN Nginx file; certificates/data are retained.'
     elif 'port' in text and 'occupied' in text:
         solution = 'Open Diagnostics to identify the listener. For an existing proxy, use the Proxy setup guide and existing-proxy install mode.'
     elif 'docker_host' in text or 'context' in text or 'unix-socket' in text:
@@ -714,7 +780,7 @@ def show_error(error):
         solution = 'Check DNS/internet and apt repository errors. Wait for other apt/dpkg processes; never delete lock files. Correct repositories, then retry.'
     elif 'private' in text or 'runtime' in text or 'missing vyrn' in text:
         solution = 'Inspect /etc/vyrn ownership and permissions locally: directory 0700, runtime.env 0600, owned by root. Do not print or regenerate existing secrets.'
-    elif 'cloudflare' in text or 'dns conflict' in text:
+    elif 'cloudflare' in text or 'dns' in text:
         solution = 'Check the zone ID, token DNS-edit scope and the displayed hostname. Resolve conflicting A/AAAA/proxy records in your provider; existing records were preserved.'
     elif 'gib' in text or 'space' in text:
         solution = 'Inspect df -h and docker system df. Free reviewed unused files or enlarge the disk; do not delete volumes to make space.'
@@ -786,6 +852,121 @@ def remove():
     print('Services removed. Data and settings retained; option 1 reinstalls them.')
 
 
+def instance_state():
+    state = {'kind': 'new', 'values': None, 'core': 'Not installed', 'database': 'Not installed',
+             'proxy': 'Not installed', 'https': 'Not verified', 'stage': '', 'has_services': False, 'error': ''}
+    if not CONFIG.exists() and not CONFIG.is_symlink():
+        return state
+    state['kind'] = 'incomplete'
+    try:
+        state['values'] = settings()
+        expected = set(services(state['values']))
+        if state['values'].get('VYRN_PROXY_MODE') == 'existing':
+            state['proxy'] = 'Host proxy (use HTTPS check)'
+        journal = CONFIG.parent / 'setup-state.json'
+        progress = json.loads(journal.read_text()) if journal.is_file() and not journal.is_symlink() else {}
+        state['stage'] = str(progress.get('stage', 'Verify the existing installation'))
+        if progress.get('complete'):
+            state['https'] = 'Last verified: ' + str(progress.get('checked_at', 'unknown'))
+        owned_stack()  # Local endpoint and checkout ownership before reading services.
+        identifiers = compose('ps', '-aq', *services(state['values']), capture=True).split()
+        state['has_services'] = bool(identifiers)
+        containers = json.loads(run(['docker', 'inspect', *identifiers], capture=True, timeout=15)) if identifiers else []
+        healthy = set()
+        for container in containers:
+            service = container['Config']['Labels'].get('com.docker.compose.service')
+            if service not in expected:
+                continue
+            status = container['State']
+            text = status.get('Health', {}).get('Status', 'running') if status.get('Running') else 'stopped'
+            state[{'postgres': 'database', 'core': 'core', 'caddy': 'proxy'}[service]] = text.capitalize()
+            if status.get('Running') and status.get('Health', {}).get('Status', 'healthy' if service == 'caddy' else 'unknown') == 'healthy':
+                healthy.add(service)
+        if healthy == expected and progress.get('complete'):
+            state['kind'] = 'installed'
+    except (RuntimeError, OSError, ValueError, KeyError, TypeError) as error:
+        state['error'] = str(error)
+    return state
+
+
+def section(title, actions):
+    screen(title)
+    for key, (label, _) in actions.items():
+        print('  ' + color(key, '1;36') + '  ' + label)
+    print('  0  Back')
+    choice = choice_input()
+    if choice in actions:
+        label, action = actions[choice]
+        screen(label)
+        action()
+    elif choice not in ('', '0'):
+        print('Choose one of the displayed options.')
+
+
+def service_controls(values):
+    def control(verb):
+        owned_stack()
+        if verb == 'start':
+            start_existing(*services(values))
+        elif yes('Stop this instance? Accounts, messages and files will be retained.'):
+            compose('stop', *reversed(services(values)))
+    section('Services', {'1': ('Show service status', lambda: (owned_stack(), compose('ps'))),
+                         '2': ('Start retained services', lambda: control('start')),
+                         '3': ('Stop services, keep data', lambda: control('stop'))})
+
+
+def repair_menu():
+    section('Diagnose and repair', {'1': ('Read-only diagnostics', diagnostics),
+                                   '2': ('Resume guided setup / retry failed stages', install),
+                                   '3': ('Repair Core and host Nginx HTTPS', repair_nginx),
+                                   '4': ('Start local Docker engine', start_docker)})
+
+
+def domain_controls(values):
+    section('Domain and HTTPS', {'1': ('Check DNS and display required records', lambda: dns_menu(values)),
+                                '2': ('Create missing DNS records with Cloudflare', lambda: cloudflare_dns(values, public_ip(values.get('VYRN_PUBLIC_IPV4', '')))),
+                                '3': ('Verify public HTTPS', lambda: https_check(values)),
+                                '4': ('Repair host Nginx HTTPS', repair_nginx),
+                                '5': ('Manual proxy integration guide', lambda: proxy_help(values))})
+
+
+def admin_access(values):
+    def details():
+        print('Use your own administrator email/password created during initial setup. There is no default password.')
+        print('Enter the current six-digit authenticator code on the verification screen, not the setup key.')
+        links(values)
+    section('Administrator access', {'1': ('Control URL and client connection details', details),
+                                     '2': ('Privately enroll the authenticator', lambda: authenticator(values))})
+
+
+def help_panel():
+    print('Easy install checks this server, prepares Docker, saves private settings, connects DNS, starts the backend and verifies HTTPS.')
+    print('A failed stage offers retry, diagnostics and a relevant repair where available. Returning later rechecks conditions; existing accounts/secrets are kept.')
+    print('A repair is always rechecked before the wizard advances. DNS/provider/firewall faults can require operator action.')
+    print('Backups/restore and source upgrades remain documented workflows; they are not shown as unimplemented menu buttons.')
+    print('Guide: https://github.com/EclipseOfficialDota/VYRN/blob/main/docs/SETUP_WIZARD.md')
+
+
+def dashboard_actions(state):
+    if state['kind'] == 'new':
+        return {'1': ('Easy install', install), '2': ('Check this server', diagnostics), '3': ('Setup help', help_panel)}
+    values = state['values']
+    actions = {'1': ('Connection details' if state['kind'] == 'installed' else 'Resume setup / finish verification',
+                     (lambda: links(values)) if state['kind'] == 'installed' else install),
+               '2': ('Diagnose and repair', repair_menu)}
+    if values:
+        actions['4'] = ('Domain and HTTPS', lambda: domain_controls(values))
+        if state['has_services']:
+            actions['3'] = ('Service controls', lambda: service_controls(values))
+            actions['8'] = ('Remove services (keep data)', remove)
+        if state['core'] in ('Healthy', 'Running'):
+            actions['5'] = ('Administrator access', lambda: admin_access(values))
+        if state['kind'] == 'installed':
+            actions['6'] = ('Run guided setup checks again', install)
+    actions['9'] = ('Help and limitations', help_panel)
+    return dict(sorted(actions.items(), key=lambda pair: int(pair[0])))
+
+
 def main():
     parser = argparse.ArgumentParser(description='VYRN beginner setup and terminal control panel (Ubuntu/Debian).')
     parser.add_argument('--lang', choices=('en',), help=argparse.SUPPRESS)
@@ -803,64 +984,30 @@ def main():
         raise RuntimeError('Run on your Ubuntu/Debian server: sudo bash setup.sh')
     if not sys.stdin.isatty():
         raise RuntimeError('Interactive terminal required. Reconnect using ssh -t; do not pipe passwords.')
-    actions = {
-        '1': 'Install / resume setup',
-        '2': 'Service status',
-        '3': 'Check public HTTPS',
-        '4': 'Authenticator setup',
-        '5': 'Start existing services',
-        '6': 'Stop services (keep data)',
-        '7': 'Client build / addresses',
-        '8': 'Remove services (keep data)',
-        '9': 'Diagnostics / troubleshoot',
-        '10': 'DNS records / check',
-        '11': 'Existing proxy setup guide',
-        '12': 'Repair Core + Nginx HTTPS',
-    }
     while True:
-        screen('Server control')
-        print('  ' + 'Ubuntu / Debian · Self-hosted setup')
-        for number, title in actions.items():
-            if number in ('1', '2', '5', '7', '8'):
-                print()
+        state = instance_state()
+        actions = dashboard_actions(state)
+        screen('Welcome' if state['kind'] == 'new' else 'Your server')
+        print(color({'new': 'NOT INSTALLED', 'incomplete': 'SETUP NEEDS ATTENTION', 'installed': 'INSTALLED'}[state['kind']], '1;32' if state['kind'] == 'installed' else '1;33'))
+        print(f"Core: {state['core']}  |  Database: {state['database']}\nProxy: {state.get('proxy', 'Check HTTPS')}\nHTTPS: {state['https']}")
+        if state['kind'] == 'incomplete' and state['stage']:
+            print('Resume: ' + state['stage'])
+        if state['error']:
+            print(color('Check needed: ', '33') + state['error'])
+        print()
+        for number, (title, _) in actions.items():
             print('  ' + color(number.rjust(2), '1;31' if number == '8' else '1;36') + '  ' + title)
-        print('\n  0  ' + 'Exit')
-        print('\n' + '─' * 54)
+        print('\n   0  Exit')
         choice = choice_input()
         if choice == '0':
             return
-        screen(actions.get(choice, 'Choose an option'))
         try:
-            if choice == '1':
-                install()
-            elif choice == '8':
-                remove()
-            elif choice == '9':
-                diagnostics()
-            elif choice == '10':
-                dns_menu()
-            elif choice == '11':
-                proxy_help(settings() if CONFIG.exists() else None)
-            elif choice == '12':
-                repair_nginx()
-            elif choice in ('2', '3', '4', '5', '6', '7'):
-                values = settings()
-                if choice in ('2', '5', '6'):
-                    owned_stack()
-                if choice == '2':
-                    compose('ps')
-                elif choice == '3':
-                    https_check(values)
-                elif choice == '4':
-                    authenticator(values)
-                elif choice == '5':
-                    start_existing(*services(values))
-                elif choice == '6' and yes('Stop this instance while retaining all volumes?'):
-                    compose('stop', *reversed(services(values)))
-                elif choice == '7':
-                    links(values)
+            if choice in actions:
+                label, action = actions[choice]
+                screen(label)
+                action()
             else:
-                print('Choose a number from 0 to 12.')
+                print('Choose one of the displayed options.')
         except (RuntimeError, OSError, ValueError) as error:
             show_error(error)
         input('\nPress Enter to return to the main menu. ')

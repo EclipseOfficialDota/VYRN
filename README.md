@@ -45,14 +45,14 @@ budget is4GiB RAM, two cores and40GiB disk plus media/backup space; actual capac
 git clone https://github.com/EclipseOfficialDota/VYRN.git && cd VYRN && sudo bash setup.sh
 ```
 
-Choose **Install / resume setup**. The wizard asks for your domain,
+Choose **Easy install** (or **Resume setup** for an unfinished instance). Six stages guide server checks, Docker, settings, DNS, backend and HTTPS; failures offer retry, diagnostics and relevant repairs. The wizard asks for your domain,
 public IPv4, admin IP/VPN and first administrator credentials. It can create missing
 Cloudflare DNS records using a hidden, unsaved token, or guide manual DNS configuration.
 It generates protected settings, builds Core, bootstraps an empty database and checks HTTPS.
 
 After the first setup launch, reopen with **`vyrn`** from any directory to check status/HTTPS, run diagnostics, enroll your authenticator or
 start/stop the instance. The panel clears between screens and includes confirmed service
-removal that keeps data and settings. Occupied public ports offer an existing-proxy mode.
+removal that keeps data and settings. The dashboard changes with actual installation/service state; HTTPS shows its last verification time. Occupied public ports offer an existing-proxy mode.
 For an active host Nginx, **Repair Core + Nginx HTTPS** starts the backend, configures the
 restricted proxy and certificate renewal, and restores the previous proxy file on failure.
 [Wizard guide](docs/SETUP_WIZARD.md) ·

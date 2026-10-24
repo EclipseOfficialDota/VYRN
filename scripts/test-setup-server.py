@@ -173,9 +173,10 @@ class SetupTests(unittest.TestCase):
 
     def test_service_menu_rejects_remote_overrides_before_docker_calls(self):
         for variable in ('DOCKER_HOST', 'DOCKER_CONTEXT'):
-            for choice in ('2', '5', '6'):
-                with self.subTest(variable=variable, choice=choice), patch.dict(os.environ, {variable: 'remote-engine'}, clear=True), patch.object(sys, 'argv', ['setup-server.py', '--lang', 'en']), patch.object(setup.os, 'geteuid', return_value=0), patch.object(sys.stdin, 'isatty', return_value=True), patch.object(setup, 'settings', return_value=self.values()), patch('builtins.input', side_effect=[choice, '', '0']), patch.object(setup, 'yes', return_value=True), patch.object(setup, 'run', return_value='') as command, contextlib.redirect_stdout(io.StringIO()):
-                    setup.main()
+            for choice in ('1', '2', '3'):
+                with self.subTest(variable=variable, choice=choice), patch.dict(os.environ, {variable: 'remote-engine'}, clear=True), patch('builtins.input', return_value=choice), patch.object(setup, 'yes', return_value=True), patch.object(setup, 'run', return_value='') as command, contextlib.redirect_stdout(io.StringIO()):
+                    with self.assertRaises(RuntimeError):
+                        setup.service_controls(self.values())
                     command.assert_not_called()
 
     def test_saved_remote_context_is_rejected_before_contacting_engine(self):
@@ -260,7 +261,7 @@ class SetupTests(unittest.TestCase):
             setup.install()
         self.assertLess(events.index(('up', '-d', '--wait', 'postgres')), events.index(('bootstrap',)))
         self.assertLess(events.index(('bootstrap',)), events.index(('up', '-d', '--no-build', '--wait', 'core', 'caddy')))
-        self.assertIn('public HTTPS still needs attention', output.getvalue())
+        self.assertIn('Public HTTPS still needs attention', output.getvalue())
         values = setup.settings()
         self.assertNotIn(values['POSTGRES_PASSWORD'], output.getvalue())
         self.assertNotIn(values['VYRN_ADMIN_TOTP_SECRET'], output.getvalue())
@@ -291,8 +292,9 @@ class SetupTests(unittest.TestCase):
         def prompt(label):
             events.append(('input', label))
             return next(answers)
-        answers = iter(['7', '', '0'])
-        with patch.object(sys, 'argv', ['setup-server.py', '--lang', 'en']), patch.object(setup.os, 'geteuid', return_value=0), patch.object(sys.stdin, 'isatty', return_value=True), patch.object(setup, 'settings', return_value=self.values()), patch('builtins.input', side_effect=prompt), patch.object(setup, 'screen', side_effect=lambda title: events.append(('screen', title))), patch.object(setup, 'links', side_effect=lambda values: events.append(('action', 'links'))), contextlib.redirect_stdout(io.StringIO()):
+        answers = iter(['1', '', '0'])
+        state = dict(kind='installed', values=self.values(), core='Healthy', database='Healthy', https='Last verified', stage='', has_services=True, error='')
+        with patch.object(sys, 'argv', ['setup-server.py', '--lang', 'en']), patch.object(setup.os, 'geteuid', return_value=0), patch.object(sys.stdin, 'isatty', return_value=True), patch.object(setup, 'instance_state', return_value=state), patch('builtins.input', side_effect=prompt), patch.object(setup, 'screen', side_effect=lambda title: events.append(('screen', title))), patch.object(setup, 'links', side_effect=lambda values: events.append(('action', 'links'))), contextlib.redirect_stdout(io.StringIO()):
             setup.main()
         self.assertEqual([event[0] for event in events], ['screen', 'input', 'screen', 'action', 'input', 'screen', 'input'])
         self.assertIn('return to the main menu', events[4][1])
@@ -476,6 +478,84 @@ class SetupTests(unittest.TestCase):
                 config.write_text('error_log stderr;\npid ' + str(temp/'nginx.pid') + ';\nevents {}\nhttp {\naccess_log off;\nclient_body_temp_path ' + str(temp/'body') + ';\nproxy_temp_path ' + str(temp/'proxy') + ';\n' + site + '\n}\n')
                 result = subprocess.run(['nginx', '-t', '-p', str(temp) + '/', '-c', str(config)], capture_output=True, text=True)
                 self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_dashboard_changes_with_verified_runtime_state(self):
+        fresh = setup.instance_state()
+        self.assertEqual(fresh['kind'], 'new')
+        self.assertEqual(list(setup.dashboard_actions(fresh)), ['1', '2', '3'])
+        setup.write_config(self.values())
+        setup.save_progress('Setup completed', complete=True)
+        containers = [dict(Config={'Labels': {'com.docker.compose.service': name}}, State={'Running': True, 'Health': {'Status': 'healthy'}}) for name in ('core', 'postgres', 'caddy')]
+        with patch.object(setup, 'owned_stack'), patch.object(setup, 'compose', return_value='core-id db-id'), patch.object(setup, 'run', return_value=json.dumps(containers)):
+            ready = setup.instance_state()
+            self.assertEqual(ready['kind'], 'installed')
+            self.assertEqual(setup.dashboard_actions(ready)['1'][0], 'Connection details')
+            self.assertIn('5', setup.dashboard_actions(ready))
+            containers[0]['State']['Running'] = False
+            with patch.object(setup, 'run', return_value=json.dumps(containers)):
+                stopped = setup.instance_state()
+            self.assertEqual(stopped['kind'], 'incomplete')
+            self.assertEqual(stopped['core'], 'Stopped')
+            self.assertNotIn('5', setup.dashboard_actions(stopped))
+            containers[0]['State']['Running'] = True
+            containers[2]['State']['Running'] = False
+            with patch.object(setup, 'run', return_value=json.dumps(containers)):
+                proxy_down = setup.instance_state()
+            self.assertEqual(proxy_down['kind'], 'incomplete')
+            self.assertEqual(proxy_down['proxy'], 'Stopped')
+        progress = self.config.parent / 'setup-state.json'
+        self.assertEqual(progress.stat().st_mode & 0o777, 0o600)
+        self.assertNotIn(self.values()['POSTGRES_PASSWORD'], progress.read_text())
+        self.assertNotIn(self.values()['VYRN_ADMIN_TOTP_SECRET'], progress.read_text())
+
+    def test_step_rechecks_after_real_repair_and_never_skips_failure(self):
+        events = []
+        def verify():
+            events.append('verify')
+            if events.count('verify') == 1:
+                raise RuntimeError('docker is stopped')
+            return 'verified'
+        with patch('builtins.input', return_value='3'), patch.object(setup, 'screen'), contextlib.redirect_stdout(io.StringIO()):
+            result = setup.setup_step('Docker', verify, lambda: events.append('repair'), 'Start engine')
+        self.assertEqual(result, 'verified')
+        self.assertEqual(events, ['verify', 'repair', 'verify'])
+
+    def test_failed_repair_can_retry_same_stage_or_pause(self):
+        with patch('builtins.input', side_effect=['3', '1']), patch.object(setup, 'screen'), patch.object(setup, 'show_error') as error:
+            action = unittest.mock.Mock(side_effect=[RuntimeError('failed check'), 'ready'])
+            repair = unittest.mock.Mock(side_effect=RuntimeError('failed repair'))
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(setup.setup_step('Test', action, repair, 'Fix'), 'ready')
+            self.assertEqual(action.call_count, 2)
+            self.assertEqual(error.call_count, 2)
+        with patch('builtins.input', return_value='0'), patch.object(setup, 'screen'), contextlib.redirect_stdout(io.StringIO()), self.assertRaises(setup.SetupPaused):
+            setup.setup_step('Test', lambda: (_ for _ in ()).throw(RuntimeError('failed')))
+
+    def test_docker_repair_never_starts_a_service_for_remote_context(self):
+        with patch.dict(os.environ, {}, clear=True), patch.object(setup, 'run', return_value='ssh://remote') as command, self.assertRaises(RuntimeError):
+            setup.start_docker()
+        self.assertEqual(command.call_count, 1)
+        self.assertEqual(command.call_args.args[0][:3], ['docker', 'context', 'inspect'])
+        with patch.dict(os.environ, {}, clear=True), patch.object(setup, 'run', side_effect=['unix:///var/run/docker.sock', '']) as command, patch.object(setup, 'check_engine') as check:
+            setup.start_docker()
+        self.assertEqual(command.call_args.args[0], ['systemctl', 'start', 'docker'])
+        check.assert_called_once()
+
+    def test_successful_wizard_marks_complete_only_after_https(self):
+        setup.write_config(dict(self.values(), VYRN_PUBLIC_IPV4='8.8.8.8'))
+        with patch.object(setup, 'host_check'), patch.object(setup, 'docker_ready'), patch.object(setup, 'owned_stack', return_value=True), patch.object(setup, 'dns_check', return_value=True), patch.object(setup, 'ensure_backend'), patch.object(setup, 'https_check', return_value=True), patch.object(setup, 'authenticator'), patch.object(setup, 'links'), contextlib.redirect_stdout(io.StringIO()):
+            setup.install()
+        state = json.loads((self.config.parent/'setup-state.json').read_text())
+        self.assertTrue(state['complete'])
+        self.assertEqual(state['stage'], 'Setup completed')
+
+    def test_first_setup_repairs_failed_https_then_verifies_before_completion(self):
+        setup.write_config(dict(self.values(), VYRN_PUBLIC_IPV4='8.8.8.8', VYRN_PROXY_MODE='existing'))
+        with patch.object(setup, 'host_check'), patch.object(setup, 'docker_ready'), patch.object(setup, 'owned_stack', return_value=False), patch.object(setup, 'dns_check', return_value=True), patch.object(setup, 'ensure_backend'), patch.object(setup, 'https_check', side_effect=[False, True]) as verify, patch.object(setup, 'repair_nginx') as repair, patch('builtins.input', return_value='3'), patch.object(setup, 'authenticator'), patch.object(setup, 'links'), contextlib.redirect_stdout(io.StringIO()):
+            setup.install()
+        repair.assert_called_once()
+        self.assertEqual(verify.call_count, 2)
+        self.assertTrue(json.loads((self.config.parent/'setup-state.json').read_text())['complete'])
 
 
 def integration():
