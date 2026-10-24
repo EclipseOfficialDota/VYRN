@@ -940,6 +940,33 @@ def admin_access(values):
                                      '2': ('Privately enroll the authenticator', lambda: authenticator(values))})
 
 
+def build_android(values, install_tools=False):
+    if os.uname().machine != 'x86_64':
+        raise RuntimeError('Android APK builds require an x86_64 server; ARM hosts are not supported.')
+    if install_tools and host_release()[:2] != ('ubuntu', '24.04'):
+        raise RuntimeError('Automatic Android build-tool installation supports Ubuntu 24.04 only. Install tools manually and choose Build with existing tools.')
+    default = 'api.' + values['VYRN_DOMAIN'] if values.get('VYRN_DOMAIN') else ''
+    hostname = ask('API hostname (without https://)', domain, default)
+    print('Builds a Debug APK for https://' + hostname)
+    print('Uses one Gradle worker and no emulator. Requires several GiB RAM, substantial disk space and Internet access.')
+    if install_tools:
+        print('Installs system build packages and PowerShell. Review Android SDK licenses when prompted.')
+    if not yes('Start APK build?'):
+        return
+    arguments = ['bash', str(ROOT / 'scripts/build-android-linux.sh')]
+    if install_tools:
+        arguments.append('--install-tools')
+    run([*arguments, '-ApiUrl', 'https://' + hostname], timeout=7200)
+    print('Download the APK from ' + str(ROOT / 'artifacts') + ' using SFTP on your SSH port.')
+
+
+def android_menu(values):
+    section('Build Android APK', {
+        '1': ('Build with existing tools', lambda: build_android(values)),
+        '2': ('Install build tools and build (Ubuntu 24.04)', lambda: build_android(values, install_tools=True)),
+    })
+
+
 def help_panel():
     print('Easy install checks this server, prepares Docker, saves private settings, connects DNS, starts the backend and verifies HTTPS.')
     print('A failed stage offers retry, diagnostics and a relevant repair where available. Returning later rechecks conditions; existing accounts/secrets are kept.')
@@ -950,7 +977,8 @@ def help_panel():
 
 def dashboard_actions(state):
     if state['kind'] == 'new':
-        return {'1': ('Easy install', install), '2': ('Check this server', diagnostics), '3': ('Setup help', help_panel)}
+        return {'1': ('Easy install', install), '2': ('Check this server', diagnostics), '3': ('Setup help', help_panel),
+                '7': ('Build Android APK', lambda: android_menu({}))}
     values = state['values']
     actions = {'1': ('Connection details' if state['kind'] == 'installed' else 'Resume setup / finish verification',
                      (lambda: links(values)) if state['kind'] == 'installed' else install),
@@ -964,6 +992,7 @@ def dashboard_actions(state):
             actions['5'] = ('Administrator access', lambda: admin_access(values))
         if state['kind'] == 'installed':
             actions['6'] = ('Run guided setup checks again', install)
+    actions['7'] = ('Build Android APK', lambda: android_menu(values))
     actions['9'] = ('Help and limitations', help_panel)
     return dict(sorted(actions.items(), key=lambda pair: int(pair[0])))
 

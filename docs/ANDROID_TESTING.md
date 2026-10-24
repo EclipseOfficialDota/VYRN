@@ -6,6 +6,8 @@ The build workflow uses PowerShell7, Git, JDK21, Android SDK platform36/build-to
 
 On an x86_64 Ubuntu 24.04 host, from the repository checkout:
 
+The terminal panel also provides **7 — Build Android APK** in every installation state. Choose existing tools or opt into installing tools on Ubuntu 24.04. It prompts for the API hostname (defaulting to the configured instance), confirms the build and displays the output directory. This builds a Debug APK; it does not change server settings.
+
 ```bash
 git pull --ff-only origin main
 sudo bash scripts/build-android-linux.sh --install-tools -ApiUrl https://api.your-domain.com

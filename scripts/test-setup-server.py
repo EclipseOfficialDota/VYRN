@@ -489,10 +489,34 @@ class SetupTests(unittest.TestCase):
                 result = subprocess.run(['nginx', '-t', '-p', str(temp) + '/', '-c', str(config)], capture_output=True, text=True)
                 self.assertEqual(result.returncode, 0, result.stderr)
 
+    def test_android_build_uses_validated_hostname_and_explicit_install_choice(self):
+        for install_tools in (False, True):
+            with self.subTest(install_tools=install_tools), patch.object(setup.os, 'uname') as uname, patch.object(setup, 'host_release', return_value=('ubuntu', '24.04', 'noble')), patch('builtins.input', side_effect=['bad;hostname', '', 'y']), patch.object(setup, 'run') as command, contextlib.redirect_stdout(io.StringIO()):
+                uname.return_value.machine = 'x86_64'
+                setup.build_android(self.values(), install_tools)
+            expected = ['bash', str(setup.ROOT / 'scripts/build-android-linux.sh')]
+            if install_tools:
+                expected.append('--install-tools')
+            command.assert_called_once_with([*expected, '-ApiUrl', 'https://api.chat.test-domain.org'], timeout=7200)
+
+    def test_android_build_cancel_and_unsupported_host_do_not_run_commands(self):
+        with patch.object(setup.os, 'uname') as uname, patch('builtins.input', side_effect=['api.test-domain.org', 'n']), patch.object(setup, 'run') as command, contextlib.redirect_stdout(io.StringIO()):
+            uname.return_value.machine = 'x86_64'
+            setup.build_android({})
+            command.assert_not_called()
+            uname.return_value.machine = 'aarch64'
+            with self.assertRaises(RuntimeError):
+                setup.build_android({})
+            command.assert_not_called()
+            uname.return_value.machine = 'x86_64'
+            with patch.object(setup, 'host_release', return_value=('debian', '13', 'trixie')), self.assertRaises(RuntimeError):
+                setup.build_android({}, install_tools=True)
+            command.assert_not_called()
+
     def test_dashboard_changes_with_verified_runtime_state(self):
         fresh = setup.instance_state()
         self.assertEqual(fresh['kind'], 'new')
-        self.assertEqual(list(setup.dashboard_actions(fresh)), ['1', '2', '3'])
+        self.assertEqual(list(setup.dashboard_actions(fresh)), ['1', '2', '3', '7'])
         setup.write_config(self.values())
         setup.save_progress('Setup completed', complete=True)
         containers = [dict(Config={'Labels': {'com.docker.compose.service': name}}, State={'Running': True, 'Health': {'Status': 'healthy'}}) for name in ('core', 'postgres', 'caddy')]
@@ -501,6 +525,7 @@ class SetupTests(unittest.TestCase):
             self.assertEqual(ready['kind'], 'installed')
             self.assertEqual(setup.dashboard_actions(ready)['1'][0], 'Connection details')
             self.assertIn('5', setup.dashboard_actions(ready))
+            self.assertIn('7', setup.dashboard_actions(ready))
             containers[0]['State']['Running'] = False
             with patch.object(setup, 'run', return_value=json.dumps(containers)):
                 stopped = setup.instance_state()
