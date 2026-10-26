@@ -940,7 +940,7 @@ def admin_access(values):
                                      '2': ('Privately enroll the authenticator', lambda: authenticator(values))})
 
 
-def build_android(values, install_tools=False):
+def build_android(values, install_tools=False, offline=False):
     if os.uname().machine != 'x86_64':
         raise RuntimeError('Android APK builds require an x86_64 server; ARM hosts are not supported.')
     if install_tools and host_release()[:2] != ('ubuntu', '24.04'):
@@ -948,7 +948,8 @@ def build_android(values, install_tools=False):
     default = 'api.' + values['VYRN_DOMAIN'] if values.get('VYRN_DOMAIN') else ''
     hostname = ask('API hostname (without https://)', domain, default)
     print('Builds a Debug APK for https://' + hostname)
-    print('Uses one Gradle worker and no emulator. Requires several GiB RAM, substantial disk space and Internet access.')
+    print('Uses one Gradle worker and no emulator. Requires several GiB RAM and substantial disk space.')
+    print('Requires a prepared private offline kit and installed system tools; no dependency downloads.' if offline else 'Requires Internet access for missing build dependencies.')
     if install_tools:
         print('Installs system build packages and PowerShell. Review Android SDK licenses when prompted.')
     if not yes('Start APK build?'):
@@ -956,6 +957,8 @@ def build_android(values, install_tools=False):
     arguments = ['bash', str(ROOT / 'scripts/build-android-linux.sh')]
     if install_tools:
         arguments.append('--install-tools')
+    if offline:
+        arguments.append('--offline')
     run([*arguments, '-ApiUrl', 'https://' + hostname], timeout=7200)
     print('Download the APK from ' + str(ROOT / 'artifacts') + ' using SFTP on your SSH port.')
 
@@ -964,6 +967,7 @@ def android_menu(values):
     section('Build Android APK', {
         '1': ('Build with existing tools', lambda: build_android(values)),
         '2': ('Install build tools and build (Ubuntu 24.04)', lambda: build_android(values, install_tools=True)),
+        '3': ('Build offline from a prepared private kit', lambda: build_android(values, offline=True)),
     })
 
 

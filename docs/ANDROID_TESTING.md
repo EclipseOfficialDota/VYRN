@@ -21,6 +21,29 @@ Outputs are in `artifacts/*.apk`; the build log is `.local/android-build.log`. D
 
 If the build host cannot download Google's command-line tools, download the original `commandlinetools-linux-13114758_latest.zip` from Google on a machine with access and transfer it privately via SFTP into `.local/android/` in your checkout. The build menu and Linux script automatically prefer that local file and verify SHA-256 `7ec965280a073311c339e571cd5de778b9975026cfcbe79f2b1cdcb1e15317ee` before extraction. A corrupt local file fails closed without downloading a replacement. `VYRN_ANDROID_TOOLS_ZIP` can select another local file. The archive remains ignored by Git; SDK licenses still require acceptance. Do not republish the SDK archive as a project release: Google's SDK license restricts redistribution. This only supplies the command-line tools, not the SDK platforms, NDK, Gradle or Maven dependencies; those still require network access or separately prepared local caches.
 
+The preferred local filename is now `.local/android/vyrn-android-tools.zip`; the original filename remains supported. Renaming does not change the file contents, checksum or license.
+
+### Private offline build kit
+
+On a connected x86_64 Linux host with JDK21, PowerShell7, Git, Python3.12+, native build tools and sufficient disk space, run:
+
+```bash
+export JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64
+bash scripts/prepare-android-offline.sh
+```
+
+This builds Debug APKs to populate the actual SDK/NDK/CMake, Gradle distribution and Maven caches, then repeats the build inside a network namespace with no external network. Only after that succeeds does it create `.local/offline/vyrn-android-offline.tar.gz` and its `.sha256`. It includes pinned upstream source and dependency caches; it excludes server settings, signing keystores, APK outputs and personal Gradle properties. Treat this as private owner-controlled build tooling, not a public redistribution archive.
+
+Alternatively run **Actions → Prepare private Android offline kit**, accepting the SDK licenses for your own cache. It uses GitHub's Linux runner instead of compiling on your computer. Its build-cache artifact requires authenticated GitHub access and expires after one day. No SDK archive or APK is added to public Releases. A failed run produces no offline-ready kit.
+
+Transfer both files privately into `.local/offline/` of a **fresh checkout of the exact same VYRN commit** on the VPS. System prerequisites must already be installed. Select **7 → 3 — Build offline from a prepared private kit**, or:
+
+```bash
+bash scripts/build-android-linux.sh --offline -ApiUrl https://api.your-domain.com
+```
+
+The kit is restored automatically only when `android/upstream` is absent, with checksum, source-revision, archive-path and disk-space checks. Existing source checkouts are preserved. SDK package installation and Git fetch are skipped; Gradle receives `--offline`. Missing caches cause an error rather than an online repair. A kit is specific to Linux/x86_64 and its prepared source revision, ABI list and build variant. Keep matching source and all system tools before connectivity is lost; a source-only Git clone is not sufficient. The verification run reuses native compilation outputs on the preparing machine, so it is not a substitute for a fresh-machine offline acceptance test after transfer.
+
 ## Normal build
 
 ```powershell

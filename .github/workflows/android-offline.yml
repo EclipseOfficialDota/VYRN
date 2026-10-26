@@ -1,0 +1,39 @@
+name: Prepare private Android offline kit
+
+on:
+  workflow_dispatch:
+    inputs:
+      accept_sdk_licenses:
+        description: 'I accept Android SDK licenses for my own private build cache'
+        type: boolean
+        required: true
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  prepare:
+    if: inputs.accept_sdk_licenses
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Prepare dependencies and verify a build without network access
+        shell: bash
+        run: |
+          export JAVA_HOME="$JAVA_HOME_21_X64"
+          export ANDROID_HOME="$PWD/.tools/android-sdk"
+          bash scripts/prepare-android-offline.sh < <(yes)
+      - name: Keep private build cache for owner transfer (no public Release)
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: vyrn-android-offline-${{ github.sha }}
+          path: |
+            .local/offline/vyrn-android-offline.tar.gz
+            .local/offline/vyrn-android-offline.tar.gz.sha256
+          retention-days: 1
+          if-no-files-found: error
+          include-hidden-files: true

@@ -30,7 +30,9 @@ jobs:
       - name: Check interactive setup contracts offline
         run: python3 scripts/test-setup-server.py
       - name: Check Linux Android build orchestration without SDK downloads
-        run: python3 scripts/test-android-linux.py
+        run: |
+          python3 scripts/test-android-linux.py
+          python3 scripts/test-android-offline.py
       - name: Check offline distribution packaging without a daemon
         run: python3 scripts/test-lite-package.py
       - name: Check DNS planning without external requests

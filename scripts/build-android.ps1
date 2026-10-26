@@ -1,4 +1,4 @@
-param([ValidateSet('dev','staging','production')][string]$Flavor='dev',[ValidateSet('debug','release')][string]$BuildType='debug',[string]$Abis='arm64-v8a,armeabi-v7a',[string]$ApiUrl='https://api.vyrn.eclipseofficial.xyz',[switch]$LocalTest,[switch]$Instrumentation)
+param([ValidateSet('dev','staging','production')][string]$Flavor='dev',[ValidateSet('debug','release')][string]$BuildType='debug',[string]$Abis='arm64-v8a,armeabi-v7a',[string]$ApiUrl='https://api.vyrn.eclipseofficial.xyz',[switch]$LocalTest,[switch]$Instrumentation,[switch]$Offline)
 $ErrorActionPreference='Stop'
 $root=Split-Path $PSScriptRoot -Parent
 if($Instrumentation -and ($Flavor -ne 'dev' -or $BuildType -ne 'debug')){throw 'Instrumentation requires dev/debug'}
@@ -49,7 +49,9 @@ Push-Location (Join-Path $root 'android/upstream')
 try {
     $log=Join-Path $root '.local/android-build.log'
     # Keep builds responsive on the owner's PC: one worker, bounded JVM, no idle daemon.
-    & $java -XX:ActiveProcessorCount=2 -classpath gradle/wrapper/gradle-wrapper.jar org.gradle.wrapper.GradleWrapperMain @tasks "-PVYRN_ABIS=$Abis" "-PVYRN_API_URL=$ApiUrl" "-PVYRN_LOCAL_TLS=$($LocalTest.IsPresent.ToString().ToLowerInvariant())" '-Dorg.gradle.jvmargs=-Xmx3g -XX:MaxMetaspaceSize=768m -XX:ActiveProcessorCount=2 -Dfile.encoding=UTF-8' --console=plain --no-daemon --no-parallel --max-workers=1 --no-watch-fs *> $log
+    $networkOptions=@()
+    if($Offline){$networkOptions+='--offline'}
+    & $java -XX:ActiveProcessorCount=2 -classpath gradle/wrapper/gradle-wrapper.jar org.gradle.wrapper.GradleWrapperMain @tasks @networkOptions "-PVYRN_ABIS=$Abis" "-PVYRN_API_URL=$ApiUrl" "-PVYRN_LOCAL_TLS=$($LocalTest.IsPresent.ToString().ToLowerInvariant())" '-Dorg.gradle.jvmargs=-Xmx3g -XX:MaxMetaspaceSize=768m -XX:ActiveProcessorCount=2 -Dfile.encoding=UTF-8' --console=plain --no-daemon --no-parallel --max-workers=1 --no-watch-fs *> $log
     if($LASTEXITCODE -ne 0){Get-Content -LiteralPath $log -Tail 75;throw 'Android build failed'}
     Get-Content -LiteralPath $log -Tail 5
 } finally { Pop-Location }

@@ -59,4 +59,21 @@ with tempfile.TemporaryDirectory() as directory:
     assert not (temp / 'missing-sdk').exists()
     assert Path(str(log) + '.download').read_text() == downloads
     assert log.read_text().splitlines() == lines
+    # Offline mode uses only the warmed source/SDK/Gradle trees, no sdkmanager/fetch.
+    checkout = script.parents[1]
+    for required in ('platforms/android-36/android.jar', 'build-tools/36.0.0/aapt2',
+                     'ndk/27.2.12479018/source.properties', 'cmake/3.22.1/bin/cmake'):
+        path = temp / 'sdk' / required
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.touch()
+    for required in ('android/upstream/.git', '.local/gradle/caches', '.local/gradle/wrapper/dists'):
+        (checkout / required).mkdir(parents=True)
+    env['ANDROID_HOME'] = str(temp / 'sdk')
+    before = log.read_text().splitlines()
+    subprocess.run(['bash', str(script), '--offline', '-ApiUrl', 'https://api.test-domain.org'], env=env, check=True)
+    assert log.read_text().splitlines()[len(before):] == [
+        'pwsh -NoProfile -File scripts/build-android.ps1 -Offline -ApiUrl https://api.test-domain.org']
+    (temp / 'sdk/platforms/android-36/android.jar').unlink()
+    result = subprocess.run(['bash', str(script), '--offline'], env=env, capture_output=True, text=True)
+    assert result.returncode == 1 and 'Offline SDK package missing' in result.stderr
 print('PASS: Linux syntax, SDK license/package order, pinned source fetch, API forwarding and architecture guard')

@@ -2,8 +2,13 @@
 set -euo pipefail
 cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.."
 
+offline=false
+if [[ ${1:-} == --offline ]]; then
+    offline=true
+    shift
+fi
 if [[ ${1:-} == --help ]]; then
-    echo 'Usage: bash scripts/build-android-linux.sh [--install-tools] -ApiUrl https://api.your-domain.com'
+    echo 'Usage: bash scripts/build-android-linux.sh [--offline | --install-tools] -ApiUrl https://api.your-domain.com'
     echo '--install-tools: install Ubuntu 24.04 x86_64 build dependencies; SDK licenses require your acceptance.'
     exit 0
 fi
@@ -12,6 +17,7 @@ if [[ $(uname -m) != x86_64 ]]; then
     exit 1
 fi
 if [[ ${1:-} == --install-tools ]]; then
+    [[ $offline == false ]] || { echo 'Offline mode cannot install system packages.' >&2; exit 1; }
     shift
     source /etc/os-release
     if [[ $ID != ubuntu || $VERSION_ID != 24.04 || $EUID != 0 ]]; then
@@ -35,10 +41,26 @@ export ANDROID_SDK_ROOT="$ANDROID_HOME"
 export PATH="$JAVA_HOME/bin:$PATH"
 command -v pwsh >/dev/null || { echo 'Install PowerShell7 first; see docs/ANDROID_TESTING.md.' >&2; exit 1; }
 [[ -x $JAVA_HOME/bin/java ]] || { echo 'Install JDK21 and set JAVA_HOME.' >&2; exit 1; }
+if [[ $offline == true ]]; then
+    if [[ -f .local/offline/vyrn-android-offline.tar.gz && ! -d android/upstream ]]; then
+        python3 scripts/restore-android-offline.py
+    fi
+    for required in 'cmdline-tools/latest/bin/sdkmanager' 'platforms/android-36/android.jar' 'build-tools/36.0.0/aapt2' 'ndk/27.2.12479018/source.properties' 'cmake/3.22.1/bin/cmake'; do
+        [[ -f $ANDROID_HOME/$required ]] || { echo "Offline SDK package missing: $required. Prepare the full cache on a connected Linux host first." >&2; exit 1; }
+    done
+    [[ -d android/upstream/.git && -d .local/gradle/caches && -d .local/gradle/wrapper/dists ]] || { echo 'Offline sources or Gradle caches are missing. A command-line-tools ZIP alone is not an offline build kit.' >&2; exit 1; }
+    pwsh -NoProfile -File scripts/build-android.ps1 -Offline "$@"
+    echo "APKs: $PWD/artifacts/"
+    exit 0
+fi
 if [[ ! -x $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager ]]; then
     temp=$(mktemp -d)
     trap 'rm -rf -- "$temp"' EXIT
-    archive=${VYRN_ANDROID_TOOLS_ZIP:-"$PWD/.local/android/commandlinetools-linux-13114758_latest.zip"}
+    archive=${VYRN_ANDROID_TOOLS_ZIP:-"$PWD/.local/android/vyrn-android-tools.zip"}
+    # Retain compatibility with archives transferred by earlier installers.
+    if [[ ! -f $archive && -z ${VYRN_ANDROID_TOOLS_ZIP:-} ]]; then
+        archive="$PWD/.local/android/commandlinetools-linux-13114758_latest.zip"
+    fi
     if [[ -f $archive ]]; then
         echo 'Using local Android command-line tools archive.'
     elif [[ -n ${VYRN_ANDROID_TOOLS_ZIP:-} ]]; then
