@@ -8,9 +8,10 @@ bash scripts/build-android-linux.sh "$@"
 # Do not label a populated cache offline-ready before testing without networking.
 command -v unshare >/dev/null || { echo 'unshare is needed to verify offline operation.' >&2; exit 1; }
 if [[ $EUID == 0 ]]; then
-    unshare --net -- bash scripts/build-android-linux.sh --offline "$@"
+    unshare --net -- bash -c 'ip link set lo up; exec bash scripts/build-android-linux.sh --offline "$@"' -- "$@"
 else
-    sudo unshare --net -- env "JAVA_HOME=$JAVA_HOME" "PATH=$PATH" "ANDROID_HOME=$ANDROID_HOME" bash scripts/build-android-linux.sh --offline "$@"
+    sudo unshare --net -- bash -c 'ip link set lo up; exec runuser -u "$1" -- "${@:2}"' -- "$(id -un)" \
+        env "JAVA_HOME=$JAVA_HOME" "PATH=$PATH" "ANDROID_HOME=$ANDROID_HOME" bash scripts/build-android-linux.sh --offline "$@"
 fi
 mkdir -p .local/offline
 kit="$PWD/.local/offline/vyrn-android-offline.tar.gz"
