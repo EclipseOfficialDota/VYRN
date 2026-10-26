@@ -11,6 +11,7 @@ with tempfile.TemporaryDirectory() as directory:
     root = Path(directory)
     (root / 'scripts').mkdir()
     shutil.copyfile(source, root / 'scripts/prepare-android-offline.sh')
+    shutil.copyfile(source.with_name('package-android-offline.sh'), root / 'scripts/package-android-offline.sh')
     (root / 'scripts/build-android-linux.sh').write_text('#!/bin/sh\nexit 0\n')
     for path in ('.tools/android-sdk/ndk/27.2.12479018/build/cmake/android.toolchain.cmake',
                  '.local/gradle/caches/dependency.jar', '.local/gradle/wrapper/gradle.zip',

@@ -36,6 +36,8 @@ This builds Debug APKs to populate the actual SDK/NDK/CMake, Gradle distribution
 
 Alternatively copy the source into your own **private repository** and run **Actions → Prepare private Android offline kit**, accepting the SDK licenses for your own cache. It uses GitHub's Linux runner instead of compiling on your computer. The workflow refuses to generate SDK cache artifacts in a public repository: authenticated-only artifact downloads on a public repository are not owner-only access. Private build-cache artifacts expire after one day. No SDK archive or APK is added to public Releases. A failed run produces no offline-ready kit.
 
+For packaging-only updates, the optional `verified_cache_run` input reuses an exact cache from a successful full-build run of this workflow. Git verifies that the Android tree and build script have not changed before skipping compilation. A failed run, changed Android inputs or missing/expired exact cache is rejected. The internal `package-android-offline.sh` helper only archives files; it does not itself certify an offline build.
+
 Transfer both files privately into `.local/offline/` of a **fresh checkout of the exact same VYRN commit** on the VPS. System prerequisites must already be installed. Select **7 → 3 — Build offline from a prepared private kit**, or:
 
 ```bash

@@ -8,9 +8,14 @@ on:
         type: boolean
         required: true
         default: false
+      verified_cache_run:
+        description: 'Optional successful full-build run to repack identical Android inputs without recompiling'
+        type: string
+        default: ''
 
 permissions:
   contents: read
+  actions: read
 
 jobs:
   prepare:
@@ -23,7 +28,25 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           persist-credentials: false
+          fetch-depth: 0
+      - name: Validate prior successful build and unchanged Android inputs
+        if: inputs.verified_cache_run != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          PREVIOUS_RUN: ${{ inputs.verified_cache_run }}
+        shell: bash
+        run: |
+          [[ $PREVIOUS_RUN =~ ^[0-9]+$ ]]
+          result=$(gh run view "$PREVIOUS_RUN" --json conclusion --jq .conclusion)
+          [[ $result == success ]]
+          name=$(gh run view "$PREVIOUS_RUN" --json workflowName --jq .workflowName)
+          [[ $name == 'Prepare private Android offline kit' ]]
+          validated=$(gh run view "$PREVIOUS_RUN" --json headSha --jq .headSha)
+          [[ $validated =~ ^[0-9a-f]{40}$ ]]
+          git diff --exit-code "$validated" HEAD -- android scripts/build-android.ps1
       - name: Reuse private SDK and Gradle dependency downloads
+        if: inputs.verified_cache_run == ''
         uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
         with:
           path: |
@@ -32,12 +55,33 @@ jobs:
             .local/gradle/wrapper
           key: android-linux-x64-v1-${{ github.run_id }}
           restore-keys: android-linux-x64-v1-
+      - name: Restore the exact previously validated dependency cache
+        if: inputs.verified_cache_run != ''
+        id: verified
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: |
+            .tools/android-sdk
+            .local/gradle/caches
+            .local/gradle/wrapper
+          key: android-linux-x64-v1-${{ inputs.verified_cache_run }}
       - name: Prepare dependencies and verify a build without network access
+        if: inputs.verified_cache_run == ''
         shell: bash
         run: |
           export JAVA_HOME="$JAVA_HOME_21_X64"
           export ANDROID_HOME="$PWD/.tools/android-sdk"
           bash scripts/prepare-android-offline.sh < <(yes)
+      - name: Repack validated dependencies with complete pinned sources
+        if: inputs.verified_cache_run != ''
+        env:
+          EXACT_CACHE_HIT: ${{ steps.verified.outputs.cache-hit }}
+        shell: bash
+        run: |
+          [[ $EXACT_CACHE_HIT == true ]] || { echo 'Validated cache is missing or expired. Run full preparation without a previous run ID.'; exit 1; }
+          pwsh -NoProfile -File android/fetch-upstream.ps1
+          pwsh -NoProfile -File android/prepare-upstream.ps1
+          bash scripts/package-android-offline.sh
       - name: Keep private build cache for owner transfer (no public Release)
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
@@ -59,7 +103,7 @@ jobs:
           if-no-files-found: ignore
           include-hidden-files: true
       - name: Preserve private dependency downloads for the next attempt
-        if: always()
+        if: always() && inputs.verified_cache_run == ''
         uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830
         with:
           path: |
