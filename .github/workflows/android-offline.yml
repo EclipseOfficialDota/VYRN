@@ -40,3 +40,12 @@ jobs:
           compression-level: 0
           if-no-files-found: error
           include-hidden-files: true
+      - name: Keep build diagnostics if cache preparation fails
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: android-cache-build-log
+          path: .local/android-build.log
+          retention-days: 1
+          if-no-files-found: ignore
+          include-hidden-files: true
