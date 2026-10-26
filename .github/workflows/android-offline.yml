@@ -14,7 +14,9 @@ permissions:
 
 jobs:
   prepare:
-    if: inputs.accept_sdk_licenses
+    # Public repository artifacts can be downloaded by other authenticated users.
+    # SDK dependency caches belong only in an owner-controlled private repository.
+    if: github.event.repository.private && inputs.accept_sdk_licenses
     runs-on: ubuntu-24.04
     timeout-minutes: 120
     steps:
@@ -35,5 +37,6 @@ jobs:
             .local/offline/vyrn-android-offline.tar.gz
             .local/offline/vyrn-android-offline.tar.gz.sha256
           retention-days: 1
+          compression-level: 0
           if-no-files-found: error
           include-hidden-files: true

@@ -34,7 +34,7 @@ bash scripts/prepare-android-offline.sh
 
 This builds Debug APKs to populate the actual SDK/NDK/CMake, Gradle distribution and Maven caches, then repeats the build inside a network namespace with no external network. Only after that succeeds does it create `.local/offline/vyrn-android-offline.tar.gz` and its `.sha256`. It includes pinned upstream source and dependency caches; it excludes server settings, signing keystores, APK outputs and personal Gradle properties. Treat this as private owner-controlled build tooling, not a public redistribution archive.
 
-Alternatively run **Actions → Prepare private Android offline kit**, accepting the SDK licenses for your own cache. It uses GitHub's Linux runner instead of compiling on your computer. Its build-cache artifact requires authenticated GitHub access and expires after one day. No SDK archive or APK is added to public Releases. A failed run produces no offline-ready kit.
+Alternatively copy the source into your own **private repository** and run **Actions → Prepare private Android offline kit**, accepting the SDK licenses for your own cache. It uses GitHub's Linux runner instead of compiling on your computer. The workflow refuses to generate SDK cache artifacts in a public repository: authenticated-only artifact downloads on a public repository are not owner-only access. Private build-cache artifacts expire after one day. No SDK archive or APK is added to public Releases. A failed run produces no offline-ready kit.
 
 Transfer both files privately into `.local/offline/` of a **fresh checkout of the exact same VYRN commit** on the VPS. System prerequisites must already be installed. Select **7 → 3 — Build offline from a prepared private kit**, or:
 

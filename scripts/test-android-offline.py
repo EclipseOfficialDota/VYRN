@@ -48,6 +48,15 @@ with tempfile.TemporaryDirectory() as directory:
     with patch.object(subprocess, 'check_output', return_value='a' * 40):
         offline.restore(root)
     assert (root / '.tools/android-sdk/platforms/android-36/android.jar').read_bytes() == b'cache'
+    member = tarfile.TarInfo('.tools/android-sdk/link')
+    member.type = tarfile.SYMTYPE
+    member.linkname = '../../.local/runtime.env'
+    try:
+        offline.cache_filter(member, str(root))
+    except ValueError:
+        pass
+    else:
+        raise AssertionError('Link to server settings accepted')
     archive.write_bytes(b'corrupt')
     try:
         offline.restore(root)

@@ -10,6 +10,21 @@ ALLOWED = ('.tools/android-sdk', '.local/gradle/caches', '.local/gradle/wrapper'
            'android/upstream', '.local/offline/source-commit.txt')
 
 
+def cache_filter(member, destination):
+    member = tarfile.data_filter(member, destination)
+    root = Path(destination).resolve()
+    paths = [root / member.name]
+    if member.issym():
+        paths.append(paths[0].parent / member.linkname)
+    elif member.islnk():
+        paths.append(root / member.linkname)
+    for path in paths:
+        name = path.resolve().relative_to(root).as_posix()
+        if not any(name == base or name.startswith(base + '/') for base in ALLOWED):
+            raise ValueError('Offline archive path or link escapes the build cache.')
+    return member
+
+
 def restore(root):
     archive = root / '.local/offline/vyrn-android-offline.tar.gz'
     expected = Path(str(archive) + '.sha256').read_text().split()[0]
@@ -29,7 +44,7 @@ def restore(root):
             if item.isdev() or item.isfifo():
                 raise ValueError('Special files are not allowed in offline archive.')
             # Validate links against the actual destination before any extraction.
-            tarfile.data_filter(item, str(root))
+            cache_filter(item, str(root))
         commit_file = bundle.extractfile('.local/offline/source-commit.txt')
         if commit_file is None:
             raise ValueError('Offline archive has no source revision.')
@@ -41,7 +56,7 @@ def restore(root):
             raise ValueError('Existing upstream checkout preserved. Restore the offline kit into a fresh checkout.')
         if sum(item.size for item in members if item.isfile()) > shutil.disk_usage(root).free:
             raise ValueError('Insufficient free space to restore offline build kit.')
-        bundle.extractall(root, members=members, filter='data')
+        bundle.extractall(root, members=members, filter=cache_filter)
     print('Private Android build cache restored. System packages and server data were not changed.')
 
 
