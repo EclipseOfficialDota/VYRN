@@ -62,17 +62,34 @@ with tempfile.TemporaryDirectory() as directory:
     # Offline mode uses only the warmed source/SDK/Gradle trees, no sdkmanager/fetch.
     checkout = script.parents[1]
     for required in ('platforms/android-36/android.jar', 'build-tools/36.0.0/aapt2',
-                     'ndk/27.2.12479018/source.properties', 'cmake/3.22.1/bin/cmake'):
+                     'ndk/27.2.12479018/source.properties', 'ndk/27.2.12479018/build/cmake/android.toolchain.cmake',
+                     'ndk/27.2.12479018/toolchains/llvm/prebuilt/linux-x86_64/bin/clang', 'cmake/3.22.1/bin/cmake'):
         path = temp / 'sdk' / required
         path.parent.mkdir(parents=True, exist_ok=True)
         path.touch()
     for required in ('android/upstream/.git', '.local/gradle/caches', '.local/gradle/wrapper/dists'):
         (checkout / required).mkdir(parents=True)
+    wrapper = checkout / 'android/upstream/gradle/wrapper'
+    wrapper.mkdir(parents=True)
+    (wrapper / 'gradle-wrapper.properties').write_text('distributionUrl=https\\://services.gradle.org/distributions/gradle-9.4.1-bin.zip\n')
+    distribution = checkout / '.local/gradle/wrapper/dists/gradle-9.4.1-bin/hash'
+    distribution.mkdir(parents=True)
+    (distribution / 'gradle-9.4.1-bin.zip.ok').touch()
     env['ANDROID_HOME'] = str(temp / 'sdk')
     before = log.read_text().splitlines()
     subprocess.run(['bash', str(script), '--offline', '-ApiUrl', 'https://api.test-domain.org'], env=env, check=True)
     assert log.read_text().splitlines()[len(before):] == [
         'pwsh -NoProfile -File scripts/build-android.ps1 -Offline -ApiUrl https://api.test-domain.org']
+    kit = checkout / '.local/offline/vyrn-android-offline.tar.gz'
+    kit.parent.mkdir(parents=True)
+    kit.touch()
+    before = log.read_text().splitlines()
+    subprocess.run(['bash', str(script)], env=env, check=True)
+    assert log.read_text().splitlines()[len(before):] == ['pwsh -NoProfile -File scripts/build-android.ps1 -Offline']
+    (distribution / 'gradle-9.4.1-bin.zip.ok').unlink()
+    result = subprocess.run(['bash', str(script), '--offline'], env=env, capture_output=True, text=True)
+    assert result.returncode == 1 and 'pinned Gradle distribution' in result.stderr, (result.returncode, result.stdout, result.stderr)
+    (distribution / 'gradle-9.4.1-bin.zip.ok').touch()
     (temp / 'sdk/platforms/android-36/android.jar').unlink()
     result = subprocess.run(['bash', str(script), '--offline'], env=env, capture_output=True, text=True)
     assert result.returncode == 1 and 'Offline SDK package missing' in result.stderr

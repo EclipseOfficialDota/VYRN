@@ -964,8 +964,9 @@ def build_android(values, install_tools=False, offline=False):
 
 
 def android_menu(values):
+    local_kit = (ROOT / '.local/offline/vyrn-android-offline.tar.gz').is_file()
     section('Build Android APK', {
-        '1': ('Build with existing tools', lambda: build_android(values)),
+        '1': ('Build from local offline kit' if local_kit else 'Build with existing tools', lambda: build_android(values, offline=local_kit)),
         '2': ('Install build tools and build (Ubuntu 24.04)', lambda: build_android(values, install_tools=True)),
         '3': ('Build offline from a prepared private kit', lambda: build_android(values, offline=True)),
     })

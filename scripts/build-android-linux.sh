@@ -7,6 +7,10 @@ if [[ ${1:-} == --offline ]]; then
     offline=true
     shift
 fi
+if [[ -f .local/offline/vyrn-android-offline.tar.gz && ${1:-} != --install-tools ]]; then
+    offline=true
+    echo 'Local offline kit detected; dependency downloads are disabled.'
+fi
 if [[ ${1:-} == --help ]]; then
     echo 'Usage: bash scripts/build-android-linux.sh [--offline | --install-tools] -ApiUrl https://api.your-domain.com'
     echo '--install-tools: install Ubuntu 24.04 x86_64 build dependencies; SDK licenses require your acceptance.'
@@ -45,10 +49,15 @@ if [[ $offline == true ]]; then
     if [[ -f .local/offline/vyrn-android-offline.tar.gz && ! -d android/upstream ]]; then
         python3 scripts/restore-android-offline.py
     fi
-    for required in 'cmdline-tools/latest/bin/sdkmanager' 'platforms/android-36/android.jar' 'build-tools/36.0.0/aapt2' 'ndk/27.2.12479018/source.properties' 'cmake/3.22.1/bin/cmake'; do
+    for required in 'cmdline-tools/latest/bin/sdkmanager' 'platforms/android-36/android.jar' 'build-tools/36.0.0/aapt2' 'ndk/27.2.12479018/source.properties' 'ndk/27.2.12479018/build/cmake/android.toolchain.cmake' 'ndk/27.2.12479018/toolchains/llvm/prebuilt/linux-x86_64/bin/clang' 'cmake/3.22.1/bin/cmake'; do
         [[ -f $ANDROID_HOME/$required ]] || { echo "Offline SDK package missing: $required. Prepare the full cache on a connected Linux host first." >&2; exit 1; }
     done
     [[ -d android/upstream/.git && -d .local/gradle/caches && -d .local/gradle/wrapper/dists ]] || { echo 'Offline sources or Gradle caches are missing. A command-line-tools ZIP alone is not an offline build kit.' >&2; exit 1; }
+    distribution=$(sed -n 's|^distributionUrl=.*/\(gradle-[A-Za-z0-9.-]*\)\.zip$|\1|p' android/upstream/gradle/wrapper/gradle-wrapper.properties)
+    if [[ ! $distribution =~ ^gradle-[A-Za-z0-9.-]+$ ]] || ! compgen -G ".local/gradle/wrapper/dists/$distribution/*/$distribution.zip.ok" >/dev/null; then
+        echo 'The pinned Gradle distribution is not cached; offline mode will not download it.' >&2
+        exit 1
+    fi
     pwsh -NoProfile -File scripts/build-android.ps1 -Offline "$@"
     echo "APKs: $PWD/artifacts/"
     exit 0
