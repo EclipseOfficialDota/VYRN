@@ -22,14 +22,14 @@ with tempfile.TemporaryDirectory() as directory:
     for path, body in (
         (tools / 'uname', 'echo x86_64'),
         (tools / 'java', 'exit 0'),
-        (tools / 'pwsh', 'printf "pwsh %s\\n" "$*" >> "$CALLS"'),
+        (tools / 'pwsh', 'printf "pwsh %s\\n" "$*" >> "$CALLS"\ncase "$*" in *scripts/build-android.ps1*) if IFS= read -r line; then echo "Unexpected build stdin" >&2; exit 23; fi;; esac'),
         (sdk / 'sdkmanager', 'printf "sdk %s\\n" "$*" >> "$CALLS"'),
     ):
         path.write_text('#!/bin/sh\n' + body + '\n')
         path.chmod(0o755)
     env = dict(os.environ, PATH=str(tools) + os.pathsep + os.environ['PATH'],
                JAVA_HOME=str(temp), ANDROID_HOME=str(temp / 'sdk'), CALLS=str(log))
-    subprocess.run(['bash', str(script), '-ApiUrl', 'https://api.test-domain.org'], env=env, check=True)
+    subprocess.run(['bash', str(script), '-ApiUrl', 'https://api.test-domain.org'], env=env, input='unexpected build input\n', text=True, check=True)
     lines = log.read_text().splitlines()
     assert len(lines) == 4, lines
     assert '--licenses' in lines[0]

@@ -67,11 +67,13 @@ jobs:
           key: android-linux-x64-v1-${{ inputs.verified_cache_run }}
       - name: Prepare dependencies and verify a build without network access
         if: inputs.verified_cache_run == ''
+        env:
+          VYRN_ACCEPT_ANDROID_LICENSES: '1'
         shell: bash
         run: |
           export JAVA_HOME="$JAVA_HOME_21_X64"
           export ANDROID_HOME="$PWD/.tools/android-sdk"
-          bash scripts/prepare-android-offline.sh < <(yes)
+          bash scripts/prepare-android-offline.sh
       - name: Repack validated dependencies with complete pinned sources
         if: inputs.verified_cache_run != ''
         env:
@@ -93,8 +95,8 @@ jobs:
           compression-level: 0
           if-no-files-found: error
           include-hidden-files: true
-      - name: Keep build diagnostics if cache preparation fails
-        if: failure()
+      - name: Keep private build diagnostics, including interrupted attempts
+        if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: android-cache-build-log

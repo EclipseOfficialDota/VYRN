@@ -58,7 +58,7 @@ if [[ $offline == true ]]; then
         echo 'The pinned Gradle distribution is not cached; offline mode will not download it.' >&2
         exit 1
     fi
-    pwsh -NoProfile -File scripts/build-android.ps1 -Offline "$@"
+    pwsh -NoProfile -File scripts/build-android.ps1 -Offline "$@" </dev/null
     echo "APKs: $PWD/artifacts/"
     exit 0
 fi
@@ -89,8 +89,12 @@ if [[ ! -x $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager ]]; then
     mv -- "$temp/cmdline-tools" "$ANDROID_HOME/cmdline-tools/latest"
 fi
 sdkmanager="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
-"$sdkmanager" --sdk_root="$ANDROID_HOME" --licenses
+if [[ ${VYRN_ACCEPT_ANDROID_LICENSES:-0} == 1 ]]; then
+    "$sdkmanager" --sdk_root="$ANDROID_HOME" --licenses < <(yes)
+else
+    "$sdkmanager" --sdk_root="$ANDROID_HOME" --licenses
+fi
 "$sdkmanager" --sdk_root="$ANDROID_HOME" 'platforms;android-36' 'build-tools;36.0.0' 'platform-tools' 'ndk;27.2.12479018' 'cmake;3.22.1'
 pwsh -NoProfile -File android/fetch-upstream.ps1
-pwsh -NoProfile -File scripts/build-android.ps1 "$@"
+pwsh -NoProfile -File scripts/build-android.ps1 "$@" </dev/null
 echo "APKs: $PWD/artifacts/"
