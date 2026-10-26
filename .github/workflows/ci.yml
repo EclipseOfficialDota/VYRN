@@ -33,6 +33,7 @@ jobs:
         run: |
           python3 scripts/test-android-linux.py
           python3 scripts/test-android-offline.py
+          python3 scripts/test-android-kit.py
       - name: Check offline distribution packaging without a daemon
         run: python3 scripts/test-lite-package.py
       - name: Check DNS planning without external requests

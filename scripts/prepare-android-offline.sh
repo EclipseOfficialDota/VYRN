@@ -20,7 +20,9 @@ revision=$(git rev-parse HEAD)
 printf '%s\n' "$revision" > .local/offline/source-commit.txt
 # Include dependencies and pinned upstream sources, never runtime.env, signing keys,
 # account data, personal Gradle properties, daemon logs or APK outputs.
-tar --exclude='*/build' --exclude='*/.cxx' --exclude='*/.gradle' \
+tar --exclude='android/upstream/TMessagesProj/build' \
+    --exclude='android/upstream/TMessagesProj/.cxx' \
+    --exclude='android/upstream/build' --exclude='*/.gradle' \
     -czf "$kit.part" .tools/android-sdk .local/gradle/caches .local/gradle/wrapper \
     android/upstream .local/offline/source-commit.txt
 mv -- "$kit.part" "$kit"
