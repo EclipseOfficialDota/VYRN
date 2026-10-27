@@ -1,0 +1,64 @@
+name: Preserve private Android offline kit
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: 'Successful private Android offline-kit preparation run'
+        type: string
+        required: true
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  preserve:
+    if: github.event.repository.private
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Validate the completed kit producer
+        id: producer
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          SOURCE_RUN: ${{ inputs.run_id }}
+        run: |
+          [[ $SOURCE_RUN =~ ^[0-9]+$ ]]
+          [[ $(gh run view "$SOURCE_RUN" --json conclusion --jq .conclusion) == success ]]
+          [[ $(gh run view "$SOURCE_RUN" --json workflowName --jq .workflowName) == 'Prepare private Android offline kit' ]]
+          revision=$(gh run view "$SOURCE_RUN" --json headSha --jq .headSha)
+          [[ $revision =~ ^[0-9a-f]{40}$ ]]
+          echo "revision=$revision" >> "$GITHUB_OUTPUT"
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: vyrn-android-offline-${{ steps.producer.outputs.revision }}
+          path: kit
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.run_id }}
+      - name: Keep checksummed private release assets below the per-file limit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          SOURCE_REVISION: ${{ steps.producer.outputs.revision }}
+          SOURCE_RUN: ${{ inputs.run_id }}
+        run: |
+          cd kit
+          sha256sum -c vyrn-android-offline.tar.gz.sha256
+          split -b 1900M -d -a 2 vyrn-android-offline.tar.gz vyrn-android-offline.tar.gz.part-
+          sha256sum vyrn-android-offline.tar.gz.part-* > PARTS_SHA256SUMS.txt
+          printf '%s\n' 'Private owner build cache; not a signed Android application release.' \
+            "Source: $SOURCE_REVISION" \
+            'Download all parts and checksums before connectivity is lost.' \
+            'Verify: sha256sum -c PARTS_SHA256SUMS.txt' \
+            'Join: cat vyrn-android-offline.tar.gz.part-* > vyrn-android-offline.tar.gz' \
+            'Verify joined archive: sha256sum -c vyrn-android-offline.tar.gz.sha256' \
+            'Keep the archive and its checksum in .local/offline/ of the matching VYRN checkout.' \
+            'Select Build Android APK > Build from local offline kit. System build prerequisites must already be installed.' \
+            'Third-party licenses remain in the archive. Do not redistribute SDK binaries publicly.' > README-OFFLINE.txt
+          tag="android-offline-${SOURCE_REVISION:0:12}-$SOURCE_RUN"
+          gh release create "$tag" --target "$SOURCE_REVISION" --prerelease \
+            --title "Private Android offline kit (${SOURCE_REVISION:0:12})" \
+            --notes-file README-OFFLINE.txt \
+            vyrn-android-offline.tar.gz.part-* vyrn-android-offline.tar.gz.sha256 PARTS_SHA256SUMS.txt README-OFFLINE.txt

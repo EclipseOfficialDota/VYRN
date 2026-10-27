@@ -28,7 +28,7 @@ jobs:
       - name: Free unused preinstalled SDK and .NET space on the disposable runner
         shell: bash
         run: |
-          [[ $GITHUB_ACTIONS == true && $RUNNER_OS == Linux ]]
+          [[ $GITHUB_ACTIONS == true && $RUNNER_OS == Linux && $RUNNER_ENVIRONMENT == github-hosted ]]
           sudo rm -rf -- /usr/local/lib/android/sdk /usr/share/dotnet
           df -h .
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
