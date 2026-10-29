@@ -36,14 +36,20 @@ Developer checks (on a build machine with Rust and Go installed):
 
 ```sh
 cd backend-rust
-cargo test -- --test-threads=1
-cargo build --release -j 1
+cargo test --locked -- --test-threads=1
+cargo build --locked --release -j 1
 cd ../backend
 VYRN_RUST_BINARY="$PWD/../backend-rust/target/release/vyrn-core" \
   go test -p 1 ./internal/security -run TestRustCompatibility -count=1
 ```
 
 ## Remaining before a server cutover
+
+The [first successful CI run](https://github.com/EclipseOfficialDota/VYRN/actions/runs/40883696575)
+passed formatting, Clippy, Rust tests and bidirectional Go compatibility. On its
+Ubuntu x86-64 runner, the release **maintenance utility** was 340,464 bytes and a
+single password hash peaked at 67,368 KiB RSS (0.19 seconds). These numbers describe
+that small utility only, not a messaging server or the full Docker stack.
 
 1. Database connections/migration locking, authentication, invitations, recovery,
    session revocation, throttling and administrator TOTP.

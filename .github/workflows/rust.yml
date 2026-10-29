@@ -28,13 +28,6 @@ jobs:
           persist-credentials: false
       - name: Install compiler on the GitHub runner only
         run: rustup toolchain install 1.97.0 --profile minimal --component rustfmt,clippy
-      - name: Resolve dependencies on the GitHub runner only
-        working-directory: backend-rust
-        run: |
-          cargo +1.97.0 generate-lockfile
-          echo '::group::Rust dependency lockfile'
-          cat Cargo.lock
-          echo '::endgroup::'
       - name: Rust formatting, lint and tests (one worker)
         working-directory: backend-rust
         run: |
