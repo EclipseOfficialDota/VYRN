@@ -42,6 +42,25 @@ jobs:
           GOMAXPROCS: '1'
           VYRN_RUST_BINARY: ${{ github.workspace }}/backend-rust/target/release/vyrn-core
         run: go test -p 1 ./internal/security -run TestRustCompatibility -count=1
+      - name: Reject interactive password input without echoing it
+        run: |
+          python3 - <<'PY'
+          import os
+          import pty
+          import subprocess
+          master, slave = pty.openpty()
+          try:
+              result = subprocess.run(
+                  ['backend-rust/target/release/vyrn-core', 'hash-password'],
+                  stdin=slave, capture_output=True, timeout=3,
+              )
+              assert result.returncode != 0 and not result.stdout
+              assert b'redirected stdin' in result.stderr
+              print('PASS: interactive input rejected before reading a password')
+          finally:
+              os.close(master)
+              os.close(slave)
+          PY
       - name: Record utility size and peak password hashing RSS
         working-directory: backend-rust
         run: |
