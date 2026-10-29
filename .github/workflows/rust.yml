@@ -1,9 +1,6 @@
 name: Rust migration
 
 on:
-  push:
-    branches: ['codex/rust-rewrite']
-    paths: ['backend-rust/**', 'backend/internal/security/**', '.github/workflows/rust.yml']
   pull_request:
     paths: ['backend-rust/**', 'backend/internal/security/**', '.github/workflows/rust.yml']
   workflow_dispatch:
