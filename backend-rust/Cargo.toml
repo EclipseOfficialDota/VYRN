@@ -1,0 +1,23 @@
+[package]
+name = "vyrn-core"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+publish = false
+license = "GPL-2.0-or-later"
+description = "VYRN Rust migration: compatible security primitives and maintenance CLI"
+
+[dependencies]
+argon2 = { version = "=0.5.3", default-features = false, features = ["alloc", "zeroize"] }
+base64 = "=0.22.1"
+getrandom = "=0.3.4"
+sha2 = "=0.10.9"
+subtle = "=2.6.1"
+zeroize = { version = "=1.8.2", features = ["alloc"] }
+
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
+strip = true
+panic = "abort"

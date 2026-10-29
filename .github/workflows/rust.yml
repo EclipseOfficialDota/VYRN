@@ -1,0 +1,59 @@
+name: Rust migration
+
+on:
+  push:
+    branches: ['codex/rust-rewrite']
+    paths: ['backend-rust/**', 'backend/internal/security/**', '.github/workflows/rust.yml']
+  pull_request:
+    paths: ['backend-rust/**', 'backend/internal/security/**', '.github/workflows/rust.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rust-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  compatibility:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      CARGO_BUILD_JOBS: '1'
+      RUST_TEST_THREADS: '1'
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Install compiler on the GitHub runner only
+        run: rustup toolchain install 1.97.0 --profile minimal --component rustfmt,clippy
+      - name: Resolve dependencies on the GitHub runner only
+        working-directory: backend-rust
+        run: |
+          cargo +1.97.0 generate-lockfile
+          echo '::group::Rust dependency lockfile'
+          cat Cargo.lock
+          echo '::endgroup::'
+      - name: Rust formatting, lint and tests (one worker)
+        working-directory: backend-rust
+        run: |
+          cargo +1.97.0 fmt --check
+          cargo +1.97.0 clippy --locked --all-targets -- -D warnings
+          cargo +1.97.0 test --locked -- --test-threads=1
+          cargo +1.97.0 build --locked --release
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version-file: backend/go.mod
+          cache: false
+      - name: Existing Go password hashes and sessions must work in Rust
+        working-directory: backend
+        env:
+          GOMAXPROCS: '1'
+          VYRN_RUST_BINARY: ${{ github.workspace }}/backend-rust/target/release/vyrn-core
+        run: go test -p 1 ./internal/security -run TestRustCompatibility -count=1
+      - name: Record utility size and peak password hashing RSS
+        working-directory: backend-rust
+        run: |
+          stat --printf='Rust migration utility: %s bytes\n' target/release/vyrn-core
+          printf 'disposable-ci-password' | /usr/bin/time -f 'Hashing peak RSS: %M KiB; elapsed: %e seconds' target/release/vyrn-core hash-password >/dev/null

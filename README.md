@@ -37,6 +37,9 @@ Android Release is available yet.** The existing Debug prerelease is an older sn
 
 ## Deploy your own server
 
+**Rust rewrite in progress:** [scope, compatibility and measured acceptance](docs/RUST_MIGRATION.md).
+The current server remains Go; the Rust security migration is not yet a deployable replacement.
+
 Start with a dedicated Ubuntu (22.04/24.04/26.04/26.10) or Debian (12/13) host, a domain and Git.
 The English terminal wizard selects the matching Docker repository. A small evaluation
 budget is4GiB RAM, two cores and40GiB disk plus media/backup space; actual capacity depends on workload.
