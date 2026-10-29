@@ -66,3 +66,8 @@ jobs:
         run: |
           stat --printf='Rust migration utility: %s bytes\n' target/release/vyrn-core
           printf 'disposable-ci-password' | /usr/bin/time -f 'Hashing peak RSS: %M KiB; elapsed: %e seconds' target/release/vyrn-core hash-password >/dev/null
+      - name: Check locked dependencies against RustSec advisories
+        working-directory: backend-rust
+        run: |
+          cargo +1.97.0 install cargo-audit --version 0.22.2 --locked --debug --jobs 1
+          cargo +1.97.0 audit --deny warnings
