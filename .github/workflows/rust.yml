@@ -1,0 +1,73 @@
+name: Rust migration
+
+on:
+  pull_request:
+    paths: ['backend-rust/**', 'backend/internal/security/**', '.github/workflows/rust.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rust-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  compatibility:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      CARGO_BUILD_JOBS: '1'
+      RUST_TEST_THREADS: '1'
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Install compiler on the GitHub runner only
+        run: rustup toolchain install 1.97.0 --profile minimal --component rustfmt,clippy
+      - name: Rust formatting, lint and tests (one worker)
+        working-directory: backend-rust
+        run: |
+          cargo +1.97.0 fmt --check
+          cargo +1.97.0 clippy --locked --all-targets -- -D warnings
+          cargo +1.97.0 test --locked -- --test-threads=1
+          cargo +1.97.0 build --locked --release
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version-file: backend/go.mod
+          cache: false
+      - name: Existing Go password hashes and sessions must work in Rust
+        working-directory: backend
+        env:
+          GOMAXPROCS: '1'
+          VYRN_RUST_BINARY: ${{ github.workspace }}/backend-rust/target/release/vyrn-core
+        run: go test -p 1 ./internal/security -run TestRustCompatibility -count=1
+      - name: Reject interactive password input without echoing it
+        run: |
+          python3 - <<'PY'
+          import os
+          import pty
+          import subprocess
+          master, slave = pty.openpty()
+          try:
+              result = subprocess.run(
+                  ['backend-rust/target/release/vyrn-core', 'hash-password'],
+                  stdin=slave, capture_output=True, timeout=3,
+              )
+              assert result.returncode != 0 and not result.stdout
+              assert b'redirected stdin' in result.stderr
+              print('PASS: interactive input rejected before reading a password')
+          finally:
+              os.close(master)
+              os.close(slave)
+          PY
+      - name: Record utility size and peak password hashing RSS
+        working-directory: backend-rust
+        run: |
+          stat --printf='Rust migration utility: %s bytes\n' target/release/vyrn-core
+          printf 'disposable-ci-password' | /usr/bin/time -f 'Hashing peak RSS: %M KiB; elapsed: %e seconds' target/release/vyrn-core hash-password >/dev/null
+      - name: Check locked dependencies against RustSec advisories
+        working-directory: backend-rust
+        run: |
+          cargo +1.97.0 install cargo-audit --version 0.22.2 --locked --debug --jobs 1
+          cargo +1.97.0 audit --deny warnings

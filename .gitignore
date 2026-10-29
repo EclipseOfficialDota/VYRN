@@ -33,3 +33,4 @@ android/upstream/
 *.p8
 __pycache__/
 *.py[cod]
+**/target/
